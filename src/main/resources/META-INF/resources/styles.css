@@ -1,0 +1,507 @@
+html {
+    --lumo-primary-color: hsl(155, 62%, 42%);
+    --lumo-primary-color-50pct: hsla(155, 62%, 42%, 0.5);
+    --lumo-primary-color-10pct: hsla(155, 62%, 42%, 0.1);
+    --lumo-primary-text-color: hsl(155, 62%, 34%);
+    --lumo-border-radius-m: 12px;
+    --lumo-border-radius-l: 18px;
+    --app-gradient: linear-gradient(160deg, #10b981 0%, #0ea5e9 100%);
+}
+
+body {
+    background:
+        radial-gradient(1200px 600px at 100% -10%, hsla(199, 89%, 60%, 0.12), transparent),
+        radial-gradient(1000px 500px at -10% 110%, hsla(155, 62%, 45%, 0.14), transparent);
+}
+
+/* ---- Centered auth / landing card ---- */
+/* The layout grows with its content (no fixed height) so long pages scroll all the
+   way to the top; min-height keeps short content vertically centered. */
+.centered-page {
+    min-height: 100vh;
+    box-sizing: border-box;
+    align-items: center;
+    justify-content: center;
+    padding: var(--lumo-space-l);
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--lumo-base-color);
+    border-radius: var(--lumo-border-radius-l);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.14);
+    padding: var(--lumo-space-xl);
+}
+
+.brand-title {
+    font-size: 2.4rem;
+    font-weight: 800;
+    line-height: 1.05;
+    margin: 0;
+    background: var(--app-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.brand-sub {
+    color: var(--lumo-secondary-text-color);
+    margin: 0 0 var(--lumo-space-m) 0;
+}
+
+/* ---- Home header ---- */
+.home-header {
+    background: var(--app-gradient);
+    color: #fff;
+    border-radius: var(--lumo-border-radius-l);
+    padding: var(--lumo-space-m) var(--lumo-space-l);
+    box-shadow: 0 10px 30px hsla(155, 62%, 40%, 0.35);
+}
+
+.home-header h1 {
+    margin: 0;
+    font-size: 1.4rem;
+    color: #fff;
+}
+
+.code-chip {
+    font-family: var(--lumo-font-family-monospace, monospace);
+    letter-spacing: 3px;
+    font-weight: 800;
+    font-size: 1.15rem;
+    background: rgba(255, 255, 255, 0.22);
+    padding: 4px 12px;
+    border-radius: 999px;
+    color: #fff;
+}
+
+/* ---- Task cards ---- */
+.task-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--lumo-space-m);
+    width: 100%;
+}
+
+.task-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: var(--lumo-space-l) var(--lumo-space-m);
+    min-height: 130px;
+    border-radius: var(--lumo-border-radius-l);
+    background: var(--lumo-base-color);
+    border: 1px solid var(--lumo-contrast-10pct);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+    cursor: pointer;
+    text-align: center;
+    transition: transform 0.08s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    user-select: none;
+}
+
+.task-card:hover {
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+    border-color: var(--lumo-primary-color-50pct);
+}
+
+.task-card:active {
+    transform: scale(0.95);
+}
+
+.task-card .emoji {
+    font-size: 2.6rem;
+    line-height: 1;
+}
+
+.task-card .name {
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.task-card .streak {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--lumo-contrast-10pct);
+    color: var(--lumo-secondary-text-color);
+}
+
+.task-card.streak-hot .streak {
+    background: hsla(25, 95%, 55%, 0.18);
+    color: hsl(20, 90%, 42%);
+}
+
+.task-card.locked {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.task-card.add-card {
+    border-style: dashed;
+    border-width: 2px;
+    color: var(--lumo-primary-text-color);
+    background: transparent;
+    box-shadow: none;
+}
+
+/* ---- Leaderboard ---- */
+.leaderboard {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lumo-space-s);
+    width: 100%;
+}
+
+.member-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 6px 6px;
+    border-radius: 999px;
+    background: var(--lumo-base-color);
+    border: 1px solid var(--lumo-contrast-10pct);
+    font-weight: 600;
+}
+
+.member-chip .dot {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 800;
+    font-size: 0.85rem;
+}
+
+.member-chip.me {
+    border-color: var(--lumo-primary-color);
+    box-shadow: 0 0 0 2px var(--lumo-primary-color-10pct);
+}
+
+.member-chip .count {
+    background: var(--lumo-contrast-10pct);
+    border-radius: 999px;
+    padding: 1px 9px;
+    font-size: 0.85rem;
+}
+
+.member-chip .credit-chip {
+    background: hsla(45, 100%, 51%, 0.18);
+    color: hsl(38, 92%, 38%);
+    border-radius: 999px;
+    padding: 1px 9px;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.section-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--lumo-secondary-text-color);
+    margin: var(--lumo-space-s) 0 0 4px;
+}
+
+/* ---- Celebration dialog ---- */
+.celebrate-dialog {
+    text-align: center;
+    padding: var(--lumo-space-l);
+    max-width: 320px;
+}
+
+.celebrate-emoji {
+    font-size: 4.5rem;
+    animation: pop 0.5s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+}
+
+.celebrate-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin: var(--lumo-space-s) 0 4px;
+}
+
+.celebrate-text {
+    color: var(--lumo-secondary-text-color);
+    margin: 0;
+}
+
+@keyframes pop {
+    0% { transform: scale(0.2) rotate(-15deg); opacity: 0; }
+    70% { transform: scale(1.15) rotate(6deg); }
+    100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+.page-pad {
+    padding: var(--lumo-space-m);
+    max-width: 760px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* ---- Admin / role badges ---- */
+.admin-badge {
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: rgba(255, 255, 255, 0.25);
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+
+.member-chip .crown {
+    font-size: 0.85rem;
+    margin-left: 2px;
+}
+
+.nav-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    margin-left: 6px;
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: #fff;
+    background: var(--lumo-error-color, #ef4444);
+    border-radius: 999px;
+}
+
+/* ---- Daily target ring ---- */
+.daily-strip {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: var(--lumo-border-radius-l);
+    background: var(--lumo-base-color);
+    border: 1px solid var(--lumo-contrast-10pct);
+}
+
+.daily-ring {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 0.85rem;
+    color: var(--lumo-primary-text-color);
+    flex: 0 0 auto;
+}
+
+.daily-ring.done {
+    color: #fff;
+}
+
+/* ---- Feedback buttons ---- */
+.feedback-row {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: var(--lumo-space-s);
+}
+
+.feedback-btn {
+    font-size: 1.6rem;
+    line-height: 1;
+    padding: 8px 12px;
+    border-radius: var(--lumo-border-radius-m);
+    border: 1px solid var(--lumo-contrast-10pct);
+    background: var(--lumo-base-color);
+    cursor: pointer;
+    transition: transform 0.08s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.feedback-btn:hover {
+    border-color: var(--lumo-primary-color-50pct);
+    transform: translateY(-2px);
+}
+
+.feedback-btn.selected {
+    background: var(--lumo-primary-color-10pct);
+    border-color: var(--lumo-primary-color);
+}
+
+.feedback-hint {
+    font-size: 0.8rem;
+    color: var(--lumo-secondary-text-color);
+    margin: var(--lumo-space-s) 0 0;
+}
+
+/* ---- Bar chart ---- */
+.chart-card {
+    background: var(--lumo-base-color);
+    border: 1px solid var(--lumo-contrast-10pct);
+    border-radius: var(--lumo-border-radius-l);
+    padding: var(--lumo-space-m);
+    margin-bottom: var(--lumo-space-m);
+}
+
+.chart-title {
+    font-weight: 700;
+    margin: 0 0 var(--lumo-space-s);
+}
+
+.bar-row {
+    display: grid;
+    grid-template-columns: 96px 1fr 34px;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+    font-size: 0.85rem;
+}
+
+.bar-row .bar-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--lumo-secondary-text-color);
+}
+
+.bar-track {
+    background: var(--lumo-contrast-10pct);
+    border-radius: 999px;
+    height: 14px;
+    overflow: hidden;
+}
+
+.bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--app-gradient);
+    min-width: 2px;
+    transition: width 0.4s ease;
+}
+
+.bar-row .bar-value {
+    text-align: right;
+    font-weight: 700;
+}
+
+/* segmented feedback bar */
+.seg-track {
+    display: flex;
+    height: 14px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--lumo-contrast-10pct);
+}
+.seg-hate { background: #ef4444; }
+.seg-ok { background: #f59e0b; }
+.seg-love { background: #10b981; }
+
+/* day trend columns */
+.trend {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 90px;
+    padding-top: 6px;
+}
+.trend-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    height: 100%;
+    gap: 4px;
+}
+.trend-bar {
+    width: 70%;
+    min-height: 2px;
+    border-radius: 4px 4px 0 0;
+    background: var(--app-gradient);
+}
+.trend-day {
+    font-size: 0.6rem;
+    color: var(--lumo-secondary-text-color);
+}
+
+/* ---- Admin lists ---- */
+.admin-section {
+    background: var(--lumo-base-color);
+    border: 1px solid var(--lumo-contrast-10pct);
+    border-radius: var(--lumo-border-radius-l);
+    padding: var(--lumo-space-m);
+    margin-bottom: var(--lumo-space-m);
+    /* Span the page: the parent layout aligns children to the start, which would
+       otherwise shrink each section to its content and truncate field labels. */
+    width: 100%;
+    box-sizing: border-box;
+}
+.admin-section h3 {
+    margin: 0 0 var(--lumo-space-s);
+    font-size: 1rem;
+}
+.list-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-top: 1px solid var(--lumo-contrast-5pct);
+}
+.list-row:first-of-type { border-top: none; }
+.list-row .grow { flex: 1; min-width: 0; }
+.list-row .sub {
+    font-size: 0.78rem;
+    color: var(--lumo-secondary-text-color);
+}
+.pin-box {
+    font-family: var(--lumo-font-family-monospace, monospace);
+    font-size: 1.4rem;
+    letter-spacing: 6px;
+    font-weight: 800;
+    color: var(--lumo-primary-text-color);
+}
+
+.task-card .admin-tools {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    display: flex;
+    gap: 2px;
+}
+.task-card .admin-tools vaadin-button {
+    background: rgba(255,255,255,0.7);
+}
+
+/* Tap-to-complete area inside a card (leaves room for the Book button below) */
+.complete-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    width: 100%;
+    flex: 1;
+}
+.task-card.locked .complete-area {
+    cursor: not-allowed;
+}
+.task-card .book-btn {
+    margin-top: 6px;
+}
+/* Highlight the current member's assigned chore in rotating mode */
+.task-card.mine {
+    border-color: var(--lumo-primary-color);
+    box-shadow: 0 0 0 2px var(--lumo-primary-color-10pct);
+}
