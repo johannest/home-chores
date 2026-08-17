@@ -5,11 +5,13 @@ import com.homechores.domain.Completion;
 import com.homechores.domain.DivisionStyle;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
+import com.homechores.domain.RejoinRequest;
 import com.homechores.domain.SpreeTier;
 import com.homechores.domain.TimeWindows;
 import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
+import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.checkbox.Checkbox;
@@ -33,6 +35,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 
 /** Admin-only tools: approvals, settings, members, chores CRUD, backup/restore. */
 class AdminPanel extends VerticalLayout {
@@ -57,12 +60,14 @@ class AdminPanel extends VerticalLayout {
 
     void refresh() {
         removeAll();
+        rejoinsSection().ifPresent(this::add);
         add(approvalsSection());
         add(settingsSection());
         add(membersSection());
         add(choresSection());
         add(rewardsSection());
         add(backupSection());
+        add(dangerSection());
     }
 
     private Div section(String title) {
@@ -70,6 +75,54 @@ class AdminPanel extends VerticalLayout {
         s.addClassName("admin-section");
         s.add(new com.vaadin.flow.component.html.H3(title));
         return s;
+    }
+
+    // ---- Rejoin requests ----------------------------------------------------
+
+    /**
+     * Devices asking to sign back in as an existing member after clearing their browser
+     * storage. Rendered only when something is waiting — most families never see it.
+     */
+    private Optional<Div> rejoinsSection() {
+        var requests = service.pendingRejoins(homeCode);
+        if (requests.isEmpty()) {
+            return Optional.empty();
+        }
+        Div s = section(T.tr("admin.rejoins", requests.size()));
+        Span info = new Span(T.tr("admin.rejoins.info"));
+        info.addClassName("sub");
+        s.add(info);
+
+        for (RejoinRequest r : requests) {
+            String name = service.findMember(r.getMemberId()).map(Member::getName).orElse("?");
+
+            Div box = new Div();
+            Div line = new Div();
+            line.setText(T.tr("admin.rejoins.row", name));
+            line.getStyle().set("font-weight", "600");
+            Span sub = new Span(ago(r.getRequestedAt()));
+            sub.addClassName("sub");
+            box.add(line, sub);
+            box.addClassName("grow");
+
+            Button approve = new Button(VaadinIcon.CHECK.create(), e -> {
+                service.decideRejoin(r.getId(), memberId, true);
+                toast(T.tr("admin.rejoins.approved", name));
+                refresh();
+            });
+            approve.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SUCCESS,
+                    ButtonVariant.LUMO_SMALL);
+            Button reject = new Button(VaadinIcon.CLOSE.create(), e -> {
+                service.decideRejoin(r.getId(), memberId, false);
+                refresh();
+            });
+            reject.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_SMALL);
+
+            Div row = new Div(box, approve, reject);
+            row.addClassName("list-row");
+            s.add(row);
+        }
+        return Optional.of(s);
     }
 
     // ---- Approvals ----------------------------------------------------------
@@ -132,6 +185,16 @@ class AdminPanel extends VerticalLayout {
             service.saveHome(h);
         });
 
+        Checkbox rejoinGate = new Checkbox(T.tr("admin.approveRejoin"));
+        rejoinGate.setValue(home.isApproveRejoin());
+        rejoinGate.addValueChangeListener(e -> {
+            Home h = service.findHome(homeCode).orElseThrow();
+            h.setApproveRejoin(e.getValue());
+            service.saveHome(h);
+        });
+        Span rejoinHint = new Span(T.tr("admin.approveRejoin.helper"));
+        rejoinHint.addClassName("sub");
+
         Select<Integer> target = new Select<>();
         target.setLabel(T.tr("admin.dailyTarget"));
         target.setWidthFull();
@@ -147,6 +210,9 @@ class AdminPanel extends VerticalLayout {
 
         Select<DivisionStyle> style = new Select<>();
         style.setLabel(T.tr("admin.divisionStyle"));
+        // Short option labels with the explanation underneath: the full sentences used to
+        // be the option text, which truncated mid-word in the closed select on a phone.
+        style.setHelperText(T.tr("admin.divisionStyle.helper"));
         style.setWidthFull();
         style.setItems(DivisionStyle.DEFAULT, DivisionStyle.ROTATING);
         style.setItemLabelGenerator(ds -> ds == DivisionStyle.ROTATING
@@ -210,7 +276,7 @@ class AdminPanel extends VerticalLayout {
         pinRow.setAlignItems(FlexComponent.Alignment.CENTER);
 
         VerticalLayout body = new VerticalLayout(approval, style, enforced, bookingHours, target,
-                nameRow, pinLabel, pinRow);
+                rejoinGate, rejoinHint, nameRow, pinLabel, pinRow);
         body.setPadding(false);
         body.setSpacing(true);
         body.setWidthFull();
@@ -312,6 +378,7 @@ class AdminPanel extends VerticalLayout {
                         return;
                     }
                     if (m.getId().equals(memberId)) {
+                        DeviceIdentity.forget();
                         SessionContext.signOut();
                         getUI().ifPresent(ui -> ui.navigate(LandingView.class));
                     } else {
@@ -566,6 +633,8 @@ class AdminPanel extends VerticalLayout {
         confirm(T.tr("admin.restore.title"), T.tr("admin.restore.text"), () -> {
                     try {
                         var result = backup.restore(bytes);
+                        // Restoring remaps every member id, so the stored identity is stale.
+                        DeviceIdentity.forget();
                         SessionContext.signOut();
                         getUI().ifPresent(ui -> {
                             ui.navigate(LandingView.class);
@@ -579,6 +648,78 @@ class AdminPanel extends VerticalLayout {
                         toastError(ex.getMessage());
                     }
                 });
+    }
+
+    // ---- Danger zone --------------------------------------------------------
+
+    /** Deleting the whole home. Irreversible, so it sits apart from everything else. */
+    private Div dangerSection() {
+        Div s = section(T.tr("admin.danger"));
+        s.addClassName("danger-section");
+        Span info = new Span(T.tr("admin.deleteHome.info"));
+        info.addClassName("sub");
+        Button delete = new Button(T.tr("admin.deleteHome"), VaadinIcon.TRASH.create(),
+                e -> deleteHomeDialog());
+        delete.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_PRIMARY);
+
+        VerticalLayout body = new VerticalLayout(info, delete);
+        body.setPadding(false);
+        body.setSpacing(true);
+        s.add(body);
+        return s;
+    }
+
+    /**
+     * Confirms the wipe by making the admin type the home code — the one action here that
+     * nothing can undo, so a plain "are you sure?" isn't enough.
+     */
+    private void deleteHomeDialog() {
+        Home home = service.findHome(homeCode).orElseThrow();
+        Dialog d = new Dialog();
+        d.setHeaderTitle(T.tr("admin.deleteHome.title", home.getName()));
+        d.setWidth("min(90vw, 26em)");
+
+        Span warning = new Span(T.tr("admin.deleteHome.warning",
+                service.membersOf(homeCode).size(), service.tasksOf(homeCode).size()));
+        Span backupHint = new Span(T.tr("admin.deleteHome.backupHint"));
+        backupHint.addClassName("sub");
+
+        TextField confirm = new TextField(T.tr("admin.deleteHome.confirmLabel", homeCode));
+        confirm.setWidthFull();
+        confirm.setPlaceholder(homeCode);
+
+        Button wipe = new Button(T.tr("admin.deleteHome.confirm"), e -> {
+            if (!homeCode.equalsIgnoreCase(confirm.getValue() == null
+                    ? "" : confirm.getValue().trim())) {
+                confirm.setInvalid(true);
+                confirm.setErrorMessage(T.tr("admin.deleteHome.mismatch", homeCode));
+                return;
+            }
+            d.close();
+            // Leave the board *before* wiping it. The revision bump lands once the delete
+            // commits and shows every remaining device out with a generic "an admin deleted
+            // this home"; stepping off first means this device is no longer listening, so
+            // the admin who pressed the button gets their own confirmation instead.
+            String name = home.getName();
+            UI ui = UI.getCurrent();
+            DeviceIdentity.forget();
+            SessionContext.signOut();
+            ui.navigate(LandingView.class);
+            if (service.deleteHome(homeCode)) {
+                Notification n = Notification.show(T.tr("admin.deleteHome.done", name),
+                        5000, Notification.Position.TOP_CENTER);
+                n.addThemeVariants(NotificationVariant.LUMO_SUCCESS);
+            } else {
+                toastError(T.tr("admin.deleteHome.failed"));
+            }
+        });
+        wipe.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_PRIMARY);
+
+        VerticalLayout body = new VerticalLayout(warning, backupHint, confirm);
+        body.setPadding(false);
+        d.add(body);
+        d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), wipe);
+        d.open();
     }
 
     // ---- Small helpers ------------------------------------------------------

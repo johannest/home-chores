@@ -83,8 +83,10 @@ class StatsPanel extends VerticalLayout {
         total.getStyle().set("margin", "0 0 var(--lumo-space-s)");
         body.add(total);
 
+        // The separator lives here, not in the properties file: Properties strips leading
+        // whitespace from values, so a padded "  ✅ …" ran straight into the number.
         Paragraph today = new Paragraph(T.tr("stats.today", s.doneToday(), s.target())
-                + (s.doneToday() >= s.target() ? T.tr("stats.today.reached") : ""));
+                + (s.doneToday() >= s.target() ? "  " + T.tr("stats.today.reached") : ""));
         today.getStyle().set("font-weight", "600").set("margin-top", "0");
         body.add(today);
 

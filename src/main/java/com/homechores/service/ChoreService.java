@@ -11,6 +11,9 @@ import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
+import com.homechores.domain.RejoinRequest;
+import com.homechores.domain.RejoinRequestRepository;
+import com.homechores.domain.RejoinStatus;
 import com.homechores.domain.TimeWindows;
 import com.homechores.i18n.Translations;
 import java.security.SecureRandom;
@@ -53,18 +56,20 @@ public class ChoreService {
     private final MemberRepository members;
     private final ChoreTaskRepository tasks;
     private final CompletionRepository completions;
+    private final RejoinRequestRepository rejoins;
     private final HomeState homeState;
     private final CreditService creditService;
     private final Translations translations;
 
     public ChoreService(HomeRepository homes, MemberRepository members,
                         ChoreTaskRepository tasks, CompletionRepository completions,
-                        HomeState homeState, CreditService creditService,
-                        Translations translations) {
+                        RejoinRequestRepository rejoins, HomeState homeState,
+                        CreditService creditService, Translations translations) {
         this.homes = homes;
         this.members = members;
         this.tasks = tasks;
         this.completions = completions;
+        this.rejoins = rejoins;
         this.homeState = homeState;
         this.creditService = creditService;
         this.translations = translations;
@@ -89,13 +94,41 @@ public class ChoreService {
             code = generateCode();
         } while (homes.existsById(code));
 
-        homes.save(new Home(code, homeName.trim(), generatePin()));
+        Home home = new Home(code, homeName.trim(), generatePin());
+        home.setLastActiveAt(Instant.now());
+        homes.save(home);
         seedDefaultTasks(code, locale);
         return addMember(code, memberName, true);
     }
 
     public Optional<Home> findHome(String code) {
         return code == null ? Optional.empty() : homes.findById(normalizeCode(code));
+    }
+
+    /** How stale {@code lastActiveAt} may get before a touch bothers to write to the DB. */
+    private static final Duration TOUCH_RESOLUTION = Duration.ofHours(1);
+
+    /**
+     * Records that a person is using this home. Called when someone opens the board or
+     * changes something in it — never from push traffic, so an idle phone left on a
+     * charger doesn't keep a home looking alive.
+     *
+     * <p>Writes at most once an hour per home, and never bumps the revision signal: this
+     * is bookkeeping, not state anyone's screen should react to.
+     */
+    @Transactional
+    public void touchHome(String code) {
+        homes.findById(normalizeCode(code)).ifPresent(this::touch);
+    }
+
+    /** Same, for callers that already hold the entity. */
+    private void touch(Home home) {
+        Instant now = Instant.now();
+        Instant last = home.getLastActiveAt();
+        if (last == null || last.isBefore(now.minus(TOUCH_RESOLUTION))) {
+            home.setLastActiveAt(now);
+            homes.save(home);
+        }
     }
 
     @Transactional
@@ -111,6 +144,7 @@ public class ChoreService {
         if (!homes.existsById(norm)) {
             return Optional.empty();
         }
+        touchHome(norm);
         return Optional.of(addMember(norm, memberName, false));
     }
 
@@ -128,6 +162,132 @@ public class ChoreService {
 
     public List<Member> membersOf(String homeCode) {
         return members.findByHomeCodeOrderByJoinedAtAsc(homeCode);
+    }
+
+    /**
+     * Deletes a home and everything belonging to it — members, chores, completions,
+     * credits, spree tiers and rejoin requests. Irreversible; the caller is responsible
+     * for confirming intent (see {@code AdminPanel}'s danger zone).
+     *
+     * <p>The revision is bumped last so every other device still on this home re-renders,
+     * finds the home gone and shows itself out (see {@code HomeView}).
+     *
+     * @return false if there was no such home
+     */
+    @Transactional
+    public boolean deleteHome(String code) {
+        String norm = normalizeCode(code);
+        if (!homes.existsById(norm)) {
+            return false;
+        }
+        rejoins.deleteByHomeCode(norm);
+        completions.deleteByHomeCode(norm);
+        creditService.deleteForHome(norm);
+        tasks.deleteByHomeCode(norm);
+        members.deleteByHomeCode(norm);
+        homes.deleteById(norm);
+        homeState.bump(norm);
+        return true;
+    }
+
+    // ---- Rejoining as an existing member ------------------------------------
+
+    /** How a {@link #requestRejoin} attempt ended. */
+    public enum RejoinResult {
+        /** Sign the device straight in — the home doesn't gate rejoins, or the PIN matched. */
+        SIGNED_IN,
+        /** An admin has to approve first; the caller should keep the returned token. */
+        PENDING,
+        /** A PIN was supplied but didn't match the home's admin PIN. */
+        WRONG_PIN,
+        /** No such home, or that member doesn't belong to it. */
+        UNKNOWN
+    }
+
+    /** Outcome of a rejoin attempt; {@code token} is set only for {@link RejoinResult#PENDING}. */
+    public record Rejoin(RejoinResult result, String token) {
+    }
+
+    /**
+     * Asks to sign back in as an existing member — the recovery path for a device that lost
+     * its stored identity. A correct admin PIN (or a home with the approval gate off) signs
+     * in immediately; otherwise a pending request is raised for an admin to decide on.
+     *
+     * <p>The PIN only bypasses the gate — it does not grant admin rights. The member keeps
+     * whatever role their existing record already has, and the header's "Admin?" action
+     * remains the way to claim admin.
+     */
+    @Transactional
+    public Rejoin requestRejoin(String code, Long memberId, String pin) {
+        String norm = normalizeCode(code);
+        Home home = homes.findById(norm).orElse(null);
+        Member member = memberId == null ? null : members.findById(memberId).orElse(null);
+        if (home == null || member == null || !norm.equals(member.getHomeCode())) {
+            return new Rejoin(RejoinResult.UNKNOWN, null);
+        }
+        boolean pinGiven = pin != null && !pin.isBlank();
+        if (pinGiven && !pin.trim().equals(home.getAdminPin())) {
+            return new Rejoin(RejoinResult.WRONG_PIN, null);
+        }
+        if (pinGiven || !home.isApproveRejoin()) {
+            touchHome(norm);
+            return new Rejoin(RejoinResult.SIGNED_IN, null);
+        }
+        // Only the newest device may be waiting for a given member, so an abandoned request
+        // on an old phone can't be used to walk in later.
+        rejoins.findByHomeCodeAndStatusOrderByRequestedAtAsc(norm, RejoinStatus.PENDING).stream()
+                .filter(r -> r.getMemberId().equals(memberId))
+                .forEach(rejoins::delete);
+        String token = generateToken();
+        rejoins.save(new RejoinRequest(norm, memberId, token));
+        homeState.bump(norm);
+        return new Rejoin(RejoinResult.PENDING, token);
+    }
+
+    /** Looks a rejoin request up by the secret held in the requesting browser's storage. */
+    public Optional<RejoinRequest> findRejoinByToken(String deviceToken) {
+        return deviceToken == null || deviceToken.isBlank()
+                ? Optional.empty() : rejoins.findByDeviceToken(deviceToken);
+    }
+
+    public List<RejoinRequest> pendingRejoins(String homeCode) {
+        return rejoins.findByHomeCodeAndStatusOrderByRequestedAtAsc(homeCode, RejoinStatus.PENDING);
+    }
+
+    public long pendingRejoinCount(String homeCode) {
+        return rejoins.countByHomeCodeAndStatus(homeCode, RejoinStatus.PENDING);
+    }
+
+    /** Approves (or rejects) a pending rejoin request. The waiting device picks the
+     *  decision up through the home's revision signal. */
+    @Transactional
+    public boolean decideRejoin(Long requestId, Long adminId, boolean approve) {
+        RejoinRequest r = rejoins.findById(requestId).orElse(null);
+        if (r == null || r.getStatus() != RejoinStatus.PENDING) {
+            return false;
+        }
+        r.setStatus(approve ? RejoinStatus.APPROVED : RejoinStatus.REJECTED);
+        r.setDecidedAt(Instant.now());
+        r.setDecidedByMemberId(adminId);
+        rejoins.save(r);
+        homeState.bump(r.getHomeCode());
+        return true;
+    }
+
+    /** Consumes an approved request so its token can't be replayed on another device. */
+    @Transactional
+    public void consumeRejoin(Long requestId) {
+        rejoins.findById(requestId).ifPresent(rejoins::delete);
+    }
+
+    /** Drops a device's own pending request (the "never mind" button on the waiting screen). */
+    @Transactional
+    public void cancelRejoin(String deviceToken) {
+        findRejoinByToken(deviceToken).ifPresent(r -> {
+            String homeCode = r.getHomeCode();
+            rejoins.delete(r);
+            homeState.bump(homeCode);
+        });
     }
 
     // ---- Admin & member management -----------------------------------------
@@ -179,6 +339,7 @@ public class ChoreService {
         String homeCode = member.getHomeCode();
         completions.deleteByMemberId(memberId);
         creditService.deleteForMember(memberId);
+        rejoins.deleteByMemberId(memberId);
         members.delete(member);
         homeState.bump(homeCode);
         return true;
@@ -551,6 +712,7 @@ public class ChoreService {
                 memberId, taskId, CompletionStatus.APPROVED);
 
         Completion saved = completions.save(new Completion(task.getHomeCode(), taskId, memberId, status));
+        touch(home);
         homeState.bump(task.getHomeCode());
 
         if (approval) {
@@ -594,6 +756,7 @@ public class ChoreService {
         c.setReviewedByMemberId(adminId);
         c.setReviewedAt(java.time.Instant.now());
         completions.save(c);
+        touchHome(c.getHomeCode());
         homeState.bump(c.getHomeCode());
 
         CreditService.Award award =
@@ -665,6 +828,17 @@ public class ChoreService {
 
     private static String generatePin() {
         return String.format("%04d", RANDOM.nextInt(10000));
+    }
+
+    /** A 128-bit secret for a rejoining device — long enough that it can't be guessed. */
+    private static String generateToken() {
+        byte[] bytes = new byte[16];
+        RANDOM.nextBytes(bytes);
+        StringBuilder sb = new StringBuilder(32);
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
     }
 
     private static String normalizeCode(String code) {

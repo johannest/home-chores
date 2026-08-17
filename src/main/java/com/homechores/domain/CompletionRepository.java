@@ -21,6 +21,9 @@ public interface CompletionRepository extends JpaRepository<Completion, Long> {
 
     List<Completion> findByHomeCode(String homeCode);
 
+    /** Whether a home has any chore history at all, of any status (retention check). */
+    boolean existsByHomeCode(String homeCode);
+
     List<Completion> findByHomeCodeAndStatus(String homeCode, CompletionStatus status);
 
     List<Completion> findByMemberIdAndStatus(Long memberId, CompletionStatus status);

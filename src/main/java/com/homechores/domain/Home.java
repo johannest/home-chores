@@ -40,7 +40,31 @@ public class Home {
     /** How many hours a member's booking of a chore holds before it frees up for others. */
     private int bookingTimeoutHours = 4;
 
+    /**
+     * When on, a device signing back in as an existing member (after clearing its browser
+     * storage) needs an admin's approval. Defaults to on: the home code travels in join
+     * links, so without the gate anyone holding one could step into any member's identity.
+     * Knowing the admin PIN always bypasses the gate.
+     *
+     * <p>The column default matters: {@code ddl-auto=update} adds this to databases that
+     * already have homes in them, and H2 refuses a plain {@code not null} column there.
+     * Existing homes therefore adopt the gated behaviour.
+     */
+    @Column(columnDefinition = "boolean not null default true")
+    private boolean approveRejoin = true;
+
     private Instant createdAt = Instant.now();
+
+    /**
+     * When a member last actually did something here — completed a chore, reviewed one, or
+     * opened the board. Not touched by background push traffic, so it means "a person used
+     * this home", which is what retention decisions hang on.
+     *
+     * <p>Deliberately nullable: homes that predate the column read as null, and
+     * {@link #lastActiveOrCreated()} falls back to the creation time rather than needing a
+     * DDL default (see the note on {@code approveRejoin}).
+     */
+    private Instant lastActiveAt;
 
     protected Home() {
     }
@@ -111,11 +135,32 @@ public class Home {
         this.bookingTimeoutHours = bookingTimeoutHours;
     }
 
+    public boolean isApproveRejoin() {
+        return approveRejoin;
+    }
+
+    public void setApproveRejoin(boolean approveRejoin) {
+        this.approveRejoin = approveRejoin;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Instant getLastActiveAt() {
+        return lastActiveAt;
+    }
+
+    public void setLastActiveAt(Instant lastActiveAt) {
+        this.lastActiveAt = lastActiveAt;
+    }
+
+    /** Last activity, falling back to creation for homes that never recorded any. */
+    public Instant lastActiveOrCreated() {
+        return lastActiveAt != null ? lastActiveAt : createdAt;
     }
 }

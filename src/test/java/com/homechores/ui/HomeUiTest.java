@@ -2,6 +2,7 @@ package com.homechores.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.homechores.domain.Home;
@@ -48,9 +49,22 @@ class HomeUiTest extends SpringUIUnitTest {
         return c.getUI().isPresent();
     }
 
+    /**
+     * The label a user would read: header buttons keep their text in a child span (so it
+     * can be hidden on phones), which leaves {@code getText()} empty — fall back to the
+     * accessible name those buttons set for exactly this reason.
+     */
+    private String labelOf(Button b) {
+        String text = b.getText();
+        if (text != null && !text.isBlank()) {
+            return text.trim();
+        }
+        return b.getAriaLabel().orElseGet(() -> b.getElement().getTextRecursively()).trim();
+    }
+
     private void clickButton(String text) {
         Button b = $(Button.class).all().stream()
-                .filter(x -> text.equals(x.getText()) && usable(x))
+                .filter(x -> text.equals(labelOf(x)) && usable(x))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("No usable button: " + text));
         ComponentUtil.fireEvent(b, new ClickEvent<>(b));
@@ -132,6 +146,74 @@ class HomeUiTest extends SpringUIUnitTest {
         clickButton("Save");
 
         assertEquals(12, service.tasksOf(code).size(), "new chore persisted (11 seeded + 1)");
+    }
+
+    /**
+     * The recovery path a family member takes after clearing their browser storage: pick
+     * yourself out of the member list instead of joining again under the same name.
+     */
+    @Test
+    void rejoinPicker_signsBackInAsTheExistingMember_withoutDuplicating() {
+        Member admin = service.createHome("Shared", "Alex");
+        Member sam = service.joinHome(admin.getHomeCode(), "Sam").orElseThrow();
+        Home home = service.findHome(admin.getHomeCode()).orElseThrow();
+        home.setApproveRejoin(false); // no gate: the picker signs in straight away
+        service.saveHome(home);
+
+        navigate(LandingView.class);
+        $(Tabs.class).first().setSelectedIndex(1); // "Join a home"
+        setField("Home code", admin.getHomeCode());
+        clickButton("I'm already a member — sign me back in");
+
+        // Two rows, one per member; tap the "That's me" next to Sam.
+        assertEquals(2, $(Button.class).all().stream()
+                .filter(b -> "That's me".equals(b.getText())).count());
+        clickButton("That's me"); // rows are listed join-order, so Alex is first
+        assertInstanceOf(HomeView.class, getCurrentView());
+        assertEquals(admin.getId(), SessionContext.memberId(), "signed in as the existing Alex");
+        assertEquals(2, service.membersOf(admin.getHomeCode()).size(), "no third member created");
+        assertEquals(sam.getId(), service.membersOf(admin.getHomeCode()).get(1).getId());
+    }
+
+    /** With the gate on and no PIN, the picker parks the device in the approval queue. */
+    @Test
+    void rejoinPicker_withGateOn_raisesARequestInsteadOfSigningIn() {
+        Member admin = service.createHome("Shared", "Alex");
+        assertTrue(service.findHome(admin.getHomeCode()).orElseThrow().isApproveRejoin());
+
+        navigate(LandingView.class);
+        $(Tabs.class).first().setSelectedIndex(1);
+        setField("Home code", admin.getHomeCode());
+        clickButton("I'm already a member — sign me back in");
+        clickButton("That's me");
+
+        assertInstanceOf(LandingView.class, getCurrentView(), "still waiting, not signed in");
+        assertNull(SessionContext.memberId());
+        assertEquals(1, service.pendingRejoins(admin.getHomeCode()).size());
+    }
+
+    /** The wipe is irreversible, so a wrong code must not delete anything. */
+    @Test
+    void deleteHome_requiresTheHomeCodeTyped_correctly() {
+        Member admin = service.createHome("Doomed", "Alex");
+        String code = admin.getHomeCode();
+        SessionContext.signIn(admin.getId(), code);
+        navigate(HomeView.class);
+        $(Tabs.class).first().setSelectedIndex(2); // Admin tab
+
+        clickButton("Delete this home");
+        setField("Type the home code " + code + " to confirm", "WRONG");
+        clickButton("Delete everything");
+        assertTrue(service.findHome(code).isPresent(), "a wrong code deletes nothing");
+        assertInstanceOf(HomeView.class, getCurrentView());
+
+        setField("Type the home code " + code + " to confirm", code);
+        clickButton("Delete everything");
+
+        assertTrue(service.findHome(code).isEmpty(), "home wiped");
+        assertTrue(service.membersOf(code).isEmpty());
+        assertNull(SessionContext.memberId(), "the deleting admin is signed out");
+        assertInstanceOf(LandingView.class, getCurrentView());
     }
 
     @Test

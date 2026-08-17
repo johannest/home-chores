@@ -1,6 +1,7 @@
 package com.homechores.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,6 +37,7 @@ class BackupServiceTest {
 
         Home before = chores.findHome(code).orElseThrow();
         before.setRequireApproval(true);
+        before.setApproveRejoin(false);
         before.setDailyTargetPerMember(3);
         chores.saveHome(before);
         String pin = chores.findHome(code).orElseThrow().getAdminPin();
@@ -55,6 +57,7 @@ class BackupServiceTest {
         assertEquals("Backup Home", after.getName());
         assertEquals(pin, after.getAdminPin());
         assertTrue(after.isRequireApproval());
+        assertFalse(after.isApproveRejoin());
         assertEquals(3, after.getDailyTargetPerMember());
         assertEquals(2, chores.membersOf(code).size());
         assertEquals(11, chores.tasksOf(code).size());

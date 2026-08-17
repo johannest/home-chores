@@ -1,5 +1,6 @@
 package com.homechores.ui;
 
+import com.homechores.service.HomeCleanupService;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H1;
 import com.vaadin.flow.component.html.H2;
@@ -20,7 +21,7 @@ import com.vaadin.flow.router.RouterLink;
 @PageTitle("Privacy — FlashChores")
 public class PrivacyView extends VerticalLayout {
 
-    public PrivacyView() {
+    public PrivacyView(HomeCleanupService cleanup) {
         addClassName("centered-page");
         // Width only: a fixed 100% height + centered flex content would push the top of a
         // long page above the viewport where it can't be scrolled to. The .centered-page
@@ -59,14 +60,31 @@ public class PrivacyView extends VerticalLayout {
                         + "signed into your home. It is required for the service to work and is not used "
                         + "for tracking, so no cookie-consent banner is needed."));
 
-        card.add(section("Where it's stored & how long",
-                "Data is stored in a self-hosted database on flashchores.com. It is kept until an "
-                        + "admin removes the member or home, or requests deletion."));
+        // The retention sentence is generated from the actual configured window, so this
+        // notice can't quietly drift out of step with what the server really does.
+        String retention = "Data is stored in a self-hosted database on flashchores.com. A home and "
+                + "its chore history are kept until an admin deletes them (see below) — we do not "
+                + "delete a family's history for being idle.";
+        if (cleanup.isEnabled()) {
+            retention += " The one exception: a home that was created but never actually used — no "
+                    + "chores ever logged and no one else invited — is removed automatically after "
+                    + cleanup.getAbandonedHomeDays() + " days, so abandoned sign-ups don't linger.";
+        }
+        card.add(section("Where it's stored & how long", retention));
 
         card.add(sectionList("Your rights", new String[]{
                 "See and correct your data — a home admin can rename members and edit chores.",
-                "Erase your data — a home admin can remove a member (and all their history) or delete the home.",
-                "Export your data — a home admin can download a full JSON backup of the home.",
+                "Erase your data yourself, at any time — a home admin can remove a single member "
+                        + "(with all their history) under Admin → Members, or delete the entire home "
+                        + "and everything in it under Admin → Danger zone. Deletion is immediate and "
+                        + "permanent; no copy is kept.",
+                "Export your data — a home admin can download a full JSON backup of the home under "
+                        + "Admin → Backup & restore. Do this before deleting if you want to keep it.",
+                "Prefer us to do it? Email support@flashchores.com with your home code and admin "
+                        + "PIN. We need both: they are the only way to tell that the request really "
+                        + "comes from your household, since we hold no email addresses or accounts "
+                        + "to check it against. If you've lost the PIN, write from the address you "
+                        + "contacted us from before and we'll agree another way to confirm.",
                 "For anything else, contact support@flashchores.com and we'll help.",
         }));
 

@@ -14,6 +14,9 @@ class LanguageSwitcher extends Select<String> {
         setItemLabelGenerator(code -> T.tr("lang." + code));
         setValue(currentCode());
         setWidth("8.5em");
+        // Narrowed on phones (see styles.css) so the header actions beside it keep their
+        // text labels — a bare key or exit icon is far less obvious than "Admin?"/"Leave".
+        addClassName("lang-select");
 
         addValueChangeListener(e -> {
             String code = e.getValue();

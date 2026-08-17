@@ -131,6 +131,13 @@ public class CreditService {
         credits.deleteByMemberId(memberId);
     }
 
+    /** Wipes every credit entry and spree tier of a home (used when the home is deleted). */
+    @Transactional
+    public void deleteForHome(String homeCode) {
+        credits.deleteByHomeCode(homeCode);
+        tiers.deleteByHomeCode(homeCode);
+    }
+
     // ---- Spree tier admin ---------------------------------------------------
 
     public List<SpreeTier> tiersOf(String homeCode) {

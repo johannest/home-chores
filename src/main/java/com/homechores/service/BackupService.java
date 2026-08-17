@@ -18,6 +18,7 @@ import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
+import com.homechores.domain.RejoinRequestRepository;
 import com.homechores.domain.SpreeTier;
 import com.homechores.domain.SpreeTierRepository;
 import java.time.Instant;
@@ -40,6 +41,7 @@ public class BackupService {
     private final CompletionRepository completions;
     private final CreditEntryRepository creditEntries;
     private final SpreeTierRepository spreeTiers;
+    private final RejoinRequestRepository rejoins;
     private final HomeState homeState;
     private final ObjectMapper mapper = new ObjectMapper()
             .registerModule(new JavaTimeModule())
@@ -48,13 +50,14 @@ public class BackupService {
     public BackupService(HomeRepository homes, MemberRepository members,
                         ChoreTaskRepository tasks, CompletionRepository completions,
                         CreditEntryRepository creditEntries, SpreeTierRepository spreeTiers,
-                        HomeState homeState) {
+                        RejoinRequestRepository rejoins, HomeState homeState) {
         this.homes = homes;
         this.members = members;
         this.tasks = tasks;
         this.completions = completions;
         this.creditEntries = creditEntries;
         this.spreeTiers = spreeTiers;
+        this.rejoins = rejoins;
         this.homeState = homeState;
     }
 
@@ -66,7 +69,8 @@ public class BackupService {
         b.version = VERSION;
         b.home = new HomeDto(home.getCode(), home.getName(), home.getAdminPin(),
                 home.isRequireApproval(), home.getDailyTargetPerMember(), home.getDivisionStyle(),
-                home.isRotationEnforced(), home.getBookingTimeoutHours(), home.getCreatedAt());
+                home.isRotationEnforced(), home.getBookingTimeoutHours(), home.isApproveRejoin(),
+                home.getCreatedAt());
         for (Member m : members.findByHomeCodeOrderByJoinedAtAsc(homeCode)) {
             b.members.add(new MemberDto(m.getId(), m.getName(), m.getColor(), m.isAdmin(), m.getJoinedAt()));
         }
@@ -117,6 +121,7 @@ public class BackupService {
         home.setDailyTargetPerMember(clampTarget(b.home.dailyTargetPerMember));
         home.setDivisionStyle(b.home.divisionStyle == null ? DivisionStyle.DEFAULT : b.home.divisionStyle);
         home.setRotationEnforced(b.home.rotationEnforced);
+        home.setApproveRejoin(b.home.approveRejoin == null || b.home.approveRejoin);
         if (b.home.bookingTimeoutHours > 0) {
             home.setBookingTimeoutHours(b.home.bookingTimeoutHours);
         }
@@ -125,7 +130,9 @@ public class BackupService {
         }
         homes.save(home);
 
-        // Wipe current data for this home.
+        // Wipe current data for this home. Rejoin requests go too: their member ids are
+        // about to be remapped, so any survivor would point at the wrong person.
+        rejoins.deleteByHomeCode(code);
         completions.deleteByHomeCode(code);
         creditEntries.deleteByHomeCode(code);
         spreeTiers.deleteByHomeCode(code);
@@ -210,9 +217,12 @@ public class BackupService {
         public List<CreditDto> credits = new ArrayList<>();
     }
 
+    /** {@code approveRejoin} is boxed so backups written before the setting existed
+     *  restore with the safe default (on) rather than Jackson's {@code false}. */
     public record HomeDto(String code, String name, String adminPin, boolean requireApproval,
                           int dailyTargetPerMember, DivisionStyle divisionStyle,
-                          boolean rotationEnforced, int bookingTimeoutHours, Instant createdAt) {
+                          boolean rotationEnforced, int bookingTimeoutHours,
+                          Boolean approveRejoin, Instant createdAt) {
     }
 
     public record MemberDto(Long id, String name, String color, boolean admin, Instant joinedAt) {

@@ -14,15 +14,44 @@ body {
         radial-gradient(1000px 500px at -10% 110%, hsla(155, 62%, 45%, 0.14), transparent);
 }
 
+/* A phone must never scroll or rubber-band sideways: the app is a single column, so any
+   horizontal travel is a layout bug leaking through, and dragging the page half out of
+   the viewport feels broken. The rules below are a backstop — real overflow is fixed at
+   the source (see .auth-card box-sizing and the header layout). */
+html, body {
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+}
+
+/* Sizing is opt-out rather than opt-in here: every box in this file is padded, and a
+   content-box + padding combination silently overflows narrow screens. */
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+/* Field labels default to a single truncated line, which loses the end of longer ones
+   ("Type the home code XXXXXXX to confirm") on a narrow screen. Let them wrap. */
+vaadin-text-field::part(label),
+vaadin-integer-field::part(label),
+vaadin-select::part(label) {
+    white-space: normal;
+}
+
 /* ---- Centered auth / landing card ---- */
 /* The layout grows with its content (no fixed height) so long pages scroll all the
    way to the top; min-height keeps short content vertically centered. */
 .centered-page {
     min-height: 100vh;
+    /* dvh tracks iOS Safari's collapsing URL bar; vh above is the fallback. */
+    min-height: 100dvh;
     box-sizing: border-box;
     align-items: center;
     justify-content: center;
     padding: var(--lumo-space-l);
+    /* index.html ships viewport-fit=cover, so keep clear of the notch and home indicator. */
+    padding-left: max(var(--lumo-space-l), env(safe-area-inset-left));
+    padding-right: max(var(--lumo-space-l), env(safe-area-inset-right));
+    padding-bottom: max(var(--lumo-space-l), env(safe-area-inset-bottom));
 }
 
 .auth-card {
@@ -32,6 +61,29 @@ body {
     border-radius: var(--lumo-border-radius-l);
     box-shadow: 0 18px 50px rgba(0, 0, 0, 0.14);
     padding: var(--lumo-space-xl);
+}
+
+/* Covers the landing page while the browser is asked whether it already holds an
+   identity, so a returning phone never flashes the join form on its way to the board.
+   It's an overlay rather than a hidden form: if that lookup never answers, the user is
+   left with a working page underneath rather than a spinner forever. */
+.restore-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    max-width: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--lumo-base-color);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--lumo-space-m);
+}
+
+.restore-overlay vaadin-progress-bar {
+    max-width: 220px;
 }
 
 .brand-title {
@@ -57,12 +109,36 @@ body {
     border-radius: var(--lumo-border-radius-l);
     padding: var(--lumo-space-m) var(--lumo-space-l);
     box-shadow: 0 10px 30px hsla(155, 62%, 40%, 0.35);
+    /* The identity block and the action cluster sit side by side while they fit and drop
+       onto separate rows when they don't, instead of pushing each other off-screen. */
+    flex-wrap: wrap;
+    row-gap: var(--lumo-space-s);
 }
 
 .home-header h1 {
     margin: 0;
     font-size: 1.4rem;
     color: #fff;
+}
+
+/* Both header groups must be allowed to shrink; without min-width:0 a flex item refuses
+   to go below its content width and overflows the row. */
+.header-id {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* One line, ellipsised — a long family name must not turn into a word-per-line column. */
+.home-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.header-code,
+.header-actions {
+    flex-wrap: wrap;
+    min-width: 0;
 }
 
 .code-chip {
@@ -451,6 +527,17 @@ body {
     margin: 0 0 var(--lumo-space-s);
     font-size: 1rem;
 }
+
+/* The one irreversible action on the page — visually separated so it isn't tapped
+   on the way past the settings above it. */
+.danger-section {
+    border-color: var(--lumo-error-color, #ef4444);
+    background: hsla(0, 84%, 60%, 0.04);
+    margin-top: var(--lumo-space-l);
+}
+.danger-section h3 {
+    color: var(--lumo-error-text-color, #b91c1c);
+}
 .list-row {
     display: flex;
     align-items: center;
@@ -504,4 +591,147 @@ body {
 .task-card.mine {
     border-color: var(--lumo-primary-color);
     box-shadow: 0 0 0 2px var(--lumo-primary-color-10pct);
+}
+
+/* ==========================================================================
+   Touch & small screens
+   The app is used mostly on phones, so the rules below are about the two
+   things that break there: hover styles that stick after a tap, and layouts
+   that assume a desktop's width.
+   ========================================================================== */
+
+/* A tap on a touch screen leaves :hover applied until you tap elsewhere, so a chore card
+   stays "lifted" after being pressed. Give hover effects to real pointers only. */
+@media (hover: none) {
+    .task-card:hover {
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+        border-color: var(--lumo-contrast-10pct);
+    }
+    .feedback-btn:hover {
+        border-color: var(--lumo-contrast-10pct);
+        transform: none;
+    }
+}
+
+@media (pointer: coarse) {
+    /* The grey flash Safari/Chrome paint over a tapped element fights the card's own
+       press animation. */
+    .task-card, .feedback-btn, .member-chip {
+        -webkit-tap-highlight-color: transparent;
+    }
+    /* Small icon buttons are ~32px; a finger needs ~44px. Pad the hit area without
+       growing the visual button. */
+    .header-actions vaadin-button,
+    .header-code vaadin-button,
+    .list-row vaadin-button {
+        min-height: 40px;
+        min-width: 40px;
+    }
+}
+
+@media (max-width: 640px) {
+    /* Reclaim the card's generous desktop padding — 40px a side leaves barely 290px of
+       usable width on a 375px phone, which is what made the sign-in card look broken. */
+    .auth-card {
+        padding: var(--lumo-space-l) var(--lumo-space-m);
+    }
+    .brand-title {
+        font-size: 1.9rem;
+    }
+    .centered-page {
+        padding: var(--lumo-space-m);
+        padding-left: max(var(--lumo-space-m), env(safe-area-inset-left));
+        padding-right: max(var(--lumo-space-m), env(safe-area-inset-right));
+        padding-bottom: max(var(--lumo-space-m), env(safe-area-inset-bottom));
+    }
+
+    .page-pad {
+        padding: var(--lumo-space-s);
+        padding-left: max(var(--lumo-space-s), env(safe-area-inset-left));
+        padding-right: max(var(--lumo-space-s), env(safe-area-inset-right));
+        padding-bottom: max(var(--lumo-space-s), env(safe-area-inset-bottom));
+    }
+
+    /* The header is the first thing on the board and was eating half the screen before a
+       single chore was visible. Tighten it and let the actions sit on their own row. */
+    .home-header {
+        padding: var(--lumo-space-s) var(--lumo-space-m);
+    }
+    .home-header h1 {
+        font-size: 1.15rem;
+    }
+    .header-id {
+        flex: 1 1 100%;
+    }
+    .header-actions {
+        flex: 1 1 100%;
+        justify-content: flex-start;
+    }
+    /* Copy and Share go icon-only: a chain link and a share arrow read on their own, and
+       they sit right next to the code chip that gives them context. The labels remain as
+       aria-labels. "Admin?" and "Leave" keep their text — a bare key or exit glyph is
+       genuinely ambiguous, and shrinking the language select buys back the room. */
+    .header-code .btn-label {
+        display: none;
+    }
+    .lang-select {
+        width: 7em;
+    }
+    .code-chip {
+        font-size: 1rem;
+        letter-spacing: 2px;
+    }
+
+    /* Two columns of chores stay reachable down to the narrowest phones. */
+    .task-grid {
+        grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+        gap: var(--lumo-space-s);
+    }
+    .task-card {
+        min-height: 112px;
+        padding: var(--lumo-space-m) var(--lumo-space-s);
+    }
+    .task-card .emoji {
+        font-size: 2.2rem;
+    }
+    .task-card .name {
+        font-size: 0.9rem;
+    }
+
+    /* Admin rows carry up to four controls — let them wrap rather than overflow. */
+    .list-row {
+        flex-wrap: wrap;
+    }
+    .list-row .grow {
+        flex: 1 1 60%;
+    }
+    /* Field-plus-button rows (spree tier, rename home) are wider than a phone column, and
+       with the page unable to scroll sideways the trailing button would be half
+       untappable. Wrapping keeps every control reachable. */
+    .admin-section vaadin-horizontal-layout {
+        flex-wrap: wrap;
+    }
+
+    /* Give the bars room by trimming the label gutter. */
+    .bar-row {
+        grid-template-columns: 74px 1fr 28px;
+        gap: 6px;
+    }
+    .trend {
+        gap: 2px;
+    }
+    .pin-box {
+        font-size: 1.2rem;
+        letter-spacing: 4px;
+    }
+}
+
+/* Very narrow phones (iPhone SE 1st gen / small Androids at 320px). */
+@media (max-width: 360px) {
+    .brand-title {
+        font-size: 1.65rem;
+    }
+    .task-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    }
 }

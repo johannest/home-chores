@@ -81,14 +81,32 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         Optional<Home> home = service.findHome(homeCode);
         Optional<Member> me = service.findMember(memberId);
         if (home.isEmpty() || me.isEmpty()) {
+            // Removed member or wiped home — drop the stored identity too, or the device
+            // would keep restoring itself into a dead session on every visit.
+            DeviceIdentity.forget();
             SessionContext.signOut();
             event.forwardTo(LandingView.class);
             return;
         }
+        // Opening the board is the broadest honest signal that this family still uses the
+        // home; it feeds retention (see HomeCleanupService) and is throttled to hourly.
+        service.touchHome(homeCode);
+
         choresPanel = new ChoresPanel(service, creditService, homeCode, memberId);
         statsPanel = new StatsPanel(statsService, service, homeCode, memberId);
         adminPanel = new AdminPanel(service, creditService, backupService, homeCode, memberId);
         // Initial render happens from the Signal.effect registered in onAttach.
+    }
+
+    /** Drops this device's identity and returns it to the landing page. */
+    private void showOut() {
+        removeAll();
+        DeviceIdentity.forget();
+        SessionContext.signOut();
+        getUI().ifPresent(ui -> {
+            ui.navigate(LandingView.class);
+            Notification.show(T.tr("home.gone"), 5000, Notification.Position.TOP_CENTER);
+        });
     }
 
     private boolean isAdmin() {
@@ -98,9 +116,17 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     // ---- Chrome (header + tabs) --------------------------------------------
 
     private void buildChrome() {
+        // An admin may have deleted the home (or this member) while this device was
+        // looking at it — the revision bump lands here first, so show ourselves out
+        // rather than blowing up mid-render.
+        Optional<Home> current = service.findHome(homeCode);
+        if (current.isEmpty() || service.findMember(memberId).isEmpty()) {
+            showOut();
+            return;
+        }
         removeAll();
         boolean admin = isAdmin();
-        Home home = service.findHome(homeCode).orElseThrow();
+        Home home = current.get();
 
         Div page = new Div();
         page.addClassName("page-pad");
@@ -113,23 +139,43 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         showSelected();
     }
 
+    /**
+     * A header action whose text label collapses away on phones, leaving just the icon.
+     * The label stays in the accessible name, so the button is still announced properly.
+     */
+    private Button headerButton(String label, VaadinIcon icon, ButtonVariant... variants) {
+        Span text = new Span(label);
+        text.addClassName("btn-label");
+        Button b = new Button(icon.create());
+        // Button.add(Component...) is not public, so attach the label at the element level.
+        b.getElement().appendChild(text.getElement());
+        b.setAriaLabel(label);
+        b.addThemeVariants(ButtonVariant.LUMO_SMALL);
+        b.addThemeVariants(variants);
+        return b;
+    }
+
     private Component buildHeader(Home home, boolean admin) {
         H1 name = new H1(home.getName());
+        name.addClassName("home-title");
+        name.setTitle(home.getName()); // the full name is still reachable when truncated
 
         Span code = new Span(home.getCode());
         code.addClassName("code-chip");
-        Button copyLink = new Button(T.tr("home.copyLink"), VaadinIcon.LINK.create());
-        copyLink.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_CONTRAST);
+        Button copyLink = headerButton(T.tr("home.copyLink"), VaadinIcon.LINK,
+                ButtonVariant.LUMO_CONTRAST);
         copyLink.addClickListener(e -> copyJoinLink(home));
-        Button share = new Button(T.tr("home.share"), VaadinIcon.SHARE.create());
-        share.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_CONTRAST);
+        Button share = headerButton(T.tr("home.share"), VaadinIcon.SHARE,
+                ButtonVariant.LUMO_CONTRAST);
         share.addClickListener(e -> shareJoinLink(home));
         HorizontalLayout codeRow = new HorizontalLayout(code, copyLink, share);
+        codeRow.addClassName("header-code");
         codeRow.setAlignItems(FlexComponent.Alignment.CENTER);
-        codeRow.getStyle().set("flex-wrap", "wrap");
         Div left = new Div(name, codeRow);
+        left.addClassName("header-id");
 
         HorizontalLayout right = new HorizontalLayout();
+        right.addClassName("header-actions");
         right.setAlignItems(FlexComponent.Alignment.CENTER);
         right.add(new LanguageSwitcher());
         if (admin) {
@@ -137,15 +183,17 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
             badge.addClassName("admin-badge");
             right.add(badge);
         } else {
-            Button claim = new Button(T.tr("home.claimAdmin"), VaadinIcon.KEY.create(),
-                    e -> claimAdminDialog());
-            claim.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_CONTRAST);
+            Button claim = headerButton(T.tr("home.claimAdmin"), VaadinIcon.KEY,
+                    ButtonVariant.LUMO_CONTRAST);
+            claim.addClickListener(e -> claimAdminDialog());
             right.add(claim);
         }
-        Button leave = new Button(T.tr("home.leave"), VaadinIcon.SIGN_OUT.create());
-        leave.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+        Button leave = headerButton(T.tr("home.leave"), VaadinIcon.SIGN_OUT,
+                ButtonVariant.LUMO_TERTIARY);
         leave.getStyle().set("color", "#fff");
         leave.addClickListener(e -> {
+            // Leaving is an explicit sign-out, so the device forgets who it was as well.
+            DeviceIdentity.forget();
             SessionContext.signOut();
             getUI().ifPresent(ui -> ui.navigate(LandingView.class));
         });
@@ -168,7 +216,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         Tab adminTab = null;
         if (admin) {
             Span label = new Span(T.tr("home.tab.admin"));
-            long pending = service.pendingCount(homeCode);
+            long pending = service.pendingCount(homeCode) + service.pendingRejoinCount(homeCode);
             if (pending > 0) {
                 Span badge = new Span(String.valueOf(pending));
                 badge.addClassName("nav-badge");
@@ -276,6 +324,9 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         if (homeCode == null) {
             return; // not signed in — beforeEnter already forwarded away
         }
+        // Re-stamp the device's stored identity on every visit, so it heals itself if the
+        // write was lost (private mode, storage pressure) and outlives the server session.
+        DeviceIdentity.remember(memberId, homeCode);
         // Chore availability windows ("dog out 8-10") are evaluated in the member's local
         // time, so fetch the browser's time zone once and re-render when it arrives.
         event.getUI().getPage().retrieveExtendedClientDetails(details -> {

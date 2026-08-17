@@ -10,6 +10,8 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 
     long countByHomeCodeAndAdminTrue(String homeCode);
 
+    long countByHomeCode(String homeCode);
+
     @Transactional
     void deleteByHomeCode(String homeCode);
 }

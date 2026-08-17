@@ -8,7 +8,11 @@ Terms in **bold** map to concepts in the code.
 
 - **Home** — a household. Identified by a short, shareable **home code**
   (7 characters from an alphabet without I/O/0/1).
-- **Member** — a person in a home. Identified per browser session (a phone = a member).
+- **Member** — a person in a home. Identified per device (a phone = a member): the member
+  id is kept in the browser's **local storage** and restored into each new session.
+- **Rejoin request** — a device asking to sign back in as an existing member after losing
+  its stored identity (browsing data cleared). Held as `PENDING` / `APPROVED` / `REJECTED`
+  with a secret **device token** that only the requesting browser holds.
 - **Admin** — a member with elevated rights. The creator of a home is the first admin.
   Proven by the **admin PIN**; admins can promote other members.
 - **Chore** (a.k.a. task) — a repeatable household task (e.g. "Empty dishwasher").
@@ -45,9 +49,12 @@ Terms in **bold** map to concepts in the code.
 | Approve / reject pending completions | — | ✅ |
 | Delete / correct any completion | — | ✅ |
 | Rename / remove members, promote / demote admins | — | ✅ |
-| Change home settings (approval, division style, booking hold, daily target, PIN, name) | — | ✅ |
+| Ask to sign back in as an existing member | ✅ | ✅ |
+| Approve / reject a rejoin request | — | ✅ |
+| Change home settings (approval, rejoin gate, division style, booking hold, daily target, PIN, name) | — | ✅ |
 | Manage spree tiers, view balances, redeem credits | — | ✅ |
 | Backup / restore the family's data | — | ✅ |
+| Delete the home and all its data | — | ✅ |
 
 Non-admins have **read/complete** rights only; all create/update/delete of shared
 config is admin-only — that is the "admin has CRUD over everything" requirement.
@@ -149,11 +156,76 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   (localized), including examples of an interval chore (water plants, every 7 days)
   and a time-windowed chore (take the dog out, 08–10 & 18–22).
 
+### Phase 4
+
+- **US-34 Stay signed in without a long session.** As a family member, my phone keeps
+  working as me across session timeouts, server restarts and app relaunches, because the
+  identity lives in the phone's local storage rather than in server memory. The server
+  keeps sessions short (Spring's 30-minute default) so idle phones cost it nothing.
+- **US-35 Sign back in after clearing browsing data.** As a member whose phone forgot
+  me, I can enter the home code, pick myself from the home's member list, and get my
+  own record back — chores, credits, streaks and admin role intact — instead of joining
+  again as a duplicate person. If the home requires it, an admin approves my request
+  first; the waiting screen flips to the board the moment they do, live.
+- **US-36 Rejoin gate (admin).** As an admin, I can choose whether signing back in needs
+  my approval (default **on**, since the home code travels in join links). Pending
+  requests appear at the top of the Admin tab and in its badge count, with Approve /
+  Reject per request.
+- **US-37 Admin recovery.** As an admin whose device forgot me, entering the **admin
+  PIN** in the sign-back-in dialog gets me straight in without waiting for anyone —
+  including when I'm the only admin. The PIN opens the gate but is not itself a
+  promotion; my existing member record already carries my role.
+- **US-38 Delete the home.** As an admin, I can permanently delete the whole home —
+  members, chores, completions, credits, spree tiers, rejoin requests and settings — from
+  a **Danger zone** at the bottom of the Admin tab. Because nothing can undo it, the
+  dialog states exactly what will be lost, points me at the backup download first, and
+  only proceeds once I've typed the home code. Every other family member still on the
+  board is signed out live, with their stored device identity cleared. Other homes on the
+  same server are untouched, and the freed code can be issued to a future home.
+- **US-39 Abandoned-home retention (operator).** As the operator of a public instance, I
+  can have homes that were created and then abandoned *before anyone used them* removed
+  automatically, so stray sign-ups don't accumulate. A home qualifies only when it has no
+  chore history at all and at most one member. A home a family actually used is never
+  auto-deleted however long it sits idle: the app has no email or push channel, so nobody
+  could be warned first, and silently destroying a child's chore history is not a trade
+  worth making for disk space. Off by default.
+
 ## 4. Functional specification
 
 ### 4.1 Login & identity
 - Passwordless. Session stores `memberId` + `homeCode` (`SessionContext`), plus the
   member's browser **time zone** (fetched once per session for availability hours).
+- **Device identity** (`DeviceIdentity`): on sign-in the pair `memberId|homeCode` is
+  written to the browser's local storage under `flashchores.identity`, and re-stamped on
+  every visit to the board. The landing page reads it on attach, validates that both the
+  member and the home still exist, and signs the session in — so server sessions stay
+  short-lived and hold no state for phones that aren't actively using the app. A stale
+  entry (removed member, restored home) is cleared and the user sent to the landing page.
+  While the browser is being asked, a full-screen overlay covers the landing card; it's
+  an overlay rather than a hidden form so that a lookup which never answers leaves a
+  working page rather than a spinner.
+- **Leave**, self-removal and backup restore all clear the stored identity.
+
+#### 4.1.1 Signing back in (rejoin)
+Clearing browsing data is the one thing local storage doesn't survive. The Join tab
+therefore offers "I'm already a member — sign me back in":
+1. The member enters the home code and opens the picker, which lists the home's members.
+2. Picking a member calls `requestRejoin(code, memberId, pin)`, which returns:
+   - `SIGNED_IN` — the supplied PIN matched the home's admin PIN, or
+     `Home.approveRejoin` is off. The device signs in immediately.
+   - `PENDING` — a `RejoinRequest` is created and its **device token** returned; the
+     browser stores it under `flashchores.rejoin` and shows a waiting screen.
+   - `WRONG_PIN` / `UNKNOWN` — rejected with a message; nothing is recorded.
+3. Admins see pending requests at the top of the Admin tab (and in its badge) and
+   Approve / Reject each. The decision bumps the home revision, so the waiting device
+   picks it up over push and navigates straight to the board — no polling or reload.
+4. A device that reloaded or closed in the meantime re-checks its stored token on the
+   next visit, so an approval granted while it was away still lands. Approved requests
+   are **consumed** on sign-in so a token can't be replayed; re-requesting for the same
+   member deletes any older pending request, so only the newest device can be let in.
+- The PIN is a *bypass*, not a promotion: the member keeps whatever role their existing
+  record has, and "Admin?" in the header remains the way to claim admin.
+- Requests are deleted when the member is removed or the home is restored from a backup.
 - **Home code**: 7 characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no I/O/0/1),
   ≈ 34 billion combinations — codes can't realistically be enumerated.
 - **Admin PIN**: 4-digit numeric, generated on home creation and shown once
@@ -271,6 +343,22 @@ message and shows a matching badge on the card (`LockReason`):
   applied. IDs are remapped internally; orphaned records are skipped. Invalid files
   are rejected with a message. The restoring admin is signed out and rejoins.
 
+### 4.11.1 Deleting the home (admin)
+- A **Danger zone** section at the bottom of the Admin tab, visually separated because it
+  holds the only action nothing can undo.
+- The dialog names the home, spells out what is lost (member and chore counts, plus every
+  completion, credit and setting), suggests downloading a backup first, and requires the
+  **home code to be typed** before the delete button does anything.
+- `ChoreService.deleteHome` removes, in order: rejoin requests, completions, credits and
+  spree tiers, chores, members, and finally the home row. Other homes are untouched.
+- The acting admin's device signs itself out and returns to the landing page *before* the
+  delete runs, so it gets its own confirmation; every other device is shown out by the
+  revision bump with "This home was deleted by an admin", and drops its stored identity.
+- Revision bumps are deferred to **after the transaction commits** (`HomeState.bump`).
+  Bumping inside the transaction would wake the other devices while they can still read
+  the pre-delete state — they would re-render the doomed board and never hear again.
+- The freed home code returns to the pool and may be issued to a future home.
+
 ### 4.12 Localization (i18n)
 - Languages: English (default/fallback), Finnish, Swedish, via an `I18NProvider`
   over `messages[_fi|_sv].properties`. All UI texts, blocked messages, badges and
@@ -299,11 +387,69 @@ message and shows a matching badge on the card (`LockReason`):
   delivered to all of the home's open UIs via `@Push` (long-polling). This replaces
   the earlier broadcaster/`UI.access` plumbing; effects are disposed on detach.
 
+### 4.11.2 Retention of abandoned homes (operator)
+- `Home.lastActiveAt` records when a **person** last used the home: completing a chore,
+  approving/rejecting one, joining, signing back in, or opening the board. It is *not*
+  touched by push traffic, so a phone left on a charger doesn't keep a home looking alive.
+  Writes are throttled to once an hour per home and never bump the revision signal.
+  Nullable — homes predating the column fall back to `createdAt`.
+- `HomeCleanupService` purges a home only when **all** hold:
+  1. last activity (or creation) is older than the configured window;
+  2. it has **no completions at all**, of any status (a rejected one still counts as history);
+  3. it has **at most one member** — inviting someone means it was more than a stray tap.
+- Governed by `homechores.retention.abandoned-home-days` (**0 = disabled, the default**)
+  and `homechores.retention.cron` (nightly at 03:30 by default). `findAbandoned(cutoff)`
+  is a dry run for inspecting candidates without deleting.
+- Deletion reuses `ChoreService.deleteHome`, so the cascade across all seven tables stays
+  in one place, and each sweep logs the codes it removed.
+- **Not implemented, deliberately**: time-based deletion of homes that *were* used. With no
+  email or push channel there is no way to warn a family first, and a false positive
+  destroys irreplaceable history while a false negative costs kilobytes. If it is ever
+  added it should export a backup before deleting, and use a window of months, not days.
+- `PrivacyView` renders the retention sentence from the configured value, so the published
+  notice cannot drift out of step with what the server actually does.
+
+### 4.15.1 Mobile layout
+The app is used mostly on phones, so the layout is designed for a ~360–400px column and
+scales up, not the other way round.
+
+- **No horizontal scrolling, ever.** The app is a single column; any sideways travel is a
+  layout bug, and being able to drag the page half out of the viewport feels broken.
+  `html, body` set `overflow-x: hidden` and `overscroll-behavior-x: none` as a backstop,
+  but overflow is fixed at its source — the backstop hides a control rather than
+  revealing it, so a clipped element is *less* visible, not more. When checking layout,
+  measure each element against its container, not just against the viewport.
+- **`box-sizing: border-box` globally.** Every box here is padded; a content-box element
+  with `width: 100%` plus padding silently overflows. This was the sign-in card bug: 40px
+  of padding made a 327px card 407px wide on a 375px phone.
+- **Safe areas.** `index.html` ships `viewport-fit=cover`, so page padding uses
+  `max(<pad>, env(safe-area-inset-*))` to clear the notch and home indicator, and heights
+  use `100dvh` (with a `100vh` fallback) to track iOS Safari's collapsing URL bar.
+- **Header (≤640px).** The identity block and the action cluster each take a full row
+  rather than pushing each other off-screen; the home name is one ellipsised line. Copy
+  and Share collapse to icons — their glyphs are self-explanatory and they sit beside the
+  code chip — while "Admin?" and "Leave" keep their text, since a bare key or exit icon is
+  ambiguous. The room comes from narrowing the language select instead. Collapsed labels
+  stay in `aria-label`.
+- **Touch.** Hover effects are behind `@media (hover: hover)` — on a touch screen `:hover`
+  sticks after a tap and leaves a chore card looking permanently pressed. Small icon
+  buttons get a 40px minimum hit area under `@media (pointer: coarse)`, and tapped cards
+  suppress the platform's grey tap highlight in favour of their own press animation.
+- **Wrapping over truncation.** Admin field-plus-button rows and field labels wrap; long
+  select options were shortened with the explanation moved to helper text rather than
+  being cut off mid-word.
+
 ### 4.15 Privacy
 - `/privacy` is a public, plain-language notice: what is stored (names, completions,
   code/PIN), what is not (no emails, no trackers, single strictly-necessary session
   cookie), data location/retention, user rights (correct/erase/export via admin),
   children's-data guidance (nicknames), and operator contact details.
+- **Erasure requests.** Self-service is the primary route and is already complete: an admin
+  can erase one member (Admin → Members) or the whole home (Admin → Danger zone), and
+  export first via Backup & restore. For operator-assisted requests the notice asks for the
+  **home code plus admin PIN** — with no stored email or account there is nothing else to
+  authenticate a request against, and the code alone would let anyone have a family's board
+  deleted. The retention paragraph is generated from the live configuration (§4.11.2).
 
 ## 5. Non-functional / technical
 - Vaadin 25.2 Flow + Spring Boot 4.1 (Java 21), H2 file DB (`data/`), server push
@@ -316,6 +462,13 @@ message and shows a matching badge on the card (`LockReason`):
 - The admin PIN is a lightweight household credential, not a security boundary
   against a determined attacker; it gates casual misuse only. Codes are long enough
   not to be guessable; HTTPS is expected in production.
+- **Identity storage**: the browser holds only `memberId|homeCode` and, while a rejoin is
+  pending, a random 128-bit device token — no personal data and no credential. Server
+  sessions keep Spring's 30-minute default; local storage, not session length, is what
+  keeps a phone signed in.
+- **Schema evolution**: with `ddl-auto=update`, new non-null columns on existing tables
+  must declare a column default (see `Home.approveRejoin`) — H2 rejects the plain
+  `ALTER TABLE … ADD COLUMN … NOT NULL` on a table that already has rows.
 
 ## 6. Testing strategy
 - **Service unit tests (JUnit 5)** against an in-memory H2 profile: home create/join,
@@ -324,12 +477,19 @@ message and shows a matching badge on the card (`LockReason`):
   (block/expiry/cancel/clear-on-complete), rotation (distinct daily assignments,
   enforcement, day advance), interval due-dates, availability windows (parsing,
   normalization, in/out-of-window completion via fixed-offset zones), credits &
-  spree bonuses, stats aggregation, backup→restore round-trip (incl. windows),
-  localized default seeding.
+  spree bonuses, stats aggregation, backup→restore round-trip (incl. windows and the
+  rejoin gate), localized default seeding, and rejoin requests (gate on/off, PIN bypass
+  without promotion, wrong PIN, member from another home, approve/reject, token
+  consumption, newest-device-wins, cancel, cleanup when a member is removed), and home
+  deletion (every table wiped, other homes untouched, idempotent, code normalization,
+  freed code reusable).
 - **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest`,
   browserless): create-home flow navigates to the board with three tabs; join flow
   (two tabs, no Admin); PIN claim reveals the Admin tab; admin adds a chore from the
-  Admin panel; members never see the Admin tab.
+  Admin panel; members never see the Admin tab; the sign-back-in picker signs in as the
+  existing member without duplicating them (gate off) and raises a pending request
+  instead of signing in (gate on); deleting the home needs the code typed correctly and
+  signs the admin out.
 
 ## 7. Out of scope (possible future work)
 - Real authentication/accounts; weekly/monthly leaderboards; push notifications;

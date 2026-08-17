@@ -8,6 +8,7 @@ import com.vaadin.flow.shared.ui.Transport;
 import com.vaadin.flow.theme.lumo.Lumo;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * FlashChores — effortless tracking of small household chores.
@@ -20,6 +21,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * mechanism is deprecated).
  */
 @SpringBootApplication
+@EnableScheduling // for the retention sweep in HomeCleanupService (off unless configured)
 @Push(transport = Transport.LONG_POLLING)
 @StyleSheet(Lumo.STYLESHEET)
 @StyleSheet("styles.css")
