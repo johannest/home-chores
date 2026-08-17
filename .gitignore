@@ -1,0 +1,8 @@
+/vite.generated.ts
+/node_modules/
+/target/
+/.claude/
+/.idea/
+/.playwright-mcp/
+/.vscode/
+/data/
