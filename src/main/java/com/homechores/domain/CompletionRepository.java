@@ -21,6 +21,12 @@ public interface CompletionRepository extends JpaRepository<Completion, Long> {
 
     List<Completion> findByHomeCode(String homeCode);
 
+    /** Newest first — the admin's recent-activity list. */
+    List<Completion> findByHomeCodeOrderByDoneAtDesc(String homeCode);
+
+    /** A member's completions since a moment, newest first (the undo window). */
+    List<Completion> findByMemberIdAndDoneAtAfterOrderByDoneAtDesc(Long memberId, java.time.Instant since);
+
     /** Whether a home has any chore history at all, of any status (retention check). */
     boolean existsByHomeCode(String homeCode);
 

@@ -31,6 +31,14 @@ public class CreditEntry {
     /** For spree awards, the tier's day-count (used to avoid awarding it twice in one streak). */
     private int spreeTierDays = 0;
 
+    /**
+     * The completion that earned this credit, when it came from one. Undoing or deleting
+     * that completion revokes the credit, so a mis-tap can't leave phantom 💎 behind (nor
+     * be farmed by completing and undoing). Null for admin redemptions and for entries
+     * restored from a backup written before this existed.
+     */
+    private Long completionId;
+
     private Instant createdAt = Instant.now();
 
     protected CreditEntry() {
@@ -38,12 +46,18 @@ public class CreditEntry {
 
     public CreditEntry(String homeCode, Long memberId, int amount, CreditType type, String reason,
                        int spreeTierDays) {
+        this(homeCode, memberId, amount, type, reason, spreeTierDays, null);
+    }
+
+    public CreditEntry(String homeCode, Long memberId, int amount, CreditType type, String reason,
+                       int spreeTierDays, Long completionId) {
         this.homeCode = homeCode;
         this.memberId = memberId;
         this.amount = amount;
         this.type = type;
         this.reason = reason;
         this.spreeTierDays = spreeTierDays;
+        this.completionId = completionId;
     }
 
     public Long getId() {
@@ -72,6 +86,14 @@ public class CreditEntry {
 
     public int getSpreeTierDays() {
         return spreeTierDays;
+    }
+
+    public Long getCompletionId() {
+        return completionId;
+    }
+
+    public void setCompletionId(Long completionId) {
+        this.completionId = completionId;
     }
 
     public Instant getCreatedAt() {

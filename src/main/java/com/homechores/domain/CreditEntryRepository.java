@@ -10,6 +10,10 @@ public interface CreditEntryRepository extends JpaRepository<CreditEntry, Long> 
 
     List<CreditEntry> findByHomeCodeOrderByCreatedAtDesc(String homeCode);
 
+    /** Credits earned by one completion — revoked when it is undone or deleted. */
+    @Transactional
+    void deleteByCompletionId(Long completionId);
+
     @Transactional
     void deleteByHomeCode(String homeCode);
 

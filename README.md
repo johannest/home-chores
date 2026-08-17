@@ -18,6 +18,9 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Kahoot-style login** | No passwords. *Create a home* → get a 7-character code **and a private admin PIN**. Others *Join a home* with the code and their name, or open a **join link** (`/?join=CODE`) that prefills everything. **Copy link** / **Share** in the header use the clipboard or the native share sheet. |
 | **Stays signed in** | Each phone remembers who it is in **browser local storage**, not in a long-lived server session. Sessions can expire (and the server can restart) without anyone being asked to sign in again. |
 | **Sign back in** | If a phone clears its browsing data, its identity is gone — so the Join tab offers **"I'm already a member"**: pick yourself from the home's member list and keep your chores, credits and streaks instead of becoming a second "Sam". Admins can require approval for this (default on); knowing the **admin PIN** always skips the wait. |
+| **Confirm before counting** | Tapping a chore asks *"did you just do this?"* first — the cards are big and close together on a phone, and stray taps were counting as done. Admins can switch it off per home for speed. |
+| **Undo a mis-tap** | The celebration dialog offers *"Oops — undo this"*, and a quiet strip on the board lets a member take back their **own** chore for 10 minutes after doing it. Beyond that it's an admin job. |
+| **Admin can unmark** | A **Recent chores** list on the Admin tab unmarks any completion, however old and whoever did it — including one already approved. Any 💎 credits it earned are taken back with it. |
 | **Tap-to-complete chores** | Big chore cards under the **Chores** tab. Tap the one you just did. New homes start with **11 localized default chores**. |
 | **Fairness rule** | A member may do the *same* chore at most **3 times in a row** (`ChoreService.MAX_IN_A_ROW`); the 4th tap is blocked until *someone else* does it. |
 | **Booking ("I'll do it")** | A member can reserve a chore; others are blocked until the booking is completed, cancelled, or expires (admin-configurable hold, 1–24 h, default 4). |
@@ -53,6 +56,28 @@ Then open http://localhost:8080. On your phone, use your computer's LAN IP
 
 **Reset all data:** stop the app and delete the `data/` folder. (To wipe a single family
 without touching the others, use *Admin → Danger zone → Delete this home* in the app.)
+
+**Operator maintenance (`tools/flashchores-admin.py`):** for erasure requests you have to
+service yourself — a lost admin PIN, a legal escalation — rather than the family doing it
+in-app. Run it on the host with the service **stopped** (H2 locks the database file); it
+refuses rather than racing a running instance.
+
+```bash
+sudo systemctl stop flashchores
+./tools/flashchores-admin.py list                 # every home, most idle first
+./tools/flashchores-admin.py show K7QP4ZT         # members, chores, history, last use
+./tools/flashchores-admin.py export K7QP4ZT       # JSON backup
+./tools/flashchores-admin.py delete K7QP4ZT       # backs up first, asks you to type the code
+./tools/flashchores-admin.py purge --days 30 --dry-run
+sudo systemctl start flashchores
+```
+
+It starts the app's own code in a one-shot maintenance mode (ephemeral loopback port,
+shuts itself down), so `delete` goes through the same cascade as the in-app Danger zone —
+no hand-written SQL, and nothing new listening on the internet. `delete` writes a backup
+to `data/erasure-exports/` first unless you pass `--no-backup`; keep those as evidence the
+request was honoured, and as your undo. Needs the runnable jar (`--jar`, `FLASHCHORES_JAR`,
+or newest in `target/`). `--db-url` points it at another database, e.g. a restored copy.
 
 **Retention on a public instance:** set
 `homechores.retention.abandoned-home-days=30` (and optionally

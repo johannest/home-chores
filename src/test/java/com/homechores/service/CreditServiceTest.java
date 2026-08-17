@@ -52,13 +52,14 @@ class CreditServiceTest {
         completionRepo.save(dated(code, t.getId(), alex.getId(), Instant.now().minus(Duration.ofDays(1))));
         completionRepo.save(dated(code, t.getId(), alex.getId(), Instant.now()));
 
-        Award award = creditService.onApprovedCompletion(t, alex.getId(), code);
+        // null completion id: this test drives the award directly, without a real tap.
+        Award award = creditService.onApprovedCompletion(t, alex.getId(), code, null);
         assertEquals(2, award.spreeDays());
         assertEquals(10, award.spreeCredits());
         assertEquals(10, creditService.balance(alex.getId()));
 
         // Re-evaluating in the same streak must not award again.
-        Award again = creditService.onApprovedCompletion(t, alex.getId(), code);
+        Award again = creditService.onApprovedCompletion(t, alex.getId(), code, null);
         assertNull(again.spreeDays());
         assertEquals(10, creditService.balance(alex.getId()));
     }

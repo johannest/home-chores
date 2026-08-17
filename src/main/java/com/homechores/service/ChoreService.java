@@ -718,7 +718,8 @@ public class ChoreService {
         if (approval) {
             return CompleteOutcome.pending(task, member, saved.getId());
         }
-        CreditService.Award award = creditService.onApprovedCompletion(task, memberId, task.getHomeCode());
+        CreditService.Award award = creditService.onApprovedCompletion(
+                task, memberId, task.getHomeCode(), saved.getId());
         long memberTotal = completions.countByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
         return CompleteOutcome.done(task, member, memberTotal, !firstApprovedBefore,
                 milestoneFor(memberTotal), rotating ? 0 : streak + 1, saved.getId(), award);
@@ -760,7 +761,7 @@ public class ChoreService {
         homeState.bump(c.getHomeCode());
 
         CreditService.Award award =
-                creditService.onApprovedCompletion(task, c.getMemberId(), c.getHomeCode());
+                creditService.onApprovedCompletion(task, c.getMemberId(), c.getHomeCode(), c.getId());
         long memberTotal = completions.countByMemberIdAndStatus(c.getMemberId(), CompletionStatus.APPROVED);
         return CompleteOutcome.done(task, member, memberTotal, !firstApprovedBefore,
                 milestoneFor(memberTotal), 0, c.getId(), award);
@@ -776,12 +777,57 @@ public class ChoreService {
         homeState.bump(c.getHomeCode());
     }
 
+    /**
+     * Removes a completion outright — the admin's "that didn't happen" correction. Any
+     * credits it earned go with it, so an undone chore can't leave phantom 💎 behind.
+     */
     @Transactional
     public void deleteCompletion(Long completionId) {
         Completion c = completions.findById(completionId).orElseThrow();
         String homeCode = c.getHomeCode();
+        creditService.deleteForCompletion(completionId);
         completions.delete(c);
         homeState.bump(homeCode);
+    }
+
+    /** How long a member may take back a chore they logged by mistake. */
+    public static final Duration UNDO_WINDOW = Duration.ofMinutes(10);
+
+    /**
+     * A member taking back their own accidental tap. Deliberately narrow: only your own
+     * completion, and only while it is recent — beyond that it is an admin correction, so
+     * nobody can quietly rewrite last week's leaderboard.
+     *
+     * @return false if it isn't yours, or the window has passed
+     */
+    @Transactional
+    public boolean undoCompletion(Long completionId, Long memberId) {
+        Completion c = completions.findById(completionId).orElse(null);
+        if (c == null || !c.getMemberId().equals(memberId) || !isUndoable(c)) {
+            return false;
+        }
+        deleteCompletion(completionId);
+        return true;
+    }
+
+    private boolean isUndoable(Completion c) {
+        return c.getDoneAt().isAfter(Instant.now().minus(UNDO_WINDOW));
+    }
+
+    /**
+     * This member's most recent completion while it can still be taken back, so the board
+     * can offer an undo even after the celebration dialog has been dismissed.
+     */
+    public Optional<Completion> undoableCompletion(Long memberId) {
+        Instant since = Instant.now().minus(UNDO_WINDOW);
+        return completions.findByMemberIdAndDoneAtAfterOrderByDoneAtDesc(memberId, since)
+                .stream().findFirst();
+    }
+
+    /** Recent completions in a home, newest first — the admin's correction list. */
+    public List<Completion> recentCompletions(String homeCode, int limit) {
+        return completions.findByHomeCodeOrderByDoneAtDesc(homeCode).stream()
+                .limit(limit).toList();
     }
 
     // ---- Counts & daily target ---------------------------------------------

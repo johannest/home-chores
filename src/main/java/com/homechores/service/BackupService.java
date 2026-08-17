@@ -70,7 +70,7 @@ public class BackupService {
         b.home = new HomeDto(home.getCode(), home.getName(), home.getAdminPin(),
                 home.isRequireApproval(), home.getDailyTargetPerMember(), home.getDivisionStyle(),
                 home.isRotationEnforced(), home.getBookingTimeoutHours(), home.isApproveRejoin(),
-                home.getCreatedAt());
+                home.isConfirmCompletion(), home.getCreatedAt());
         for (Member m : members.findByHomeCodeOrderByJoinedAtAsc(homeCode)) {
             b.members.add(new MemberDto(m.getId(), m.getName(), m.getColor(), m.isAdmin(), m.getJoinedAt()));
         }
@@ -88,7 +88,7 @@ public class BackupService {
         }
         for (CreditEntry e : creditEntries.findByHomeCodeOrderByCreatedAtDesc(homeCode)) {
             b.credits.add(new CreditDto(e.getMemberId(), e.getAmount(), e.getType(),
-                    e.getReason(), e.getSpreeTierDays(), e.getCreatedAt()));
+                    e.getReason(), e.getSpreeTierDays(), e.getCompletionId(), e.getCreatedAt()));
         }
         try {
             return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(b);
@@ -122,6 +122,7 @@ public class BackupService {
         home.setDivisionStyle(b.home.divisionStyle == null ? DivisionStyle.DEFAULT : b.home.divisionStyle);
         home.setRotationEnforced(b.home.rotationEnforced);
         home.setApproveRejoin(b.home.approveRejoin == null || b.home.approveRejoin);
+        home.setConfirmCompletion(b.home.confirmCompletion == null || b.home.confirmCompletion);
         if (b.home.bookingTimeoutHours > 0) {
             home.setBookingTimeoutHours(b.home.bookingTimeoutHours);
         }
@@ -165,6 +166,7 @@ public class BackupService {
             spreeTiers.save(new SpreeTier(code, st.days, st.credits));
         }
         int restoredCompletions = 0;
+        Map<Long, Long> completionIdMap = new HashMap<>();
         for (CompletionDto c : b.completions) {
             Long newTask = taskIdMap.get(c.taskId);
             Long newMember = memberIdMap.get(c.memberId);
@@ -179,7 +181,8 @@ public class BackupService {
             entity.setFeedback(c.feedback);
             entity.setReviewedByMemberId(memberIdMap.get(c.reviewedByMemberId));
             entity.setReviewedAt(c.reviewedAt);
-            completions.save(entity);
+            Completion savedCompletion = completions.save(entity);
+            completionIdMap.put(c.id, savedCompletion.getId());
             restoredCompletions++;
         }
         for (CreditDto cr : b.credits) {
@@ -188,7 +191,8 @@ public class BackupService {
                 continue;
             }
             CreditEntry entity = new CreditEntry(code, newMember, cr.amount,
-                    cr.type == null ? CreditType.EARNED : cr.type, cr.reason, cr.spreeTierDays);
+                    cr.type == null ? CreditType.EARNED : cr.type, cr.reason, cr.spreeTierDays,
+                    completionIdMap.get(cr.completionId));
             if (cr.createdAt != null) {
                 entity.setCreatedAt(cr.createdAt);
             }
@@ -222,7 +226,7 @@ public class BackupService {
     public record HomeDto(String code, String name, String adminPin, boolean requireApproval,
                           int dailyTargetPerMember, DivisionStyle divisionStyle,
                           boolean rotationEnforced, int bookingTimeoutHours,
-                          Boolean approveRejoin, Instant createdAt) {
+                          Boolean approveRejoin, Boolean confirmCompletion, Instant createdAt) {
     }
 
     public record MemberDto(Long id, String name, String color, boolean admin, Instant joinedAt) {
@@ -236,7 +240,7 @@ public class BackupService {
     }
 
     public record CreditDto(Long memberId, int amount, CreditType type, String reason,
-                            int spreeTierDays, Instant createdAt) {
+                            int spreeTierDays, Long completionId, Instant createdAt) {
     }
 
     public record CompletionDto(Long id, Long taskId, Long memberId, Instant doneAt,

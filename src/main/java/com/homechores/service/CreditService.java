@@ -46,11 +46,12 @@ public class CreditService {
      * {@code task}: the chore's own credit value, plus any spree tier just reached.
      */
     @Transactional
-    public Award onApprovedCompletion(ChoreTask task, Long memberId, String homeCode) {
+    public Award onApprovedCompletion(ChoreTask task, Long memberId, String homeCode,
+                                      Long completionId) {
         int choreCredits = 0;
         if (task.getCreditValue() > 0) {
             credits.save(new CreditEntry(homeCode, memberId, task.getCreditValue(),
-                    CreditType.EARNED, task.getName(), 0));
+                    CreditType.EARNED, task.getName(), 0, completionId));
             choreCredits = task.getCreditValue();
         }
 
@@ -69,8 +70,10 @@ public class CreditService {
             for (SpreeTier t : tiers.findByHomeCodeOrderByDaysAsc(homeCode)) {
                 if (t.getDays() == streak && t.getCredits() > 0
                         && !alreadyAwardedSpree(memberId, t.getDays(), start)) {
+                    // Tagged with the same completion: the spree only landed because of
+                    // this chore, so undoing it takes the bonus back too.
                     credits.save(new CreditEntry(homeCode, memberId, t.getCredits(),
-                            CreditType.EARNED, "spree", t.getDays()));
+                            CreditType.EARNED, "spree", t.getDays(), completionId));
                     spreeDays = t.getDays();
                     spreeCredits = t.getCredits();
                 }
@@ -129,6 +132,14 @@ public class CreditService {
     @Transactional
     public void deleteForMember(Long memberId) {
         credits.deleteByMemberId(memberId);
+    }
+
+    /** Takes back whatever a completion earned, when it is undone or deleted. */
+    @Transactional
+    public void deleteForCompletion(Long completionId) {
+        if (completionId != null) {
+            credits.deleteByCompletionId(completionId);
+        }
     }
 
     /** Wipes every credit entry and spree tier of a home (used when the home is deleted). */

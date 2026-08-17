@@ -53,6 +53,15 @@ public class Home {
     @Column(columnDefinition = "boolean not null default true")
     private boolean approveRejoin = true;
 
+    /**
+     * When on, tapping a chore asks "did you do this?" before recording it. Defaults to on
+     * because the cards are large and close together on a phone, and user testing showed
+     * people completing several by accident. See the note on {@code approveRejoin} for why
+     * the column carries an explicit default.
+     */
+    @Column(columnDefinition = "boolean not null default true")
+    private boolean confirmCompletion = true;
+
     private Instant createdAt = Instant.now();
 
     /**
@@ -141,6 +150,14 @@ public class Home {
 
     public void setApproveRejoin(boolean approveRejoin) {
         this.approveRejoin = approveRejoin;
+    }
+
+    public boolean isConfirmCompletion() {
+        return confirmCompletion;
+    }
+
+    public void setConfirmCompletion(boolean confirmCompletion) {
+        this.confirmCompletion = confirmCompletion;
     }
 
     public Instant getCreatedAt() {

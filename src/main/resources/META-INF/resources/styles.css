@@ -386,6 +386,26 @@ vaadin-select::part(label) {
     color: #fff;
 }
 
+/* A quiet "you just did X — undo" strip, shown only while the member's own undo window
+   is open. Deliberately understated: it's an escape hatch, not a call to action. */
+.undo-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: var(--lumo-space-s);
+    padding: 6px 10px 6px 14px;
+    border-radius: var(--lumo-border-radius-l);
+    background: var(--lumo-contrast-5pct);
+    border: 1px dashed var(--lumo-contrast-20pct);
+    font-size: 0.85rem;
+    color: var(--lumo-secondary-text-color);
+}
+
+.undo-strip .grow {
+    flex: 1;
+    min-width: 0;
+}
+
 /* ---- Feedback buttons ---- */
 .feedback-row {
     display: flex;
@@ -675,7 +695,12 @@ vaadin-select::part(label) {
         display: none;
     }
     .lang-select {
-        width: 7em;
+        width: 6.5em;
+    }
+    /* A non-admin's row is the tightest: language + "Admin?" + "Leave". Trimming the
+       default layout spacing keeps it on one line instead of spilling onto a third. */
+    .header-actions {
+        gap: var(--lumo-space-xs);
     }
     .code-chip {
         font-size: 1rem;

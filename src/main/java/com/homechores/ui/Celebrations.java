@@ -27,25 +27,30 @@ final class Celebrations {
         }
     }
 
-    /** Handles the full post-completion experience for the acting member. */
-    static void afterComplete(ChoreService service, CompleteOutcome o) {
+    /**
+     * Handles the full post-completion experience for the acting member.
+     *
+     * @param onUndo taking the chore back, offered right here because this dialog is the
+     *               moment a mis-tap is noticed
+     */
+    static void afterComplete(ChoreService service, CompleteOutcome o, Runnable onUndo) {
         String chore = o.task().getName();
         if (o.pending()) {
-            showDialog(service, o, "⏳", T.tr("celebrate.pending.title"),
+            showDialog(service, o, onUndo, "⏳", T.tr("celebrate.pending.title"),
                     T.tr("celebrate.pending.text", chore));
             return;
         }
         if (o.milestone() != null) {
             fireConfetti("big");
-            showDialog(service, o, "🏆", T.tr("celebrate.milestone.title", o.milestone()),
+            showDialog(service, o, onUndo, "🏆", T.tr("celebrate.milestone.title", o.milestone()),
                     T.tr("celebrate.milestone.text", o.member().getName()));
         } else if (o.newChoreForMember()) {
             fireConfetti("medium");
-            showDialog(service, o, "🌟", T.tr("celebrate.newChore.title"),
+            showDialog(service, o, onUndo, "🌟", T.tr("celebrate.newChore.title"),
                     T.tr("celebrate.newChore.text", chore, o.member().getName()));
         } else {
             fireConfetti("small");
-            showDialog(service, o, o.task().getEmoji(), T.tr("celebrate.nice.title"),
+            showDialog(service, o, onUndo, o.task().getEmoji(), T.tr("celebrate.nice.title"),
                     T.tr("celebrate.nice.text", chore, o.member().getName()));
         }
 
@@ -79,7 +84,7 @@ final class Celebrations {
         n.addThemeVariants(NotificationVariant.LUMO_CONTRAST);
     }
 
-    private static void showDialog(ChoreService service, CompleteOutcome o,
+    private static void showDialog(ChoreService service, CompleteOutcome o, Runnable onUndo,
                                    String emoji, String title, String text) {
         Dialog dialog = new Dialog();
         dialog.setModal(true);
@@ -119,7 +124,16 @@ final class Celebrations {
         Button ok = new Button(T.tr("common.done"), e -> dialog.close());
         ok.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_LARGE);
 
-        VerticalLayout layout = new VerticalLayout(emojiEl, titleEl, textEl, hint, feedbackRow, ok);
+        // Quietly styled: undoing is the rare case, and it shouldn't compete with the
+        // celebration — but it has to be right here, where the mistake is noticed.
+        Button undo = new Button(T.tr("undo.wasntMe"), e -> {
+            dialog.close();
+            onUndo.run();
+        });
+        undo.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+
+        VerticalLayout layout =
+                new VerticalLayout(emojiEl, titleEl, textEl, hint, feedbackRow, ok, undo);
         layout.setAlignItems(FlexComponent.Alignment.CENTER);
         layout.setPadding(false);
         layout.setSpacing(true);

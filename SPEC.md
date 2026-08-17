@@ -182,6 +182,18 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   only proceeds once I've typed the home code. Every other family member still on the
   board is signed out live, with their stored device identity cleared. Other homes on the
   same server are untouched, and the freed code can be issued to a future home.
+- **US-40 Confirm before completing.** As a family member, tapping a chore asks me to
+  confirm before it is recorded, so a stray tap while scrolling doesn't count as done.
+  As an admin I can turn this off for my home (`Home.confirmCompletion`, default **on**).
+- **US-41 Undo my own chore.** As a member who confirmed by mistake, I can take the chore
+  straight back — from the celebration dialog, or from a strip on the board for
+  `ChoreService.UNDO_WINDOW` (10 minutes) afterwards, which survives dismissing the dialog.
+  Only my own completion, and only inside that window; anything older is an admin
+  correction so nobody can quietly rewrite last week's leaderboard.
+- **US-42 Admin can unmark a chore.** As an admin, the **Recent chores** list on the Admin
+  tab lets me remove any completion — any member, any age, approved or pending. This is the
+  UI for the long-specified US-14, which previously had a service method and no way to
+  reach it once a home had approval switched off.
 - **US-39 Abandoned-home retention (operator).** As the operator of a public instance, I
   can have homes that were created and then abandoned *before anyone used them* removed
   automatically, so stray sign-ups don't accumulate. A home qualifies only when it has no
@@ -387,6 +399,24 @@ message and shows a matching badge on the card (`LockReason`):
   delivered to all of the home's open UIs via `@Push` (long-polling). This replaces
   the earlier broadcaster/`UI.access` plumbing; effects are disposed on detach.
 
+### 4.3.1 Confirming, undoing and unmarking
+- **Confirm** (`Home.confirmCompletion`, default on): tapping a card opens a small dialog
+  naming the chore, with "Yes, I did it" / "Not yet". Declining records nothing. Turning
+  the setting off restores the original one-tap behaviour.
+- **Member undo**: `ChoreService.undoCompletion(completionId, memberId)` succeeds only for
+  the member's **own** completion and only within `UNDO_WINDOW` (10 minutes). Offered in
+  the celebration dialog and, so it survives dismissing that, from an undo strip on the
+  board fed by `undoableCompletion(memberId)`.
+- **Admin unmark**: `deleteCompletion(id)` from the Recent chores list — any member, any
+  age, any status.
+- **Credits follow the completion.** `CreditEntry.completionId` records which completion
+  earned an award (chore value *and* any spree bonus triggered by it), and both undo paths
+  revoke them. Without that link an undone chore would leave phantom 💎 behind, and a
+  member could farm credits by completing and undoing the same chore repeatedly. The id is
+  remapped on backup restore alongside members and tasks.
+- Undoing also frees the chore for the fairness streak rule again, since the run is
+  recomputed from the remaining completions.
+
 ### 4.11.2 Retention of abandoned homes (operator)
 - `Home.lastActiveAt` records when a **person** last used the home: completing a chore,
   approving/rejecting one, joining, signing back in, or opening the board. It is *not*
@@ -408,6 +438,26 @@ message and shows a matching badge on the card (`LockReason`):
   added it should export a backup before deleting, and use a window of months, not days.
 - `PrivacyView` renders the retention sentence from the configured value, so the published
   notice cannot drift out of step with what the server actually does.
+
+### 4.11.3 Operator maintenance CLI
+`tools/flashchores-admin.py` + `MaintenanceRunner` service the erasure requests the
+operator has to handle personally (lost admin PIN, legal escalation) and let them inspect
+retention candidates before enabling the sweep.
+
+- **No public admin surface, by design.** The app has no authentication beyond household
+  codes, so an authenticated "delete any home" endpoint on the internet would be its
+  highest-value target. Instead the CLI starts the app's own code in a one-shot mode
+  (`--maintenance.command=…`), which prints a JSON result between fence markers and shuts
+  itself down. Vaadin's Spring integration requires a web context, so the launcher gives it
+  an ephemeral **loopback** port for the couple of seconds the command runs.
+- **No hand-written SQL.** Deletion calls `ChoreService.deleteHome`, so the seven-table
+  cascade lives in one tested place; SQL by hand would risk orphaned rows.
+- **Requires the service stopped**, because H2 holds an exclusive file lock. The script
+  probes the port and refuses with an instruction rather than failing part-way.
+- Commands: `list`, `show`, `export`, `delete`, `purge --days N [--dry-run]`. `delete`
+  exports a backup to `data/erasure-exports/` first (unless `--no-backup`) and requires the
+  home code to be typed, mirroring the in-app Danger zone. `--db-url` targets another
+  database, e.g. a restored copy. Exit codes: 0 success, 2 handled failure.
 
 ### 4.15.1 Mobile layout
 The app is used mostly on phones, so the layout is designed for a ~360–400px column and

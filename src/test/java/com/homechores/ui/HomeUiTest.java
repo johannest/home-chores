@@ -13,6 +13,7 @@ import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.ComponentUtil;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
+import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.tabs.Tabs;
 import com.vaadin.flow.component.textfield.TextField;
@@ -76,6 +77,14 @@ class HomeUiTest extends SpringUIUnitTest {
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("No usable field: " + label));
         f.setValue(value);
+    }
+
+    /** Taps the nth chore card's complete area, the way a member does on the board. */
+    private void clickChoreCard(int index) {
+        Div area = $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("complete-area") && usable(d))
+                .toList().get(index);
+        ComponentUtil.fireEvent(area, new ClickEvent<>(area));
     }
 
     private int tabCount() {
@@ -214,6 +223,72 @@ class HomeUiTest extends SpringUIUnitTest {
         assertTrue(service.membersOf(code).isEmpty());
         assertNull(SessionContext.memberId(), "the deleting admin is signed out");
         assertInstanceOf(LandingView.class, getCurrentView());
+    }
+
+    /** A stray tap must ask first, and answering "not yet" must record nothing. */
+    @Test
+    void tappingAChore_asksBeforeRecordingIt() {
+        Member admin = service.createHome("Confirmed", "Alex");
+        String code = admin.getHomeCode();
+        SessionContext.signIn(admin.getId(), code);
+        navigate(HomeView.class);
+
+        clickChoreCard(0);
+        clickButton("Not yet");
+        assertEquals(0, service.completionCount(admin.getId()), "declining records nothing");
+
+        clickChoreCard(0);
+        clickButton("Yes, I did it ✅");
+        assertEquals(1, service.completionCount(admin.getId()));
+    }
+
+    @Test
+    void withConfirmationOff_aTapCompletesStraightAway() {
+        Member admin = service.createHome("Fast", "Alex");
+        String code = admin.getHomeCode();
+        Home home = service.findHome(code).orElseThrow();
+        home.setConfirmCompletion(false);
+        service.saveHome(home);
+        SessionContext.signIn(admin.getId(), code);
+        navigate(HomeView.class);
+
+        clickChoreCard(0);
+
+        assertEquals(1, service.completionCount(admin.getId()));
+    }
+
+    /** The member's own escape hatch, from the strip that outlives the celebration. */
+    @Test
+    void memberCanUndoTheirChoreFromTheBoard() {
+        Member admin = service.createHome("Undo", "Alex");
+        SessionContext.signIn(admin.getId(), admin.getHomeCode());
+        navigate(HomeView.class);
+        clickChoreCard(0);
+        clickButton("Yes, I did it ✅");
+        assertEquals(1, service.completionCount(admin.getId()));
+
+        clickButton("Undo");
+
+        assertEquals(0, service.completionCount(admin.getId()));
+    }
+
+    @Test
+    void admin_canUnmarkAChoreFromRecentActivity() {
+        Member admin = service.createHome("Correct", "Alex");
+        String code = admin.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        service.complete(service.tasksOf(code).get(0).getId(), sam.getId());
+        assertEquals(1, service.completionCount(sam.getId()));
+
+        SessionContext.signIn(admin.getId(), code);
+        navigate(HomeView.class);
+        $(Tabs.class).first().setSelectedIndex(2); // Admin tab
+
+        clickButton("Unmark");
+        clickButton("Confirm");
+
+        assertEquals(0, service.completionCount(sam.getId()),
+                "an admin can take back someone else's chore");
     }
 
     @Test

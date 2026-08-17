@@ -16,6 +16,7 @@ import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
+import com.vaadin.flow.component.orderedlayout.FlexComponent;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.TextField;
 import java.time.LocalDate;
@@ -30,6 +31,7 @@ class ChoresPanel extends VerticalLayout {
     private final Long memberId;
 
     private final Div dailyStrip = new Div();
+    private final Div undoStrip = new Div();
     private final Div leaderboard = new Div();
     private final Div taskGrid = new Div();
 
@@ -45,7 +47,8 @@ class ChoresPanel extends VerticalLayout {
         leaderboard.addClassName("leaderboard");
         taskGrid.addClassName("task-grid");
 
-        add(dailyStrip, sectionLabel(T.tr("board.leaderboard")), leaderboard,
+        undoStrip.setVisible(false);
+        add(dailyStrip, undoStrip, sectionLabel(T.tr("board.leaderboard")), leaderboard,
                 sectionLabel(T.tr("board.tapPrompt")), taskGrid);
     }
 
@@ -59,6 +62,7 @@ class ChoresPanel extends VerticalLayout {
     void refresh() {
         boolean admin = service.findMember(memberId).map(Member::isAdmin).orElse(false);
         renderDaily();
+        renderUndo();
         renderLeaderboard();
         renderTasks(admin);
     }
@@ -236,15 +240,103 @@ class ChoresPanel extends VerticalLayout {
         return card;
     }
 
+    /**
+     * Tapping a card asks first, unless the home has turned that off. The cards are big and
+     * side by side on a phone, so a stray tap while scrolling used to log a chore outright.
+     */
     private void handleComplete(Long taskId) {
+        boolean confirm = service.findHome(homeCode)
+                .map(Home::isConfirmCompletion).orElse(true);
+        if (!confirm) {
+            completeNow(taskId);
+            return;
+        }
+        service.taskViews(homeCode, memberId, SessionContext.timeZone()).stream()
+                .filter(v -> v.task().getId().equals(taskId))
+                .findFirst()
+                .ifPresent(view -> confirmDialog(view.task().getEmoji(), view.task().getName(),
+                        () -> completeNow(taskId)));
+    }
+
+    private void confirmDialog(String emoji, String choreName, Runnable onYes) {
+        Dialog dialog = new Dialog();
+        dialog.setModal(true);
+        dialog.addClassName("celebrate-dialog");
+
+        Div emojiEl = new Div();
+        emojiEl.setText(emoji);
+        emojiEl.addClassName("celebrate-emoji");
+        Div titleEl = new Div();
+        titleEl.setText(choreName);
+        titleEl.addClassName("celebrate-title");
+        Div question = new Div();
+        question.setText(T.tr("confirm.didYouDoIt"));
+        question.addClassName("celebrate-text");
+
+        Button yes = new Button(T.tr("confirm.yes"), e -> {
+            dialog.close();
+            onYes.run();
+        });
+        yes.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_LARGE);
+        yes.setWidthFull();
+        Button no = new Button(T.tr("confirm.notYet"), e -> dialog.close());
+        no.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        no.setWidthFull();
+
+        VerticalLayout layout = new VerticalLayout(emojiEl, titleEl, question, yes, no);
+        layout.setAlignItems(FlexComponent.Alignment.CENTER);
+        layout.setPadding(false);
+        dialog.add(layout);
+        dialog.open();
+    }
+
+    private void completeNow(Long taskId) {
         CompleteOutcome outcome = service.complete(taskId, memberId, SessionContext.timeZone());
         if (!outcome.allowed()) {
             Celebrations.showBlocked(outcome);
             refresh();
             return;
         }
-        Celebrations.afterComplete(service, outcome);
+        Celebrations.afterComplete(service, outcome, this::undoLast);
         refresh();
+    }
+
+    /**
+     * Takes back the member's most recent chore. Offered from the celebration dialog and
+     * from a strip on the board, so it survives dismissing the dialog.
+     */
+    private void undoLast() {
+        service.undoableCompletion(memberId).ifPresentOrElse(completion -> {
+            if (service.undoCompletion(completion.getId(), memberId)) {
+                Notification n = Notification.show(T.tr("undo.done"),
+                        3000, Notification.Position.TOP_CENTER);
+                n.addThemeVariants(NotificationVariant.LUMO_SUCCESS);
+            }
+            refresh();
+        }, this::refresh);
+    }
+
+    /** A time-limited "that wasn't me" for the member's own last chore. */
+    private void renderUndo() {
+        undoStrip.removeAll();
+        var recent = service.undoableCompletion(memberId);
+        if (recent.isEmpty()) {
+            undoStrip.setVisible(false);
+            return;
+        }
+        undoStrip.setVisible(true);
+        String choreName = service.tasksOf(homeCode).stream()
+                .filter(t -> t.getId().equals(recent.get().getTaskId()))
+                .findFirst().map(t -> t.getEmoji() + " " + t.getName()).orElse("?");
+
+        Span text = new Span(T.tr("undo.justDid", choreName));
+        text.addClassName("grow");
+        Button undo = new Button(T.tr("undo.action"), e -> undoLast());
+        undo.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+
+        Div strip = new Div(text, undo);
+        strip.addClassName("undo-strip");
+        undoStrip.add(strip);
     }
 
     private void handleBook(Long taskId) {

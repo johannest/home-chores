@@ -46,6 +46,9 @@ class AdminPanel extends VerticalLayout {
     private final String homeCode;
     private final Long memberId;
 
+    /** How far back the correction list reaches — enough for "that was this morning". */
+    private static final int RECENT_LIMIT = 15;
+
     AdminPanel(ChoreService service, CreditService creditService, BackupService backup,
                String homeCode, Long memberId) {
         this.service = service;
@@ -62,6 +65,7 @@ class AdminPanel extends VerticalLayout {
         removeAll();
         rejoinsSection().ifPresent(this::add);
         add(approvalsSection());
+        add(recentSection());
         add(settingsSection());
         add(membersSection());
         add(choresSection());
@@ -171,6 +175,62 @@ class AdminPanel extends VerticalLayout {
         return s;
     }
 
+    // ---- Recent activity (corrections) --------------------------------------
+
+    /**
+     * The last few completions, so an admin can unmark a chore that was tapped by mistake
+     * — including one already approved, and long after the member's own undo window shut.
+     */
+    private Div recentSection() {
+        Div s = section(T.tr("admin.recent"));
+        var recent = service.recentCompletions(homeCode, RECENT_LIMIT);
+        if (recent.isEmpty()) {
+            Span none = new Span(T.tr("admin.recent.none"));
+            none.addClassName("sub");
+            s.add(none);
+            return s;
+        }
+        Span info = new Span(T.tr("admin.recent.info"));
+        info.addClassName("sub");
+        s.add(info);
+
+        for (Completion c : recent) {
+            String member = service.findMember(c.getMemberId()).map(Member::getName).orElse("?");
+            String chore = service.tasksOf(homeCode).stream()
+                    .filter(t -> t.getId().equals(c.getTaskId()))
+                    .findFirst().map(t -> t.getEmoji() + " " + t.getName()).orElse("?");
+
+            Div info2 = new Div();
+            Div line = new Div();
+            line.setText(member + " — " + chore);
+            line.getStyle().set("font-weight", "600");
+            String status = switch (c.getStatus()) {
+                case PENDING -> "  ·  " + T.tr("admin.recent.pending");
+                case REJECTED -> "  ·  " + T.tr("admin.recent.rejected");
+                default -> "";
+            };
+            Span sub = new Span(ago(c.getDoneAt()) + status
+                    + (c.getFeedback() != null ? "  ·  " + c.getFeedback().getEmoji() : ""));
+            sub.addClassName("sub");
+            info2.add(line, sub);
+            info2.addClassName("grow");
+
+            Button unmark = new Button(T.tr("admin.recent.unmark"), VaadinIcon.ARROW_BACKWARD.create(),
+                    e -> confirm(T.tr("admin.recent.unmark.title", chore),
+                            T.tr("admin.recent.unmark.text", member), () -> {
+                                service.deleteCompletion(c.getId());
+                                toast(T.tr("admin.recent.unmarked", chore, member));
+                                refresh();
+                            }));
+            unmark.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+
+            Div row = new Div(info2, unmark);
+            row.addClassName("list-row");
+            s.add(row);
+        }
+        return s;
+    }
+
     // ---- Settings -----------------------------------------------------------
 
     private Div settingsSection() {
@@ -184,6 +244,16 @@ class AdminPanel extends VerticalLayout {
             h.setRequireApproval(e.getValue());
             service.saveHome(h);
         });
+
+        Checkbox confirmTaps = new Checkbox(T.tr("admin.confirmCompletion"));
+        confirmTaps.setValue(home.isConfirmCompletion());
+        confirmTaps.addValueChangeListener(e -> {
+            Home h = service.findHome(homeCode).orElseThrow();
+            h.setConfirmCompletion(e.getValue());
+            service.saveHome(h);
+        });
+        Span confirmHint = new Span(T.tr("admin.confirmCompletion.helper"));
+        confirmHint.addClassName("sub");
 
         Checkbox rejoinGate = new Checkbox(T.tr("admin.approveRejoin"));
         rejoinGate.setValue(home.isApproveRejoin());
@@ -275,8 +345,8 @@ class AdminPanel extends VerticalLayout {
         HorizontalLayout pinRow = new HorizontalLayout(pin, changePin);
         pinRow.setAlignItems(FlexComponent.Alignment.CENTER);
 
-        VerticalLayout body = new VerticalLayout(approval, style, enforced, bookingHours, target,
-                rejoinGate, rejoinHint, nameRow, pinLabel, pinRow);
+        VerticalLayout body = new VerticalLayout(confirmTaps, confirmHint, approval, style,
+                enforced, bookingHours, target, rejoinGate, rejoinHint, nameRow, pinLabel, pinRow);
         body.setPadding(false);
         body.setSpacing(true);
         body.setWidthFull();
