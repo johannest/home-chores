@@ -725,6 +725,104 @@ public class ChoreService {
                 milestoneFor(memberTotal), rotating ? 0 : streak + 1, saved.getId(), award);
     }
 
+    /**
+     * An admin recording that somebody else did a chore — the member who has no phone of
+     * their own, or who simply forgot to tap it.
+     *
+     * <p>Deliberately skips every lock a member's own tap goes through (interval,
+     * availability hours, rotation, booking, fairness streak). Those exist to steer who
+     * does what next; this is a statement about what already happened, and refusing to
+     * record a chore that was demonstrably done would just be wrong.
+     *
+     * <p>Recorded {@code APPROVED} whatever the home's approval setting says — an admin
+     * logging it <em>is</em> the approval — with the admin kept as the reviewer so the
+     * history shows whose word it was. Credits and milestones follow as usual, and the
+     * entry can be taken back from the admin's Recent chores list like any other.
+     *
+     * @param memberId the member who did the chore, not the admin doing the recording
+     */
+    @Transactional
+    public CompleteOutcome completeFor(Long taskId, Long memberId, Long adminId) {
+        ChoreTask task = tasks.findById(taskId).orElseThrow();
+        Member member = members.findById(memberId).orElseThrow();
+        Home home = homes.findById(task.getHomeCode()).orElseThrow();
+        if (!task.getHomeCode().equals(member.getHomeCode())) {
+            throw new IllegalArgumentException("Chore and member belong to different homes");
+        }
+
+        // Logging it settles the chore, so a booking on it has served its purpose.
+        if (task.getBookedByMemberId() != null) {
+            task.setBookedByMemberId(null);
+            task.setBookedAt(null);
+            tasks.save(task);
+        }
+
+        boolean firstApprovedBefore = completions.existsByMemberIdAndTaskIdAndStatus(
+                memberId, taskId, CompletionStatus.APPROVED);
+
+        Completion entry = new Completion(task.getHomeCode(), taskId, memberId,
+                CompletionStatus.APPROVED);
+        entry.setReviewedByMemberId(adminId);
+        entry.setReviewedAt(Instant.now());
+        Completion saved = completions.save(entry);
+        touch(home);
+        homeState.bump(task.getHomeCode());
+
+        CreditService.Award award = creditService.onApprovedCompletion(
+                task, memberId, task.getHomeCode(), saved.getId());
+        long memberTotal = completions.countByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
+        return CompleteOutcome.done(task, member, memberTotal, !firstApprovedBefore,
+                milestoneFor(memberTotal), 0, saved.getId(), award);
+    }
+
+    // ---- "Other help" (something the chore list doesn't cover) --------------
+
+    /** Longest description a member can write for other help — a line, not an essay. */
+    public static final int MAX_HELP_LENGTH = 200;
+
+    /**
+     * Logs help that no chore covers: the member writes what they did and an admin accepts
+     * or declines it (see {@link #approve(Long, Long, int)} / {@link #reject}).
+     *
+     * <p>Always PENDING, even in a home that doesn't require approval for chores. The text
+     * is freeform and there is no chore behind it, so somebody has to read it before it
+     * counts towards anyone's totals.
+     *
+     * @return empty if the home has the feature switched off or the description is blank
+     */
+    @Transactional
+    public Optional<Completion> logOtherHelp(String homeCode, Long memberId, String description) {
+        Home home = homes.findById(normalizeCode(homeCode)).orElseThrow();
+        if (!home.isAllowOtherHelp()) {
+            return Optional.empty();
+        }
+        String text = description == null ? "" : description.trim();
+        if (text.isEmpty()) {
+            return Optional.empty();
+        }
+        if (text.length() > MAX_HELP_LENGTH) {
+            text = text.substring(0, MAX_HELP_LENGTH);
+        }
+        Completion saved = completions.save(
+                Completion.otherHelp(home.getCode(), memberId, text));
+        touch(home);
+        homeState.bump(home.getCode());
+        return Optional.of(saved);
+    }
+
+    /** Other-help entries waiting for a decision, newest first (the admin's list). */
+    public List<Completion> pendingOtherHelp(String homeCode) {
+        return completions
+                .findByHomeCodeAndStatusOrderByDoneAtDesc(homeCode, CompletionStatus.PENDING)
+                .stream().filter(Completion::isOtherHelp).toList();
+    }
+
+    /** How many of this member's own help entries are still waiting — shown on their card. */
+    public long pendingOtherHelpCount(String homeCode, Long memberId) {
+        return pendingOtherHelp(homeCode).stream()
+                .filter(c -> c.getMemberId().equals(memberId)).count();
+    }
+
     @Transactional
     public void setFeedback(Long completionId, Feedback feedback) {
         Completion c = completions.findById(completionId).orElseThrow();
@@ -735,8 +833,12 @@ public class ChoreService {
 
     // ---- Approvals ----------------------------------------------------------
 
+    /** Pending chore completions. Other help has its own list, since it is decided
+     *  differently (a reward to name, and maybe a new chore to add). */
     public List<Completion> pendingApprovals(String homeCode) {
-        return completions.findByHomeCodeAndStatusOrderByDoneAtDesc(homeCode, CompletionStatus.PENDING);
+        return completions
+                .findByHomeCodeAndStatusOrderByDoneAtDesc(homeCode, CompletionStatus.PENDING)
+                .stream().filter(c -> !c.isOtherHelp()).toList();
     }
 
     public long pendingCount(String homeCode) {
@@ -746,11 +848,21 @@ public class ChoreService {
     /** Approves a pending completion; returns the celebration outcome for that member. */
     @Transactional
     public CompleteOutcome approve(Long completionId, Long adminId) {
+        return approve(completionId, adminId, 0);
+    }
+
+    /**
+     * Approves a pending completion, or accepts an other-help entry. {@code credits} is only
+     * used for other help — a chore carries its own credit value, but help written by hand
+     * has nothing to read a reward off, so the admin sets it when they accept.
+     */
+    @Transactional
+    public CompleteOutcome approve(Long completionId, Long adminId, int credits) {
         Completion c = completions.findById(completionId).orElseThrow();
-        ChoreTask task = tasks.findById(c.getTaskId()).orElseThrow();
+        ChoreTask task = c.isOtherHelp() ? null : tasks.findById(c.getTaskId()).orElseThrow();
         Member member = members.findById(c.getMemberId()).orElseThrow();
 
-        boolean firstApprovedBefore = completions.existsByMemberIdAndTaskIdAndStatus(
+        boolean firstApprovedBefore = task != null && completions.existsByMemberIdAndTaskIdAndStatus(
                 c.getMemberId(), c.getTaskId(), CompletionStatus.APPROVED);
 
         c.setStatus(CompletionStatus.APPROVED);
@@ -760,10 +872,12 @@ public class ChoreService {
         touchHome(c.getHomeCode());
         homeState.bump(c.getHomeCode());
 
-        CreditService.Award award =
-                creditService.onApprovedCompletion(task, c.getMemberId(), c.getHomeCode(), c.getId());
+        CreditService.Award award = task != null
+                ? creditService.onApprovedCompletion(task, c.getMemberId(), c.getHomeCode(), c.getId())
+                : creditService.onApprovedHelp(c.getHomeCode(), c.getMemberId(), c.getId(),
+                        credits, c.getNote());
         long memberTotal = completions.countByMemberIdAndStatus(c.getMemberId(), CompletionStatus.APPROVED);
-        return CompleteOutcome.done(task, member, memberTotal, !firstApprovedBefore,
+        return CompleteOutcome.done(task, member, memberTotal, task != null && !firstApprovedBefore,
                 milestoneFor(memberTotal), 0, c.getId(), award);
     }
 
@@ -922,7 +1036,8 @@ public class ChoreService {
         }
     }
 
-    /** The result of attempting to complete (or approve) a chore. */
+    /** The result of attempting to complete (or approve) a chore. {@code task} is null when
+     *  what was accepted was other help rather than a chore. */
     public record CompleteOutcome(
             boolean allowed,
             boolean pending,

@@ -126,6 +126,9 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         }
         removeAll();
         boolean admin = isAdmin();
+        // Re-applied on every render, so a promotion or demotion by another admin moves this
+        // device onto the other idle lifetime as soon as its board updates.
+        SessionContext.applyTimeout(admin);
         Home home = current.get();
 
         Div page = new Div();

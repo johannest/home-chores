@@ -20,6 +20,9 @@ Terms in **bold** map to concepts in the code.
   and a **credit value**.
 - **Completion** — a record that a member did a chore at a time. Has a **status**
   (`PENDING` / `APPROVED` / `REJECTED`) and optional **feedback**.
+- **Other help** — a completion with no chore behind it (`taskId == null`): the member
+  wrote down what they did (`Completion.note`) because the board had no card for it.
+  Always starts `PENDING`, whatever the home's approval setting says.
 - **Feedback** — a member's reaction to doing a chore: `HATE` / `OK` / `LOVE`.
 - **Require-approval** — a per-home toggle. When on, completions start `PENDING`
   and only count once an admin approves them. When off, completions are `APPROVED`
@@ -41,6 +44,9 @@ Terms in **bold** map to concepts in the code.
 |---|:--:|:--:|
 | Join a home, complete chores, give feedback | ✅ | ✅ |
 | Book a chore ("I'll do it") / cancel own booking | ✅ | ✅ |
+| Log **other help** the board has no card for | ✅ | ✅ |
+| Accept / decline other help, and set its reward | — | ✅ |
+| Turn accepted other help into a new chore | — | ✅ |
 | Copy/share the home code and join link | ✅ | ✅ |
 | Switch UI language | ✅ | ✅ |
 | See own statistics | ✅ | ✅ |
@@ -51,7 +57,7 @@ Terms in **bold** map to concepts in the code.
 | Rename / remove members, promote / demote admins | — | ✅ |
 | Ask to sign back in as an existing member | ✅ | ✅ |
 | Approve / reject a rejoin request | — | ✅ |
-| Change home settings (approval, rejoin gate, division style, booking hold, daily target, PIN, name) | — | ✅ |
+| Change home settings (approval, rejoin gate, division style, booking hold, daily target, other help, PIN, name) | — | ✅ |
 | Manage spree tiers, view balances, redeem credits | — | ✅ |
 | Backup / restore the family's data | — | ✅ |
 | Delete the home and all its data | — | ✅ |
@@ -161,7 +167,7 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
 - **US-34 Stay signed in without a long session.** As a family member, my phone keeps
   working as me across session timeouts, server restarts and app relaunches, because the
   identity lives in the phone's local storage rather than in server memory. The server
-  keeps sessions short (Spring's 30-minute default) so idle phones cost it nothing.
+  keeps sessions short (§4.1.2) so idle phones cost it nothing.
 - **US-35 Sign back in after clearing browsing data.** As a member whose phone forgot
   me, I can enter the home code, pick myself from the home's member list, and get my
   own record back — chores, credits, streaks and admin role intact — instead of joining
@@ -201,6 +207,45 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   auto-deleted however long it sits idle: the app has no email or push channel, so nobody
   could be warned first, and silently destroying a child's chore history is not a trade
   worth making for disk space. Off by default.
+
+### Phase 5
+
+- **US-43 Log help nobody made a card for.** As a family member who helped in a way the
+  board doesn't cover ("carried the shopping in"), I can tap **🙋 Other help**, write what I
+  did in a line, and send it for approval — instead of either tapping a chore that isn't
+  what I did or getting nothing for it. It shows as waiting on my card until it's decided,
+  and I can take it straight back inside my normal undo window if I mistyped it.
+- **US-44 Accept or decline other help (admin).** As an admin, other help appears in its own
+  section at the top of the Admin tab, in the member's own words and with who and when. I can
+  **accept** it — which counts it for that member exactly like a chore, with a reward in 💎 I
+  name myself, since there's no chore carrying a credit value — or **decline** it, which
+  leaves it uncounted. It waits for me even in a home where chores need no approval: it's
+  free text, so somebody has to read it.
+- **US-45 Promote accepted help to a chore (admin).** As an admin, right after accepting I'm
+  asked whether this should join the chore list. The name comes prefilled from what the member
+  wrote (editable — a description of one evening makes a poor chore name), along with emoji,
+  repeat interval and credits. Saying yes gives the family a card anyone can tap from then on;
+  saying no leaves the board alone. Either way the accepted help keeps counting.
+- **US-46 Switch other help off (admin).** As an admin who doesn't want free-text entries, I
+  can turn the feature off for my home (`Home.allowOtherHelp`, default **on**); the card
+  disappears from the board.
+
+- **US-47 Log a chore for someone (admin).** As an admin, I can record a chore on another
+  member's behalf — the child who has no phone of their own, or the one who did it and forgot
+  to tap. I pick who and which chore in the Admin tab and it counts for them straight away:
+  my logging it *is* the approval, and the history keeps my name as the reviewer. It goes in
+  regardless of the booking, streak, interval, hours and rotation locks, because those steer
+  who does what *next* and this is a statement about what already happened. If I get it wrong,
+  the unmark list takes it back like any other completion.
+- **US-48 Sessions that don't outlive the moment.** As a family, our phones hold no server
+  session while nobody is using them: a member's session lasts 3 minutes of inactivity and an
+  admin's 15, and expiry is invisible — the page returns itself to the board using the
+  identity in local storage. As an admin I get the longer one because settings forms are read
+  and filled in slowly.
+- **US-49 No machine translation on top of ours.** As a user whose browser offers to
+  translate pages, FlashChores declines: the app already speaks my language, and an automatic
+  translation would rewrite home codes, member names and what people wrote about their own
+  help.
 
 ## 4. Functional specification
 
@@ -246,6 +291,32 @@ therefore offers "I'm already a member — sign me back in":
   current session's member `admin = true`. The PIN is the admin credential, so
   anyone with it can be admin (by design, like sharing a household master code).
 - **Join links**: `/?join=CODE` preselects the Join tab and prefills the code.
+
+#### 4.1.2 Session lifetime
+Sessions are short because nothing is lost when one ends: the identity is in local storage,
+and the next interaction signs the phone straight back in.
+
+- **3 minutes for a member, 15 for an admin** (`SessionContext.MEMBER_TIMEOUT_SECONDS` /
+  `ADMIN_TIMEOUT_SECONDS`, applied per session with `WrappedSession.setMaxInactiveInterval`).
+  Members tap and pocket the phone; admins read and fill in forms — settings, PINs, reward
+  tiers — which produce no requests while being read, and where being bounced mid-edit costs
+  real work. The lifetime is re-applied on every board render, so a promotion or demotion
+  moves that device onto the other one without signing out.
+- `server.servlet.session.timeout=3m` covers visitors who haven't signed in yet.
+- **`vaadin.closeIdleSessions=true`** is what makes the numbers mean anything. Without it,
+  Vaadin's heartbeats keep an open tab alive indefinitely and the timeout only applies to
+  closed tabs. With it, the clock runs from `VaadinSession.lastRequestTimestamp`, which only
+  `ServerRpcHandler.handleRpc` updates — i.e. from the last real interaction. Heartbeats and
+  push traffic don't count as the user being present, so a board left open on a counter does
+  expire.
+- **`vaadin.heartbeatInterval=60`**, below the shortest timeout: expiry is only noticed when
+  some request runs `cleanupSession`, so the default 300 s heartbeat would let a 3-minute
+  session linger for five.
+- **Expiry is silent** (`SessionExpiryInitListener`): the "Session Expired — take note of any
+  unsaved data" dialog is the right message for a bank and the wrong one for a chore board,
+  so it is disabled and `sessionExpiredURL` points at `/`. The browser reloads the landing
+  page, which restores the stored identity and returns to the board. A device waiting on a
+  rejoin approval re-reads its token the same way and goes back to waiting.
 
 ### 4.2 Chores (CRUD — admin)
 - Create: name (required) + emoji (optional, default ✅) + **repeat every N days**
@@ -337,8 +408,9 @@ message and shows a matching badge on the card (`LockReason`):
   14-day activity trend; per-member adherence today.
 
 ### 4.10 Approvals (admin)
-- A list of all `PENDING` completions for the home, newest first, each with member,
-  chore, time, feedback, and **Approve** / **Reject** actions.
+- A list of all `PENDING` chore completions for the home, newest first, each with member,
+  chore, time, feedback, and **Approve** / **Reject** actions. Other help is excluded here
+  and listed separately (§4.3.2), though the Admin tab's badge counts both.
 - Approve → `APPROVED`, records reviewer/time, triggers milestone/new-chore/credit
   evaluation.
 - Reject → `REJECTED` (retained for audit, excluded from all counts and fairness).
@@ -348,11 +420,12 @@ message and shows a matching badge on the card (`LockReason`):
 - **Backup**: a JSON document `{ version, home, members[], tasks[], completions[],
   spreeTiers[], credits[] }` for this home only (the "family DB"), offered as a
   file download `home-chores-<code>-backup.json`. Tasks include interval, credit
-  value and availability windows.
+  value and availability windows; completions include the other-help `note`.
 - **Restore**: upload a backup JSON. After a confirmation dialog warning that current
   data will be replaced, the home's data is deleted and recreated from the file, and
   home settings (name, PIN, approval, division style, booking hold, target) are
-  applied. IDs are remapped internally; orphaned records are skipped. Invalid files
+  applied. IDs are remapped internally; orphaned records are skipped — an other-help entry
+  has no task to remap and is not an orphan. Invalid files
   are rejected with a message. The restoring admin is signed out and rejoins.
 
 ### 4.11.1 Deleting the home (admin)
@@ -416,6 +489,47 @@ message and shows a matching badge on the card (`LockReason`):
   remapped on backup restore alongside members and tasks.
 - Undoing also frees the chore for the fairness streak rule again, since the run is
   recomputed from the remaining completions.
+
+### 4.3.2 Other help (help no chore covers)
+A chore list is never complete, and a child who carried the shopping in shouldn't have to
+choose between tapping something they didn't do and getting nothing for it.
+
+- **Modelled as a completion without a chore.** `Completion.taskId == null` and
+  `Completion.note` holds what the member wrote (≤ `ChoreService.MAX_HELP_LENGTH` = 200 chars,
+  trimmed to fit). Reusing the completion table is what makes an accepted entry count
+  everywhere a chore does — totals, daily target, spree streaks, leaderboard, the admin's
+  recent list, undo, backup — instead of needing a parallel notion of "credit for something".
+  Nullable `taskId` is why the aggregations compare `task.getId().equals(c.getTaskId())` and
+  never the other way round.
+- **Always `PENDING`**, even when `requireApproval` is off: the text is freeform and there is
+  no chore behind it, so it counts for nobody until an admin has read it. `logOtherHelp`
+  returns empty when the home has the feature off or the text is blank.
+- **Member's view**: a 🙋 card at the end of the board (dashed, so it doesn't read as a chore),
+  a one-field dialog, and a "⏳ n waiting" badge for their own undecided entries. Their own
+  entry is undoable from the board strip for `UNDO_WINDOW` like any completion.
+- **Admin's view** (§4.10 lists chores only; help has its own section above it, since the
+  decision differs): who, what, when, **Accept** / **Decline**. Accepting asks for a reward in
+  credits (0 = none) — a chore carries its own `creditValue`, hand-written help has nothing to
+  read one off — and then offers to add it to the chore list (US-45). Declining sets
+  `REJECTED`, which every count already excludes.
+- **Statistics** count accepted help as one more bar in "my chores by type" and in chore
+  popularity. `StatsService` returns the count and the view supplies the label: "Other help"
+  is UI wording, unlike a chore name, which is the family's own data.
+- **Per-home switch**: `Home.allowOtherHelp`, default on, with the usual column default so
+  `ddl-auto=update` can add it to existing databases (§5).
+
+### 4.3.3 Logging a chore for someone else (admin)
+`ChoreService.completeFor(taskId, memberId, adminId)`, from the **Log a chore for someone**
+section of the Admin tab (member picker + chore picker + "Log it"). The member picker lists
+everyone in the home except the admin doing the logging.
+
+- **Skips every lock** in §4.3 — interval, hours, rotation, booking, fairness streak. They
+  decide who *should* do a chore next; this records who *did* one. It clears any booking on
+  the chore, as completing it normally would.
+- **Recorded `APPROVED`** whatever `requireApproval` says, with `reviewedByMemberId` set to
+  the admin, so the history shows whose word it was. Credits, milestones, the daily target and
+  spree streaks all follow for the member it was logged for, not the admin.
+- **Reversible** through the same Recent chores unmark (§4.3.1), credits included.
 
 ### 4.11.2 Retention of abandoned homes (operator)
 - `Home.lastActiveAt` records when a **person** last used the home: completing a chore,
@@ -514,8 +628,12 @@ scales up, not the other way round.
   not to be guessable; HTTPS is expected in production.
 - **Identity storage**: the browser holds only `memberId|homeCode` and, while a rejoin is
   pending, a random 128-bit device token — no personal data and no credential. Server
-  sessions keep Spring's 30-minute default; local storage, not session length, is what
-  keeps a phone signed in.
+  sessions are short-lived (§4.1.2); local storage, not session length, is what keeps a
+  phone signed in.
+- **Browser auto-translation is off** (`translate="no"` + `notranslate` + the Google meta
+  tag, in `index.html`). The app already renders in the user's language (§4.12), so a
+  machine translation on top would fight it — and would rewrite the strings that must stay
+  verbatim: home codes, member names and the free text of other-help entries.
 - **Schema evolution**: with `ddl-auto=update`, new non-null columns on existing tables
   must declare a column default (see `Home.approveRejoin`) — H2 rejects the plain
   `ALTER TABLE … ADD COLUMN … NOT NULL` on a table that already has rows.
@@ -532,14 +650,23 @@ scales up, not the other way round.
   without promotion, wrong PIN, member from another home, approve/reject, token
   consumption, newest-device-wins, cancel, cleanup when a member is removed), and home
   deletion (every table wiped, other homes untouched, idempotent, code normalization,
-  freed code reusable).
+  freed code reusable), and other help (pending regardless of the approval setting, accept
+  counts it and awards the named credits, decline leaves it uncounted, separate queues but one
+  badge count, blank/switched-off records nothing, over-long text trimmed, member's own undo,
+  stats counted apart from chores, backup round-trip keeping the note and the setting), and
+  logging a chore for someone (counts for them and not the admin, immediate even with approval
+  on, admin recorded as reviewer, goes in despite the streak lock and before an interval chore
+  is due, credits to the member who did it, clears a booking, unmarkable, cross-home refused).
 - **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest`,
   browserless): create-home flow navigates to the board with three tabs; join flow
   (two tabs, no Admin); PIN claim reveals the Admin tab; admin adds a chore from the
   Admin panel; members never see the Admin tab; the sign-back-in picker signs in as the
   existing member without duplicating them (gate off) and raises a pending request
   instead of signing in (gate on); deleting the home needs the code typed correctly and
-  signs the admin out.
+  signs the admin out; a member logs other help from the board and it waits uncounted, while an
+  admin accepts it (counted) and promotes it to a chore, or declines it (no chore added); an
+  admin logs a chore for another member from the Admin tab; and the session lifetime is the
+  member's until the PIN is entered, and the admin's from then on.
 
 ## 7. Out of scope (possible future work)
 - Real authentication/accounts; weekly/monthly leaderboards; push notifications;

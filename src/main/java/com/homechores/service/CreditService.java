@@ -48,11 +48,27 @@ public class CreditService {
     @Transactional
     public Award onApprovedCompletion(ChoreTask task, Long memberId, String homeCode,
                                       Long completionId) {
+        return award(homeCode, memberId, completionId, task.getCreditValue(), task.getName());
+    }
+
+    /**
+     * Same for accepted "other help": there is no chore to carry a credit value, so the
+     * admin names the reward (0 for none) when they accept it.
+     */
+    @Transactional
+    public Award onApprovedHelp(String homeCode, Long memberId, Long completionId, int credits,
+                               String what) {
+        return award(homeCode, memberId, completionId, Math.max(0, credits),
+                what == null || what.isBlank() ? "Other help" : what.trim());
+    }
+
+    private Award award(String homeCode, Long memberId, Long completionId, int value,
+                        String reason) {
         int choreCredits = 0;
-        if (task.getCreditValue() > 0) {
-            credits.save(new CreditEntry(homeCode, memberId, task.getCreditValue(),
-                    CreditType.EARNED, task.getName(), 0, completionId));
-            choreCredits = task.getCreditValue();
+        if (value > 0) {
+            credits.save(new CreditEntry(homeCode, memberId, value,
+                    CreditType.EARNED, reason, 0, completionId));
+            choreCredits = value;
         }
 
         Integer spreeDays = null;

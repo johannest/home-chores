@@ -49,10 +49,16 @@ public class StatsService {
         Home home = homes.findById(homeCode).orElseThrow();
         List<Completion> approved = completions.findByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
 
-        // by chore
+        // by chore ("other help" has no task, so it's counted separately and labelled
+        // by the caller — the label is UI wording, not data like a chore name)
         Map<Long, Long> byTask = new HashMap<>();
+        long otherHelp = 0;
         for (Completion c : approved) {
-            byTask.merge(c.getTaskId(), 1L, Long::sum);
+            if (c.isOtherHelp()) {
+                otherHelp++;
+            } else {
+                byTask.merge(c.getTaskId(), 1L, Long::sum);
+            }
         }
         List<CountBar> byChore = new ArrayList<>();
         for (ChoreTask t : tasks.findByHomeCodeOrderByCreatedAtAsc(homeCode)) {
@@ -83,7 +89,7 @@ public class StatsService {
 
         long doneToday = perDay.getOrDefault(today, 0L);
         return new MyStats(approved.size(), byChore, fb, last7, doneToday,
-                home.getDailyTargetPerMember());
+                home.getDailyTargetPerMember(), otherHelp);
     }
 
     // ---- Home-wide ("Admin stats") -----------------------------------------
@@ -110,19 +116,24 @@ public class StatsService {
         List<ChoreFeedback> feedbackByChore = new ArrayList<>();
         for (ChoreTask t : taskList) {
             long n = all.stream()
-                    .filter(c -> c.getTaskId().equals(t.getId()))
+                    .filter(c -> t.getId().equals(c.getTaskId()))
                     .filter(c -> c.getStatus() == CompletionStatus.APPROVED)
                     .count();
             popularity.add(new CountBar(t.getEmoji() + " " + t.getName(), n));
 
             FeedbackSplit fb = feedbackSplit(all.stream()
-                    .filter(c -> c.getTaskId().equals(t.getId()))
+                    .filter(c -> t.getId().equals(c.getTaskId()))
                     .filter(c -> c.getStatus() != CompletionStatus.REJECTED)
                     .toList());
             if (fb.total() > 0) {
                 feedbackByChore.add(new ChoreFeedback(t, fb));
             }
         }
+        // Accepted other help belongs in the same picture, but it has no chore to hang off.
+        long otherHelp = all.stream()
+                .filter(Completion::isOtherHelp)
+                .filter(c -> c.getStatus() == CompletionStatus.APPROVED)
+                .count();
 
         // 14-day activity trend (approved, home-wide)
         Map<LocalDate, Long> perDay = new HashMap<>();
@@ -149,7 +160,8 @@ public class StatsService {
         }
 
         long pending = all.stream().filter(c -> c.getStatus() == CompletionStatus.PENDING).count();
-        return new HomeStats(perMember, popularity, feedbackByChore, trend14, adherence, pending);
+        return new HomeStats(perMember, popularity, feedbackByChore, trend14, adherence, pending,
+                otherHelp);
     }
 
     private FeedbackSplit feedbackSplit(List<Completion> list) {
@@ -179,12 +191,14 @@ public class StatsService {
     public record MemberDaily(Member member, long doneToday, int target) {
     }
 
+    /** {@code otherHelp} = approved help entries with no chore behind them; the view labels
+     *  and appends them, since "Other help" is UI wording rather than a stored name. */
     public record MyStats(long totalApproved, List<CountBar> byChore, FeedbackSplit feedback,
-                          List<DayCount> last7, long doneToday, int target) {
+                          List<DayCount> last7, long doneToday, int target, long otherHelp) {
     }
 
     public record HomeStats(List<CountBar> perMember, List<CountBar> chorePopularity,
                             List<ChoreFeedback> feedbackByChore, List<DayCount> trend14,
-                            List<MemberDaily> adherence, long pending) {
+                            List<MemberDaily> adherence, long pending, long otherHelp) {
     }
 }

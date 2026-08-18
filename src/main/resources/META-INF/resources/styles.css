@@ -228,6 +228,16 @@ vaadin-select::part(label) {
     box-shadow: none;
 }
 
+/* "Other help" — a chore card in shape, but visibly not one of the chores: what goes
+   on it is written by the member, and it always waits for an admin's decision. */
+.task-card.help-card {
+    border-style: dashed;
+    border-width: 2px;
+    border-color: var(--lumo-contrast-30pct);
+    background: var(--lumo-contrast-5pct);
+    box-shadow: none;
+}
+
 /* ---- Leaderboard ---- */
 .leaderboard {
     display: flex;

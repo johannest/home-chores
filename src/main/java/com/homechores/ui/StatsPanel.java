@@ -90,9 +90,23 @@ class StatsPanel extends VerticalLayout {
         today.getStyle().set("font-weight", "600").set("margin-top", "0");
         body.add(today);
 
-        body.add(Charts.card(T.tr("stats.byChore"), Charts.horizontalBars(s.byChore())));
+        body.add(Charts.card(T.tr("stats.byChore"), Charts.horizontalBars(withOtherHelp(
+                s.byChore(), s.otherHelp()))));
         body.add(Charts.card(T.tr("stats.feelings"), Charts.feedbackBar(s.feedback())));
         body.add(Charts.card(T.tr("stats.last7"), Charts.dayTrend(s.last7())));
+    }
+
+    /**
+     * Appends accepted other help as one more bar. The service counts it but can't name it —
+     * "Other help" is UI wording, unlike a chore name, which is the family's own data.
+     */
+    private static List<CountBar> withOtherHelp(List<CountBar> bars, long otherHelp) {
+        if (otherHelp <= 0) {
+            return bars;
+        }
+        List<CountBar> all = new ArrayList<>(bars);
+        all.add(new CountBar("🙋 " + T.tr("board.otherHelp"), otherHelp));
+        return all;
     }
 
     private void renderHome() {
@@ -105,7 +119,8 @@ class StatsPanel extends VerticalLayout {
         }
 
         body.add(Charts.card(T.tr("stats.perMember"), Charts.horizontalBars(s.perMember())));
-        body.add(Charts.card(T.tr("stats.popularity"), Charts.horizontalBars(s.chorePopularity())));
+        body.add(Charts.card(T.tr("stats.popularity"), Charts.horizontalBars(withOtherHelp(
+                s.chorePopularity(), s.otherHelp()))));
 
         Div fbBody = new Div();
         if (s.feedbackByChore().isEmpty()) {

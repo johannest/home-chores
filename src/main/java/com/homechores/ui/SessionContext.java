@@ -13,7 +13,41 @@ public final class SessionContext {
     private static final String HOME_CODE = "homeCode";
     private static final String TIME_ZONE = "timeZone";
 
+    /**
+     * How long a member's session survives without them touching the app. Short on purpose:
+     * the identity lives in the phone's local storage ({@link DeviceIdentity}), so an expired
+     * session costs the user nothing but frees the server of state for a phone that is only
+     * lying on a table. With {@code vaadin.closeIdleSessions=true} this is measured from the
+     * last real interaction — heartbeats and push traffic don't count as activity.
+     */
+    public static final int MEMBER_TIMEOUT_SECONDS = 300;
+
+    /**
+     * Admins get longer. Their work is filling in settings, PINs and reward tiers — forms
+     * that take thought and produce no requests while they're being read, and where being
+     * bounced back to the board mid-edit would be a real loss rather than a blink.
+     */
+    public static final int ADMIN_TIMEOUT_SECONDS = 1200;
+
     private SessionContext() {
+    }
+
+    /** The idle lifetime for a member, in seconds. */
+    public static int timeoutSecondsFor(boolean admin) {
+        return admin ? ADMIN_TIMEOUT_SECONDS : MEMBER_TIMEOUT_SECONDS;
+    }
+
+    /**
+     * Applies the idle lifetime for the current session. Safe to call repeatedly — it is
+     * re-applied whenever the board re-renders, so a member who has just been promoted (or
+     * demoted) moves to the other lifetime without signing out and in again.
+     */
+    public static void applyTimeout(boolean admin) {
+        VaadinSession session = VaadinSession.getCurrent();
+        if (session == null || session.getSession() == null) {
+            return; // no HTTP session behind this one (tests, background threads)
+        }
+        session.getSession().setMaxInactiveInterval(timeoutSecondsFor(admin));
     }
 
     /** Remembers the member's browser time zone (used for chore availability windows). */

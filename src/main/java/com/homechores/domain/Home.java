@@ -62,6 +62,15 @@ public class Home {
     @Column(columnDefinition = "boolean not null default true")
     private boolean confirmCompletion = true;
 
+    /**
+     * When on, members can log help that no chore covers ("other help") in their own words,
+     * for an admin to accept or decline. On by default — real help that happens to be
+     * missing from the board is exactly what a family wants to notice. See the note on
+     * {@code approveRejoin} for why the column carries an explicit default.
+     */
+    @Column(columnDefinition = "boolean not null default true")
+    private boolean allowOtherHelp = true;
+
     private Instant createdAt = Instant.now();
 
     /**
@@ -158,6 +167,14 @@ public class Home {
 
     public void setConfirmCompletion(boolean confirmCompletion) {
         this.confirmCompletion = confirmCompletion;
+    }
+
+    public boolean isAllowOtherHelp() {
+        return allowOtherHelp;
+    }
+
+    public void setAllowOtherHelp(boolean allowOtherHelp) {
+        this.allowOtherHelp = allowOtherHelp;
     }
 
     public Instant getCreatedAt() {

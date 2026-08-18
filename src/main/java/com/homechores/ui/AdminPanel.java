@@ -35,6 +35,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /** Admin-only tools: approvals, settings, members, chores CRUD, backup/restore. */
@@ -64,7 +65,9 @@ class AdminPanel extends VerticalLayout {
     void refresh() {
         removeAll();
         rejoinsSection().ifPresent(this::add);
+        otherHelpSection().ifPresent(this::add);
         add(approvalsSection());
+        add(logForSection());
         add(recentSection());
         add(settingsSection());
         add(membersSection());
@@ -129,6 +132,169 @@ class AdminPanel extends VerticalLayout {
         return Optional.of(s);
     }
 
+    // ---- Other help ---------------------------------------------------------
+
+    /**
+     * Help a member did that no chore covers, in their own words. Kept apart from the
+     * ordinary approval queue because the decision is a different one: there is no chore to
+     * read a reward off, and a kind of help that keeps coming back probably deserves a card
+     * of its own on the board.
+     */
+    private Optional<Div> otherHelpSection() {
+        var waiting = service.pendingOtherHelp(homeCode);
+        if (waiting.isEmpty()) {
+            return Optional.empty();
+        }
+        Div s = section(T.tr("admin.help", waiting.size()));
+        Span info = new Span(T.tr("admin.help.info"));
+        info.addClassName("sub");
+        s.add(info);
+
+        for (Completion c : waiting) {
+            String member = service.findMember(c.getMemberId()).map(Member::getName).orElse("?");
+
+            Div box = new Div();
+            Div line = new Div();
+            line.setText("🙋 " + c.getNote());
+            line.getStyle().set("font-weight", "600");
+            Span sub = new Span(member + "  ·  " + ago(c.getDoneAt()));
+            sub.addClassName("sub");
+            box.add(line, sub);
+            box.addClassName("grow");
+
+            Button accept = new Button(VaadinIcon.CHECK.create(), e -> acceptHelpDialog(c, member));
+            accept.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SUCCESS,
+                    ButtonVariant.LUMO_SMALL);
+            accept.setAriaLabel(T.tr("admin.help.accept"));
+            Button decline = new Button(VaadinIcon.CLOSE.create(), e -> {
+                service.reject(c.getId(), memberId);
+                toast(T.tr("admin.help.declined"));
+                refresh();
+            });
+            decline.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_SMALL);
+            decline.setAriaLabel(T.tr("admin.help.decline"));
+
+            Div row = new Div(box, accept, decline);
+            row.addClassName("list-row");
+            s.add(row);
+        }
+        return Optional.of(s);
+    }
+
+    /** Accepting: name the reward (there's no chore to carry one), then count it. */
+    private void acceptHelpDialog(Completion help, String member) {
+        Dialog d = new Dialog();
+        d.setHeaderTitle(T.tr("admin.help.accept.title"));
+        d.setWidth("min(90vw, 24em)");
+
+        Span what = new Span("🙋 " + help.getNote());
+        what.getStyle().set("font-weight", "600");
+        Span who = new Span(T.tr("admin.help.accept.by", member));
+        who.addClassName("sub");
+
+        IntegerField credits = new IntegerField(T.tr("admin.help.accept.credits"));
+        credits.setMin(0);
+        credits.setValue(0);
+        credits.setStepButtonsVisible(true);
+        credits.setWidthFull();
+        credits.setHelperText(T.tr("admin.help.accept.credits.helper"));
+
+        Button ok = new Button(T.tr("admin.help.accept.confirm"), e -> {
+            int amount = credits.getValue() == null ? 0 : Math.max(0, credits.getValue());
+            service.approve(help.getId(), memberId, amount);
+            d.close();
+            toast(T.tr("admin.help.accepted", member));
+            // The board is the point: help that happens often should become a card anyone
+            // can tap, so the same thing never has to be typed out and reviewed again.
+            promoteToChoreDialog(help.getNote(), amount);
+        });
+        ok.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SUCCESS);
+
+        VerticalLayout body = new VerticalLayout(what, who, credits);
+        body.setPadding(false);
+        d.add(body);
+        d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), ok);
+        d.open();
+    }
+
+    /**
+     * Offers to turn accepted help into a permanent chore. Prefilled from what the member
+     * wrote, but editable — "took the neighbour's dog out because they were away" is a good
+     * description of one evening and a poor name for a chore card.
+     */
+    private void promoteToChoreDialog(String description, int credits) {
+        Dialog d = new Dialog();
+        d.setHeaderTitle(T.tr("admin.help.promote.title"));
+        d.setWidth("min(90vw, 24em)");
+
+        Span question = new Span(T.tr("admin.help.promote.text"));
+
+        TextField name = new TextField(T.tr("admin.chore.name"));
+        name.setValue(shortName(description));
+        name.setWidthFull();
+        TextField emoji = new TextField(T.tr("admin.chore.emoji"));
+        emoji.setWidthFull();
+        emoji.setMaxLength(4);
+        emoji.setPlaceholder("🙋");
+        IntegerField interval = new IntegerField(T.tr("admin.chore.interval"));
+        interval.setMin(0);
+        interval.setValue(0);
+        interval.setStepButtonsVisible(true);
+        interval.setWidthFull();
+        interval.setHelperText(T.tr("admin.chore.interval.helper"));
+        IntegerField credit = new IntegerField(T.tr("admin.chore.credits"));
+        credit.setMin(0);
+        credit.setValue(Math.max(0, credits));
+        credit.setStepButtonsVisible(true);
+        credit.setWidthFull();
+        credit.setHelperText(T.tr("admin.chore.credits.helper"));
+
+        Button add = new Button(T.tr("admin.help.promote.add"), e -> {
+            if (name.isEmpty()) {
+                name.setInvalid(true);
+                name.setErrorMessage(T.tr("admin.chore.nameRequired"));
+                return;
+            }
+            service.addTask(homeCode, name.getValue(), emoji.getValue(),
+                    interval.getValue() == null ? 0 : Math.max(0, interval.getValue()),
+                    credit.getValue() == null ? 0 : Math.max(0, credit.getValue()), null);
+            d.close();
+            toast(T.tr("admin.help.promote.added", name.getValue().trim()));
+            refresh();
+        });
+        add.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        Button skip = new Button(T.tr("admin.help.promote.no"), e -> {
+            d.close();
+            refresh();
+        });
+
+        VerticalLayout body = new VerticalLayout(question, name, emoji, interval, credit);
+        body.setPadding(false);
+        d.add(body);
+        d.getFooter().add(skip, add);
+        d.addDialogCloseActionListener(e -> {
+            d.close();
+            refresh();
+        });
+        d.open();
+    }
+
+    /** A chore-card-sized name out of a free-text description: first line, first clause. */
+    private static String shortName(String description) {
+        if (description == null) {
+            return "";
+        }
+        String s = description.trim();
+        int cut = s.indexOf('\n');
+        if (cut < 0) {
+            cut = s.indexOf(',');
+        }
+        if (cut > 0) {
+            s = s.substring(0, cut).trim();
+        }
+        return s.length() > 40 ? s.substring(0, 40).trim() : s;
+    }
+
     // ---- Approvals ----------------------------------------------------------
 
     private Div approvalsSection() {
@@ -142,9 +308,7 @@ class AdminPanel extends VerticalLayout {
         }
         for (Completion c : pending) {
             String member = service.findMember(c.getMemberId()).map(Member::getName).orElse("?");
-            String chore = service.tasksOf(homeCode).stream()
-                    .filter(t -> t.getId().equals(c.getTaskId()))
-                    .findFirst().map(t -> t.getEmoji() + " " + t.getName()).orElse("?");
+            String chore = describe(c);
 
             Div info = new Div();
             Div line = new Div();
@@ -175,6 +339,63 @@ class AdminPanel extends VerticalLayout {
         return s;
     }
 
+    // ---- Logging a chore for someone else -----------------------------------
+
+    /**
+     * Recording a chore on another member's behalf: the child with no phone, or the one who
+     * did it and forgot to tap. The counterpart of the unmark list below — one puts a chore
+     * into somebody's history, the other takes one out.
+     */
+    private Div logForSection() {
+        Div s = section(T.tr("admin.logFor"));
+        List<Member> others = service.membersOf(homeCode).stream()
+                .filter(m -> !m.getId().equals(memberId))
+                .toList();
+        List<ChoreTask> chores = service.tasksOf(homeCode);
+        if (others.isEmpty() || chores.isEmpty()) {
+            Span none = new Span(T.tr(others.isEmpty()
+                    ? "admin.logFor.noOthers" : "admin.logFor.noChores"));
+            none.addClassName("sub");
+            s.add(none);
+            return s;
+        }
+        Span info = new Span(T.tr("admin.logFor.info"));
+        info.addClassName("sub");
+
+        Select<Member> who = new Select<>();
+        who.setLabel(T.tr("admin.logFor.member"));
+        who.setWidthFull();
+        who.setItems(others);
+        who.setItemLabelGenerator(Member::getName);
+        who.setValue(others.get(0));
+
+        Select<ChoreTask> which = new Select<>();
+        which.setLabel(T.tr("admin.logFor.chore"));
+        which.setWidthFull();
+        which.setItems(chores);
+        which.setItemLabelGenerator(t -> t.getEmoji() + " " + t.getName());
+        which.setValue(chores.get(0));
+
+        Button log = new Button(T.tr("admin.logFor.action"), VaadinIcon.CHECK.create(), e -> {
+            Member target = who.getValue();
+            ChoreTask chore = which.getValue();
+            if (target == null || chore == null) {
+                return;
+            }
+            service.completeFor(chore.getId(), target.getId(), memberId);
+            toast(T.tr("admin.logFor.done", chore.getName(), target.getName()));
+            refresh();
+        });
+        log.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+
+        VerticalLayout body = new VerticalLayout(info, who, which, log);
+        body.setPadding(false);
+        body.setSpacing(true);
+        body.setWidthFull();
+        s.add(body);
+        return s;
+    }
+
     // ---- Recent activity (corrections) --------------------------------------
 
     /**
@@ -196,9 +417,7 @@ class AdminPanel extends VerticalLayout {
 
         for (Completion c : recent) {
             String member = service.findMember(c.getMemberId()).map(Member::getName).orElse("?");
-            String chore = service.tasksOf(homeCode).stream()
-                    .filter(t -> t.getId().equals(c.getTaskId()))
-                    .findFirst().map(t -> t.getEmoji() + " " + t.getName()).orElse("?");
+            String chore = describe(c);
 
             Div info2 = new Div();
             Div line = new Div();
@@ -254,6 +473,16 @@ class AdminPanel extends VerticalLayout {
         });
         Span confirmHint = new Span(T.tr("admin.confirmCompletion.helper"));
         confirmHint.addClassName("sub");
+
+        Checkbox otherHelp = new Checkbox(T.tr("admin.allowOtherHelp"));
+        otherHelp.setValue(home.isAllowOtherHelp());
+        otherHelp.addValueChangeListener(e -> {
+            Home h = service.findHome(homeCode).orElseThrow();
+            h.setAllowOtherHelp(e.getValue());
+            service.saveHome(h);
+        });
+        Span otherHelpHint = new Span(T.tr("admin.allowOtherHelp.helper"));
+        otherHelpHint.addClassName("sub");
 
         Checkbox rejoinGate = new Checkbox(T.tr("admin.approveRejoin"));
         rejoinGate.setValue(home.isApproveRejoin());
@@ -345,8 +574,9 @@ class AdminPanel extends VerticalLayout {
         HorizontalLayout pinRow = new HorizontalLayout(pin, changePin);
         pinRow.setAlignItems(FlexComponent.Alignment.CENTER);
 
-        VerticalLayout body = new VerticalLayout(confirmTaps, confirmHint, approval, style,
-                enforced, bookingHours, target, rejoinGate, rejoinHint, nameRow, pinLabel, pinRow);
+        VerticalLayout body = new VerticalLayout(confirmTaps, confirmHint, approval,
+                otherHelp, otherHelpHint, style, enforced, bookingHours, target,
+                rejoinGate, rejoinHint, nameRow, pinLabel, pinRow);
         body.setPadding(false);
         body.setSpacing(true);
         body.setWidthFull();
@@ -793,6 +1023,16 @@ class AdminPanel extends VerticalLayout {
     }
 
     // ---- Small helpers ------------------------------------------------------
+
+    /** How a completion reads in the admin lists: the chore, or the helper's own words. */
+    private String describe(Completion c) {
+        if (c.isOtherHelp()) {
+            return "🙋 " + c.getNote();
+        }
+        return service.tasksOf(homeCode).stream()
+                .filter(t -> t.getId().equals(c.getTaskId()))
+                .findFirst().map(t -> t.getEmoji() + " " + t.getName()).orElse("?");
+    }
 
     private void confirm(String title, String text, Runnable onConfirm) {
         Dialog d = new Dialog();

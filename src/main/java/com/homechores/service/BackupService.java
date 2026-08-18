@@ -70,7 +70,7 @@ public class BackupService {
         b.home = new HomeDto(home.getCode(), home.getName(), home.getAdminPin(),
                 home.isRequireApproval(), home.getDailyTargetPerMember(), home.getDivisionStyle(),
                 home.isRotationEnforced(), home.getBookingTimeoutHours(), home.isApproveRejoin(),
-                home.isConfirmCompletion(), home.getCreatedAt());
+                home.isConfirmCompletion(), home.isAllowOtherHelp(), home.getCreatedAt());
         for (Member m : members.findByHomeCodeOrderByJoinedAtAsc(homeCode)) {
             b.members.add(new MemberDto(m.getId(), m.getName(), m.getColor(), m.isAdmin(), m.getJoinedAt()));
         }
@@ -81,7 +81,7 @@ public class BackupService {
         for (Completion c : completions.findByHomeCode(homeCode)) {
             b.completions.add(new CompletionDto(c.getId(), c.getTaskId(), c.getMemberId(),
                     c.getDoneAt(), c.getStatus(), c.getFeedback(),
-                    c.getReviewedByMemberId(), c.getReviewedAt()));
+                    c.getReviewedByMemberId(), c.getReviewedAt(), c.getNote()));
         }
         for (SpreeTier t : spreeTiers.findByHomeCodeOrderByDaysAsc(homeCode)) {
             b.spreeTiers.add(new SpreeTierDto(t.getDays(), t.getCredits()));
@@ -123,6 +123,7 @@ public class BackupService {
         home.setRotationEnforced(b.home.rotationEnforced);
         home.setApproveRejoin(b.home.approveRejoin == null || b.home.approveRejoin);
         home.setConfirmCompletion(b.home.confirmCompletion == null || b.home.confirmCompletion);
+        home.setAllowOtherHelp(b.home.allowOtherHelp == null || b.home.allowOtherHelp);
         if (b.home.bookingTimeoutHours > 0) {
             home.setBookingTimeoutHours(b.home.bookingTimeoutHours);
         }
@@ -168,9 +169,11 @@ public class BackupService {
         int restoredCompletions = 0;
         Map<Long, Long> completionIdMap = new HashMap<>();
         for (CompletionDto c : b.completions) {
-            Long newTask = taskIdMap.get(c.taskId);
+            // A null taskId is an "other help" entry, not an orphan: it never had a chore,
+            // and its own note is what it says. Only a task that no longer resolves is one.
+            Long newTask = c.taskId == null ? null : taskIdMap.get(c.taskId);
             Long newMember = memberIdMap.get(c.memberId);
-            if (newTask == null || newMember == null) {
+            if (newMember == null || (c.taskId != null && newTask == null)) {
                 continue; // orphaned record — skip
             }
             Completion entity = new Completion(code, newTask, newMember,
@@ -179,6 +182,7 @@ public class BackupService {
                 entity.setDoneAt(c.doneAt);
             }
             entity.setFeedback(c.feedback);
+            entity.setNote(c.note);
             entity.setReviewedByMemberId(memberIdMap.get(c.reviewedByMemberId));
             entity.setReviewedAt(c.reviewedAt);
             Completion savedCompletion = completions.save(entity);
@@ -221,12 +225,13 @@ public class BackupService {
         public List<CreditDto> credits = new ArrayList<>();
     }
 
-    /** {@code approveRejoin} is boxed so backups written before the setting existed
-     *  restore with the safe default (on) rather than Jackson's {@code false}. */
+    /** The boxed booleans are boxed so backups written before those settings existed
+     *  restore with their default (on) rather than Jackson's {@code false}. */
     public record HomeDto(String code, String name, String adminPin, boolean requireApproval,
                           int dailyTargetPerMember, DivisionStyle divisionStyle,
                           boolean rotationEnforced, int bookingTimeoutHours,
-                          Boolean approveRejoin, Boolean confirmCompletion, Instant createdAt) {
+                          Boolean approveRejoin, Boolean confirmCompletion,
+                          Boolean allowOtherHelp, Instant createdAt) {
     }
 
     public record MemberDto(Long id, String name, String color, boolean admin, Instant joinedAt) {
@@ -243,8 +248,9 @@ public class BackupService {
                             int spreeTierDays, Long completionId, Instant createdAt) {
     }
 
+    /** {@code taskId} is null (and {@code note} set) for an "other help" entry. */
     public record CompletionDto(Long id, Long taskId, Long memberId, Instant doneAt,
                                 CompletionStatus status, Feedback feedback,
-                                Long reviewedByMemberId, Instant reviewedAt) {
+                                Long reviewedByMemberId, Instant reviewedAt, String note) {
     }
 }

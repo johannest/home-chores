@@ -9,8 +9,9 @@ import java.util.Optional;
  * server session.
  *
  * <p>{@link SessionContext} still holds the signed-in member for the duration of a
- * {@code VaadinSession}, but that session is deliberately short-lived (Spring's 30-minute
- * default) so the server holds no state for phones that aren't actively using the app.
+ * {@code VaadinSession}, but that session is deliberately short-lived (3 minutes for a
+ * member, 15 for an admin — see {@link SessionContext#applyTimeout}) so the server holds no
+ * state for phones that aren't actively using the app.
  * Local storage is what carries the identity across session timeouts, restarts and app
  * relaunches — it survives everything except the user clearing site data, which is exactly
  * what the rejoin flow in {@link LandingView} recovers from.

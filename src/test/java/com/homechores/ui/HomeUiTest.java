@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.homechores.domain.ChoreTask;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
 import com.homechores.service.ChoreService;
@@ -15,8 +16,11 @@ import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
+import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.tabs.Tabs;
+import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
+import com.vaadin.flow.server.VaadinSession;
 import com.vaadin.testbench.unit.SpringUIUnitTest;
 import java.util.Locale;
 import org.junit.jupiter.api.BeforeEach;
@@ -85,6 +89,43 @@ class HomeUiTest extends SpringUIUnitTest {
                 .filter(d -> d.getClassNames().contains("complete-area") && usable(d))
                 .toList().get(index);
         ComponentUtil.fireEvent(area, new ClickEvent<>(area));
+    }
+
+    private String valueOf(String label) {
+        return $(TextField.class).all().stream()
+                .filter(x -> label.equals(x.getLabel()) && usable(x))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No usable field: " + label))
+                .getValue();
+    }
+
+    private void setTextArea(String label, String value) {
+        TextArea a = $(TextArea.class).all().stream()
+                .filter(x -> label.equals(x.getLabel()) && usable(x))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No usable text area: " + label));
+        a.setValue(value);
+    }
+
+    /** Taps the board's "Other help" card. */
+    private void clickHelpCard() {
+        Div card = $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("help-card") && usable(d))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No Other help card on the board"));
+        ComponentUtil.fireEvent(card, new ClickEvent<>(card));
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> Select<T> selectByLabel(String label) {
+        return (Select<T>) $(Select.class).all().stream()
+                .filter(x -> label.equals(x.getLabel()) && usable(x))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No usable select: " + label));
+    }
+
+    private int maxInactiveInterval() {
+        return VaadinSession.getCurrent().getSession().getMaxInactiveInterval();
     }
 
     private int tabCount() {
@@ -289,6 +330,110 @@ class HomeUiTest extends SpringUIUnitTest {
 
         assertEquals(0, service.completionCount(sam.getId()),
                 "an admin can take back someone else's chore");
+    }
+
+    /** Help that no chore covers: the member writes it, and nothing counts until reviewed. */
+    @Test
+    void member_canLogOtherHelp_whichWaitsForAnAdmin() {
+        Member admin = service.createHome("Helpful", "Alex");
+        String code = admin.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        SessionContext.signIn(sam.getId(), code);
+        navigate(HomeView.class);
+
+        clickHelpCard();
+        setTextArea("What did you do?", "Carried the shopping in");
+        clickButton("Send for approval");
+
+        assertEquals(0, service.completionCount(sam.getId()), "not counted before a decision");
+        assertEquals(1, service.pendingOtherHelp(code).size());
+        assertEquals("Carried the shopping in", service.pendingOtherHelp(code).get(0).getNote());
+    }
+
+    /** Accepting counts it, and the follow-up prompt turns it into a card anyone can tap. */
+    @Test
+    void admin_acceptsOtherHelp_andCanAddItToTheChores() {
+        Member admin = service.createHome("Helpful", "Alex");
+        String code = admin.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        service.logOtherHelp(code, sam.getId(), "Washed the car");
+
+        SessionContext.signIn(admin.getId(), code);
+        navigate(HomeView.class);
+        $(Tabs.class).first().setSelectedIndex(2); // Admin tab
+
+        clickButton("Accept");
+        clickButton("Accept help");
+        assertEquals(1, service.completionCount(sam.getId()), "accepted help counts");
+
+        // The prompt that follows offers the same help as a permanent chore.
+        assertEquals("Washed the car", valueOf("Chore name"));
+        clickButton("Add as chore");
+
+        assertEquals(12, service.tasksOf(code).size(), "11 seeded + the promoted one");
+        assertTrue(service.tasksOf(code).stream()
+                .anyMatch(t -> "Washed the car".equals(t.getName())));
+    }
+
+    @Test
+    void admin_canDeclineOtherHelp() {
+        Member admin = service.createHome("Helpful", "Alex");
+        String code = admin.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        service.logOtherHelp(code, sam.getId(), "Not much really");
+
+        SessionContext.signIn(admin.getId(), code);
+        navigate(HomeView.class);
+        $(Tabs.class).first().setSelectedIndex(2);
+
+        clickButton("Decline");
+
+        assertEquals(0, service.completionCount(sam.getId()));
+        assertTrue(service.pendingOtherHelp(code).isEmpty());
+        assertEquals(11, service.tasksOf(code).size(), "declining adds no chore");
+    }
+
+    /** The phone-less member's chores still get onto the board, logged by an admin. */
+    @Test
+    void admin_canLogAChoreForAnotherMember() {
+        Member admin = service.createHome("Household", "Alex");
+        String code = admin.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+
+        SessionContext.signIn(admin.getId(), code);
+        navigate(HomeView.class);
+        $(Tabs.class).first().setSelectedIndex(2); // Admin tab
+
+        // "Who did it" offers the other members only, so the default is already Sam.
+        Select<Member> who = selectByLabel("Who did it");
+        assertEquals(sam.getId(), who.getValue().getId());
+        Select<ChoreTask> which = selectByLabel("Which chore");
+        which.setValue(service.tasksOf(code).get(1));
+        clickButton("Log it");
+
+        assertEquals(1, service.completionCount(sam.getId()));
+        assertEquals(0, service.completionCount(admin.getId()), "not logged for the admin");
+    }
+
+    /**
+     * Sessions are short so idle phones cost the server nothing; admins get longer because
+     * their work is reading and filling in forms (see SessionContext).
+     */
+    @Test
+    void sessionLifetime_isShortForMembersAndLongerForAdmins() {
+        Member admin = service.createHome("Timed", "Alex");
+        String code = admin.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+
+        SessionContext.signIn(sam.getId(), code);
+        navigate(HomeView.class);
+        assertEquals(SessionContext.MEMBER_TIMEOUT_SECONDS, maxInactiveInterval());
+
+        // Claiming admin on the same device moves it onto the admin lifetime.
+        clickButton("Admin?");
+        setField("Admin PIN", service.findHome(code).orElseThrow().getAdminPin());
+        clickButton("Unlock");
+        assertEquals(SessionContext.ADMIN_TIMEOUT_SECONDS, maxInactiveInterval());
     }
 
     @Test

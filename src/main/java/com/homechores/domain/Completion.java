@@ -1,5 +1,6 @@
 package com.homechores.domain;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -8,7 +9,11 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import java.time.Instant;
 
-/** A record that a member completed a chore at a point in time. */
+/**
+ * A record that a member completed a chore at a point in time — or, when {@code taskId}
+ * is null, that they helped in a way no chore covers and wrote down what they did
+ * ("other help", see {@link #otherHelp}).
+ */
 @Entity
 public class Completion {
 
@@ -18,6 +23,7 @@ public class Completion {
 
     private String homeCode;
 
+    /** The chore that was done, or null for an "other help" entry. */
     private Long taskId;
 
     private Long memberId;
@@ -34,6 +40,10 @@ public class Completion {
 
     private Instant reviewedAt; // nullable
 
+    /** What the member wrote for an "other help" entry; null for ordinary chores. */
+    @Column(length = 300)
+    private String note;
+
     protected Completion() {
     }
 
@@ -42,6 +52,22 @@ public class Completion {
         this.taskId = taskId;
         this.memberId = memberId;
         this.status = status;
+    }
+
+    /**
+     * Help the chore list doesn't cover, described by the member in their own words. It has
+     * no task, so it starts PENDING whatever the home's approval setting says: somebody has
+     * to read the text before it can count for anything.
+     */
+    public static Completion otherHelp(String homeCode, Long memberId, String note) {
+        Completion c = new Completion(homeCode, null, memberId, CompletionStatus.PENDING);
+        c.note = note;
+        return c;
+    }
+
+    /** True for an entry a member wrote themselves rather than a tap on a chore card. */
+    public boolean isOtherHelp() {
+        return taskId == null;
     }
 
     public Long getId() {
@@ -102,5 +128,13 @@ public class Completion {
 
     public void setReviewedAt(Instant reviewedAt) {
         this.reviewedAt = reviewedAt;
+    }
+
+    public String getNote() {
+        return note;
+    }
+
+    public void setNote(String note) {
+        this.note = note;
     }
 }

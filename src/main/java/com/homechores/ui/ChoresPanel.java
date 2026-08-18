@@ -1,5 +1,6 @@
 package com.homechores.ui;
 
+import com.homechores.domain.Completion;
 import com.homechores.domain.DivisionStyle;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
@@ -18,7 +19,9 @@ import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.FlexComponent;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
+import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
+import com.vaadin.flow.data.value.ValueChangeMode;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 
@@ -137,6 +140,9 @@ class ChoresPanel extends VerticalLayout {
         for (TaskView view : service.taskViews(homeCode, memberId, SessionContext.timeZone())) {
             taskGrid.add(taskCard(view, rotating));
         }
+        if (service.findHome(homeCode).map(Home::isAllowOtherHelp).orElse(true)) {
+            taskGrid.add(otherHelpCard());
+        }
         if (admin) {
             taskGrid.add(addCard());
         }
@@ -224,6 +230,74 @@ class ChoresPanel extends VerticalLayout {
                     + (view.streak() >= ChoreService.MAX_IN_A_ROW ? " 🔒" : " 🔥");
         }
         return null;
+    }
+
+    /**
+     * "I helped with something else" — the way to log real help the board has no card for.
+     * It sits with the chores rather than in a menu: a child who just carried the shopping
+     * in won't go looking for a form.
+     */
+    private Div otherHelpCard() {
+        Div card = new Div();
+        card.addClassNames("task-card", "help-card");
+        Div emoji = new Div();
+        emoji.setText("🙋");
+        emoji.addClassName("emoji");
+        Div name = new Div();
+        name.setText(T.tr("board.otherHelp"));
+        name.addClassName("name");
+        card.add(emoji, name);
+
+        long waiting = service.pendingOtherHelpCount(homeCode, memberId);
+        if (waiting > 0) {
+            Span badge = new Span(T.tr("board.otherHelp.waiting", waiting));
+            badge.addClassName("streak");
+            card.add(badge);
+        }
+        card.addClickListener(e -> openOtherHelpDialog());
+        return card;
+    }
+
+    /** Describe-what-you-did, then it goes to an admin to accept or decline. */
+    private void openOtherHelpDialog() {
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle(T.tr("board.otherHelp.title"));
+        dialog.setWidth("min(90vw, 24em)");
+
+        Span intro = new Span(T.tr("board.otherHelp.intro"));
+        intro.addClassName("sub");
+
+        TextArea what = new TextArea(T.tr("board.otherHelp.what"));
+        what.setPlaceholder(T.tr("board.otherHelp.placeholder"));
+        what.setWidthFull();
+        what.setMaxLength(ChoreService.MAX_HELP_LENGTH);
+        what.setValueChangeMode(ValueChangeMode.EAGER);
+        what.setHelperText(T.tr("board.otherHelp.helper"));
+        what.focus();
+
+        Button send = new Button(T.tr("board.otherHelp.send"), e -> {
+            if (what.getValue() == null || what.getValue().isBlank()) {
+                what.setInvalid(true);
+                what.setErrorMessage(T.tr("board.otherHelp.required"));
+                return;
+            }
+            boolean logged = service.logOtherHelp(homeCode, memberId, what.getValue()).isPresent();
+            dialog.close();
+            Notification n = Notification.show(
+                    logged ? T.tr("board.otherHelp.sent") : T.tr("board.otherHelp.off"),
+                    4000, Notification.Position.TOP_CENTER);
+            n.addThemeVariants(logged ? NotificationVariant.LUMO_SUCCESS
+                    : NotificationVariant.LUMO_CONTRAST);
+            refresh();
+        });
+        send.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+
+        VerticalLayout body = new VerticalLayout(intro, what);
+        body.setPadding(false);
+        body.setSpacing(false);
+        dialog.add(body);
+        dialog.getFooter().add(new Button(T.tr("common.cancel"), e -> dialog.close()), send);
+        dialog.open();
     }
 
     private Div addCard() {
@@ -325,11 +399,9 @@ class ChoresPanel extends VerticalLayout {
             return;
         }
         undoStrip.setVisible(true);
-        String choreName = service.tasksOf(homeCode).stream()
-                .filter(t -> t.getId().equals(recent.get().getTaskId()))
-                .findFirst().map(t -> t.getEmoji() + " " + t.getName()).orElse("?");
-
-        Span text = new Span(T.tr("undo.justDid", choreName));
+        Completion last = recent.get();
+        Span text = new Span(T.tr(last.isOtherHelp() ? "undo.justLogged" : "undo.justDid",
+                describe(last)));
         text.addClassName("grow");
         Button undo = new Button(T.tr("undo.action"), e -> undoLast());
         undo.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
@@ -337,6 +409,16 @@ class ChoresPanel extends VerticalLayout {
         Div strip = new Div(text, undo);
         strip.addClassName("undo-strip");
         undoStrip.add(strip);
+    }
+
+    /** How a completion reads on the board: the chore, or the member's own words. */
+    private String describe(Completion c) {
+        if (c.isOtherHelp()) {
+            return "🙋 " + c.getNote();
+        }
+        return service.tasksOf(homeCode).stream()
+                .filter(t -> t.getId().equals(c.getTaskId()))
+                .findFirst().map(t -> t.getEmoji() + " " + t.getName()).orElse("?");
     }
 
     private void handleBook(Long taskId) {

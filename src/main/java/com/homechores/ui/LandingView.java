@@ -389,6 +389,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
             return false;
         }
         SessionContext.signIn(m.get().getId(), m.get().getHomeCode());
+        SessionContext.applyTimeout(m.get().isAdmin());
         getUI().ifPresent(ui -> ui.navigate(HomeView.class));
         return true;
     }
@@ -431,6 +432,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
     /** Signs in for this session and remembers the identity on the device itself. */
     private void signIn(Long memberId, String homeCode) {
         SessionContext.signIn(memberId, homeCode);
+        SessionContext.applyTimeout(service.findMember(memberId).map(Member::isAdmin).orElse(false));
         DeviceIdentity.remember(memberId, homeCode);
     }
 
