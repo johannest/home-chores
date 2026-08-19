@@ -104,6 +104,32 @@ java -jar target/flashchores-1.0.0.jar
 The `-Pproduction` profile is required for a runnable jar — without it the jar boots
 in dev mode and fails on the missing dev server.
 
+### Running in production on a low-process host
+
+The target host allows 100 processes, and on Linux that limit counts **threads** — every
+Java thread is a task against `RLIMIT_NPROC` / cgroup `pids.max`. Run the jar with:
+
+```bash
+java -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx512m -jar target/flashchores-1.0.0.jar
+```
+
+Measured on this jar: **29 threads whether idle or serving 600 concurrent requests**, of
+which 12 are the bare JVM floor. What each part buys:
+
+| Setting | Effect |
+|---|---|
+| `-XX:ActiveProcessorCount=2` | Caps GC, JIT and virtual-thread carrier parallelism. Also the reason there are 2 carriers. |
+| `-XX:+UseSerialGC` | Drops G1's six threads (`GC Thread`×2, `G1 Service`, `G1 Refine`, `G1 Main Marker`, `G1 Conc`). The live set is tens of MB, so serial pauses stay trivial. |
+| `-Xmx512m` | Comfortable under the host's 2 GB limit: ~76 MB RSS idle, ~290 MB after a 600-request burst (SerialGC is not eager about returning it). Lower it if you want a tighter ceiling. |
+| `spring.threads.virtual.enabled=true` (in `application.properties`) | Removes Tomcat's growable exec pool, so thread count no longer tracks traffic. |
+
+Verify on the host with `ls /proc/<pid>/task | wc -l` (JVM threads) and
+`cat /sys/fs/cgroup/pids.current` (what the limit actually counts).
+
+Two things deliberately **not** done: `-XX:TieredStopAtLevel=1 -XX:CICompilerCount=1` saves
+one thread but disables C2 and made startup slower (2.5 s → 3.6 s), and a GraalVM native
+image trades away JIT peak throughput for startup and memory wins this host does not need.
+
 ## Project structure
 
 ```

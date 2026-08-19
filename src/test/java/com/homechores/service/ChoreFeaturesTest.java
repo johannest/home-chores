@@ -142,6 +142,26 @@ class ChoreFeaturesTest {
         assertTrue(service.complete(plants.getId(), alex.getId()).allowed());
     }
 
+    /**
+     * The board computes due dates from the completions it already loaded, via a different code
+     * path from the public nextDueDate. Pin that path: it is what draws the "🕒 in Nd" badge.
+     */
+    @Test
+    void boardReportsTheSameDueDate_asTheServiceApi() {
+        Member alex = service.createHome("Nest", "Alex");
+        ChoreTask plants = service.addTask(alex.getHomeCode(), "Water plants", "🪴", 5);
+        assertTrue(service.complete(plants.getId(), alex.getId()).allowed());
+
+        TaskView view = service.taskViews(alex.getHomeCode(), alex.getId()).stream()
+                .filter(v -> v.task().getId().equals(plants.getId()))
+                .findFirst().orElseThrow();
+
+        assertEquals(LocalDate.now().plusDays(5), view.nextDueDate(), "board's own due date");
+        assertEquals(service.nextDueDate(plants), view.nextDueDate(), "and it agrees with the API");
+        assertFalse(view.due());
+        assertEquals(LockReason.NOT_DUE, view.lockReason());
+    }
+
     // ---- Seasonal chores ---------------------------------------------------
 
     /** The season it is on the server right now — the gate uses LocalDate.now(). */

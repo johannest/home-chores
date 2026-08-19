@@ -493,8 +493,8 @@ public class ChoreService {
             String bookerName = bookerId == null ? null : memberName(bookerId);
             Instant bookingExpires = bookerId == null ? null : bookingExpiry(task, home);
 
-            boolean due = isDue(task);
-            LocalDate nextDue = nextDueDate(task);
+            boolean due = isDue(task, recent);
+            LocalDate nextDue = nextDueDate(task, recent);
             boolean inHours = TimeWindows.isWithinAny(task.getAvailableWindows(), localNow);
             boolean inSeason = Seasons.isInSeason(task.getSeasons(), today);
 
@@ -556,24 +556,44 @@ public class ChoreService {
 
     // ---- Interval (every-N-days) chores ------------------------------------
 
-    /** Date of the last time this chore was done (non-rejected), or null. */
-    private LocalDate lastDoneDate(Long taskId) {
-        List<Completion> recent = activeCompletions(taskId);
+    /** Date of the last time this chore was done, from an already-fetched list, or null. */
+    private LocalDate lastDoneDate(List<Completion> recent) {
         return recent.isEmpty() ? null
                 : recent.get(0).getDoneAt().atZone(ZoneId.systemDefault()).toLocalDate();
     }
 
     /** The next date the chore becomes due (today if it has no interval or was never done). */
     public LocalDate nextDueDate(ChoreTask t) {
+        // No interval means always due, and answering that needs no history at all — so don't
+        // pay for a query to find out.
         if (t.getIntervalDays() <= 0) {
             return LocalDate.now();
         }
-        LocalDate last = lastDoneDate(t.getId());
-        return last == null ? LocalDate.now() : last.plusDays(t.getIntervalDays());
+        return nextDueDate(t, activeCompletions(t.getId()));
     }
 
     public boolean isDue(ChoreTask t) {
         return !LocalDate.now().isBefore(nextDueDate(t));
+    }
+
+    /*
+     * Both due-date questions are also asked from taskViews, which has already loaded the task's
+     * completions for the fairness streak. These overloads take that list so a board render costs
+     * one query per chore instead of three: measured 3 statements per interval chore before, 1
+     * after — a 25-chore weekly board went from 78 statements to 28 (see BoardRenderCostTest).
+     * It matters because taskViews re-runs for every connected device on every HomeState bump.
+     */
+
+    private LocalDate nextDueDate(ChoreTask t, List<Completion> recent) {
+        if (t.getIntervalDays() <= 0) {
+            return LocalDate.now();
+        }
+        LocalDate last = lastDoneDate(recent);
+        return last == null ? LocalDate.now() : last.plusDays(t.getIntervalDays());
+    }
+
+    private boolean isDue(ChoreTask t, List<Completion> recent) {
+        return !LocalDate.now().isBefore(nextDueDate(t, recent));
     }
 
     // ---- Booking ("I'll do it") --------------------------------------------
