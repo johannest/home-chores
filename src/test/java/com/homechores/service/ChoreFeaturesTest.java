@@ -14,9 +14,12 @@ import com.homechores.domain.CompletionRepository;
 import com.homechores.domain.DivisionStyle;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
+import com.homechores.domain.Season;
+import com.homechores.domain.Seasons;
 import com.homechores.domain.TimeWindows;
 import com.homechores.service.ChoreService.CompleteOutcome;
 import com.homechores.service.ChoreService.LockReason;
+import com.homechores.service.ChoreService.TaskView;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -137,6 +140,103 @@ class ChoreFeaturesTest {
 
         assertTrue(service.isDue(plants), "due again after 6 days");
         assertTrue(service.complete(plants.getId(), alex.getId()).allowed());
+    }
+
+    // ---- Seasonal chores ---------------------------------------------------
+
+    /** The season it is on the server right now — the gate uses LocalDate.now(). */
+    private static Season currentSeason() {
+        return Season.of(LocalDate.now().getMonth());
+    }
+
+    /** The season half a year away, so it is never the current one. */
+    private static Season oppositeSeason() {
+        Season[] all = Season.values();
+        return all[(currentSeason().ordinal() + 2) % all.length];
+    }
+
+    private ChoreTask seasonalChore(String homeCode, Season season) {
+        return service.addTask(homeCode, "Seasonal", "🍂", 0, 0, null, season.name());
+    }
+
+    @Test
+    void untaggedChore_isDoableWhateverTheSeason() {
+        Member alex = service.createHome("Nest", "Alex");
+        ChoreTask any = service.addTask(alex.getHomeCode(), "Anytime", "🧹", 0);
+
+        assertNull(any.getSeasons(), "no tag means all year round");
+        assertTrue(service.complete(any.getId(), alex.getId()).allowed());
+    }
+
+    @Test
+    void inSeasonChore_isDoable() {
+        Member alex = service.createHome("Nest", "Alex");
+        ChoreTask chore = seasonalChore(alex.getHomeCode(), currentSeason());
+
+        assertTrue(service.complete(chore.getId(), alex.getId()).allowed(),
+                "tagged with the season we are actually in");
+    }
+
+    @Test
+    void outOfSeasonChore_isBlocked() {
+        Member alex = service.createHome("Nest", "Alex");
+        ChoreTask chore = seasonalChore(alex.getHomeCode(), oppositeSeason());
+
+        CompleteOutcome outcome = service.complete(chore.getId(), alex.getId());
+        assertFalse(outcome.allowed());
+        assertEquals(LockReason.OUT_OF_SEASON, outcome.blockReason());
+    }
+
+    @Test
+    void outOfSeasonChore_readsAsLockedOnTheBoard() {
+        Member alex = service.createHome("Nest", "Alex");
+        ChoreTask chore = seasonalChore(alex.getHomeCode(), oppositeSeason());
+
+        TaskView view = service.taskViews(alex.getHomeCode(), alex.getId()).stream()
+                .filter(v -> v.task().getId().equals(chore.getId()))
+                .findFirst().orElseThrow();
+        assertTrue(view.lockedForMe());
+        assertEquals(LockReason.OUT_OF_SEASON, view.lockReason());
+    }
+
+    /**
+     * Season is reported ahead of the interval. Otherwise a winter chore on a yearly interval
+     * badges "in 200d" — true, and no help at all in working out why it can't be tapped.
+     */
+    @Test
+    void outOfSeasonBeatsNotDue_asTheReportedReason() {
+        Member alex = service.createHome("Nest", "Alex");
+        ChoreTask chore = service.addTask(alex.getHomeCode(), "Rake leaves", "🍂", 365, 0, null,
+                oppositeSeason().name());
+        // Do it once so the yearly interval also has it locked.
+        service.completeFor(chore.getId(), alex.getId(), alex.getId());
+
+        CompleteOutcome outcome = service.complete(chore.getId(), alex.getId());
+        assertFalse(outcome.allowed());
+        assertEquals(LockReason.OUT_OF_SEASON, outcome.blockReason(),
+                "season is the useful reason, not the interval");
+    }
+
+    @Test
+    void allFourSeasonsTagged_behavesLikeUntagged() {
+        Member alex = service.createHome("Nest", "Alex");
+        ChoreTask chore = service.addTask(alex.getHomeCode(), "Every season", "🔁", 0, 0, null,
+                Seasons.normalize("SPRING,SUMMER,AUTUMN,WINTER"));
+
+        assertNull(chore.getSeasons(), "every season is the same as no restriction");
+        assertTrue(service.complete(chore.getId(), alex.getId()).allowed());
+    }
+
+    /** A mangled value (hand-edited backup) must fail open rather than orphan the chore. */
+    @Test
+    void garbledSeasonValue_failsOpen() {
+        Member alex = service.createHome("Nest", "Alex");
+        ChoreTask chore = service.addTask(alex.getHomeCode(), "Broken", "❓", 0);
+        ChoreTask stored = taskRepo.findById(chore.getId()).orElseThrow();
+        stored.setSeasons("NOT_A_SEASON");
+        taskRepo.save(stored);
+
+        assertTrue(service.complete(chore.getId(), alex.getId()).allowed());
     }
 
     // ---- Rotating division --------------------------------------------------

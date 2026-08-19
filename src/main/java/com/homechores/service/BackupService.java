@@ -76,7 +76,7 @@ public class BackupService {
         }
         for (ChoreTask t : tasks.findByHomeCodeOrderByCreatedAtAsc(homeCode)) {
             b.tasks.add(new TaskDto(t.getId(), t.getName(), t.getEmoji(), t.getIntervalDays(),
-                    t.getCreditValue(), t.getAvailableWindows(), t.getCreatedAt()));
+                    t.getCreditValue(), t.getAvailableWindows(), t.getSeasons(), t.getCreatedAt()));
         }
         for (Completion c : completions.findByHomeCode(homeCode)) {
             b.completions.add(new CompletionDto(c.getId(), c.getTaskId(), c.getMemberId(),
@@ -157,6 +157,10 @@ public class BackupService {
             entity.setIntervalDays(Math.max(0, t.intervalDays));
             entity.setCreditValue(Math.max(0, t.creditValue));
             entity.setAvailableWindows(t.availableWindows);
+            // Stored raw: a backup written before seasons existed has no key, which deserializes
+            // to null — and null already means "all year round". Garbage is neutralised on read
+            // by Seasons.isInSeason failing open.
+            entity.setSeasons(t.seasons);
             if (t.createdAt != null) {
                 entity.setCreatedAt(t.createdAt);
             }
@@ -238,7 +242,7 @@ public class BackupService {
     }
 
     public record TaskDto(Long id, String name, String emoji, int intervalDays, int creditValue,
-                          String availableWindows, Instant createdAt) {
+                          String availableWindows, String seasons, Instant createdAt) {
     }
 
     public record SpreeTierDto(int days, int credits) {

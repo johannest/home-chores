@@ -32,7 +32,7 @@ class DeleteHomeTest {
         List<ChoreTask> tasks = service.tasksOf(code);
 
         // Give the home something in every table the wipe has to reach.
-        service.updateTask(tasks.get(0).getId(), "Paid chore", "💎", 0, 5, null);
+        service.updateTask(tasks.get(0).getId(), "Paid chore", "💎", 0, 5, null, null);
         service.complete(tasks.get(0).getId(), alex.getId());
         service.complete(tasks.get(1).getId(), sam.getId());
         credits.addTier(code, 3, 10);

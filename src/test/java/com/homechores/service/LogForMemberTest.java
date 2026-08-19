@@ -118,7 +118,7 @@ class LogForMemberTest {
         String code = alex.getHomeCode();
         Member sam = service.joinHome(code, "Sam").orElseThrow();
         ChoreTask chore = service.tasksOf(code).get(0);
-        service.updateTask(chore.getId(), chore.getName(), chore.getEmoji(), 0, 4, null);
+        service.updateTask(chore.getId(), chore.getName(), chore.getEmoji(), 0, 4, null, null);
 
         service.completeFor(chore.getId(), sam.getId(), alex.getId());
 

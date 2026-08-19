@@ -1,9 +1,11 @@
 package com.homechores.ui;
 
+import com.homechores.domain.Cadence;
 import com.homechores.domain.Completion;
 import com.homechores.domain.DivisionStyle;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
+import com.homechores.domain.Seasons;
 import com.homechores.domain.TimeWindows;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
@@ -24,6 +26,11 @@ import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.data.value.ValueChangeMode;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Predicate;
 
 /** The chore board: daily progress, leaderboard, and tap-to-complete chore cards. */
 class ChoresPanel extends VerticalLayout {
@@ -36,7 +43,42 @@ class ChoresPanel extends VerticalLayout {
     private final Div dailyStrip = new Div();
     private final Div undoStrip = new Div();
     private final Div leaderboard = new Div();
+    private final Div filterBar = new Div();
     private final Div taskGrid = new Div();
+
+    /**
+     * One narrowing lens over the board. Declaration order is the order the chips render in.
+     *
+     * <p>Lenses, not a partition: an off-season chore shows under both {@link #OFF_SEASON} and its
+     * own cadence chip, so the counts would not add up to the number of chores. That is why the
+     * chips carry no count pills.
+     */
+    private enum Filter {
+        ALL(null, "board.filter.all"),
+        DUE_NOW(null, "board.filter.dueNow"),
+        ANYTIME(Cadence.ANYTIME, "board.filter.anytime"),
+        DAILY(Cadence.DAILY, "board.filter.daily"),
+        WEEKLY(Cadence.WEEKLY, "board.filter.weekly"),
+        MONTHLY(Cadence.MONTHLY, "board.filter.monthly"),
+        MULTI_MONTH(Cadence.MULTI_MONTH, "board.filter.multiMonth"),
+        YEARLY(Cadence.YEARLY, "board.filter.yearly"),
+        OFF_SEASON(null, "board.filter.offSeason");
+
+        private final Cadence cadence;
+        private final String key;
+
+        Filter(Cadence cadence, String key) {
+            this.cadence = cadence;
+            this.key = key;
+        }
+    }
+
+    /**
+     * The member's chosen lens. A plain field is enough: HomeView builds this panel once per
+     * navigation and holds it, so it survives every HomeState rebuild — the same trick
+     * StatsPanel uses for its sub-tab.
+     */
+    private Filter filter = Filter.ALL;
 
     ChoresPanel(ChoreService service, CreditService creditService, String homeCode, Long memberId) {
         this.service = service;
@@ -48,11 +90,15 @@ class ChoresPanel extends VerticalLayout {
         setWidthFull();
 
         leaderboard.addClassName("leaderboard");
+        filterBar.addClassName("filter-bar");
         taskGrid.addClassName("task-grid");
 
         undoStrip.setVisible(false);
+        // Hidden until there is something worth choosing between, so a simple home looks
+        // exactly as it did before.
+        filterBar.setVisible(false);
         add(dailyStrip, undoStrip, sectionLabel(T.tr("board.leaderboard")), leaderboard,
-                sectionLabel(T.tr("board.tapPrompt")), taskGrid);
+                sectionLabel(T.tr("board.tapPrompt")), filterBar, taskGrid);
     }
 
     private Div sectionLabel(String text) {
@@ -134,17 +180,128 @@ class ChoresPanel extends VerticalLayout {
     }
 
     private void renderTasks(boolean admin) {
+        Home home = service.findHome(homeCode).orElse(null);
+        boolean rotating = home != null && home.getDivisionStyle() == DivisionStyle.ROTATING;
+        // One snapshot for both the chips and the grid, so they can never disagree.
+        List<TaskView> all = service.taskViews(homeCode, memberId, SessionContext.timeZone());
+
+        List<Filter> chips = availableChips(all);
+        if (chips.size() < 2) {
+            chips = List.of(Filter.ALL); // nothing worth choosing between; the bar stays hidden
+        }
+        if (!chips.contains(filter)) {
+            filter = Filter.ALL; // the bucket vanished, or the bar is hidden entirely
+        }
+        List<TaskView> shown = select(all, rotating);
+        if (shown.isEmpty() && filter != Filter.ALL) {
+            // Never leave the member staring at a blank board wondering what they broke.
+            // Fires in practice when you filter to "Due now" and complete the last due chore.
+            filter = Filter.ALL;
+            shown = select(all, rotating);
+        }
+
+        renderFilters(chips, admin);
+
         taskGrid.removeAll();
-        boolean rotating = service.findHome(homeCode)
-                .map(h -> h.getDivisionStyle() == DivisionStyle.ROTATING).orElse(false);
-        for (TaskView view : service.taskViews(homeCode, memberId, SessionContext.timeZone())) {
+        for (TaskView view : shown) {
             taskGrid.add(taskCard(view, rotating));
         }
-        if (service.findHome(homeCode).map(Home::isAllowOtherHelp).orElse(true)) {
-            taskGrid.add(otherHelpCard());
+        // Neither tile is a chore, so under a narrowed lens they would just dilute the answer.
+        // "All" is always the first chip, so both stay one tap away.
+        if (filter == Filter.ALL) {
+            if (home == null || home.isAllowOtherHelp()) {
+                taskGrid.add(otherHelpCard());
+            }
+            if (admin) {
+                taskGrid.add(addCard());
+            }
         }
-        if (admin) {
-            taskGrid.add(addCard());
+    }
+
+    /** The views the current lens shows. */
+    private List<TaskView> select(List<TaskView> all, boolean rotating) {
+        Predicate<TaskView> keep = matches(filter);
+        List<TaskView> out = new ArrayList<>();
+        for (TaskView v : all) {
+            // Under enforced rotation the member's own card is the only completable one; hiding it
+            // behind a lens would turn the board into a dead end.
+            if (keep.test(v) || (rotating && v.assignedToMe(memberId))) {
+                out.add(v);
+            }
+        }
+        return out;
+    }
+
+    private Predicate<TaskView> matches(Filter f) {
+        return switch (f) {
+            case ALL -> v -> true;
+            // "Could I tap this right now, time-wise?" — a chore booked by someone else or capped
+            // by the streak rule is still due, so it stays listed.
+            case DUE_NOW -> v -> v.lockReason() != LockReason.NOT_DUE
+                    && v.lockReason() != LockReason.OUTSIDE_HOURS
+                    && v.lockReason() != LockReason.OUT_OF_SEASON;
+            case OFF_SEASON -> v -> v.lockReason() == LockReason.OUT_OF_SEASON;
+            default -> v -> Cadence.of(v.task().getIntervalDays()) == f.cadence;
+        };
+    }
+
+    /**
+     * Which chips are worth showing. Empty buckets are left out, and a chip that would select
+     * everything is noise rather than a choice.
+     */
+    private List<Filter> availableChips(List<TaskView> all) {
+        Map<Filter, Integer> counts = new LinkedHashMap<>();
+        for (Filter f : Filter.values()) {
+            int n = 0;
+            for (TaskView v : all) {
+                if (matches(f).test(v)) {
+                    n++;
+                }
+            }
+            counts.put(f, n);
+        }
+
+        List<Filter> cadenceChips = new ArrayList<>();
+        for (Filter f : Filter.values()) {
+            if (f.cadence != null && counts.get(f) > 0) {
+                cadenceChips.add(f);
+            }
+        }
+
+        List<Filter> chips = new ArrayList<>();
+        chips.add(Filter.ALL);
+        if (counts.get(Filter.DUE_NOW) > 0 && counts.get(Filter.DUE_NOW) < all.size()) {
+            chips.add(Filter.DUE_NOW);
+        }
+        // A single non-empty cadence bucket is just "All" wearing a different label.
+        if (cadenceChips.size() >= 2) {
+            chips.addAll(cadenceChips);
+        }
+        if (counts.get(Filter.OFF_SEASON) > 0) {
+            chips.add(Filter.OFF_SEASON);
+        }
+        return chips;
+    }
+
+    private void renderFilters(List<Filter> chips, boolean admin) {
+        filterBar.removeAll();
+        // "All" on its own is not a choice — but "All / Due now" is, so one real alternative
+        // beside it is enough to earn the row.
+        filterBar.setVisible(chips.size() >= 2);
+        for (Filter f : chips) {
+            Div chip = new Div();
+            chip.addClassName("filter-chip");
+            if (f == filter) {
+                chip.addClassName("selected");
+            }
+            chip.setText(T.tr(f.key));
+            chip.addClickListener(e -> {
+                filter = f;
+                // Re-render this board only. Never refresh() and never bump HomeState: one
+                // member's view preference must not redraw the whole family's screens.
+                renderTasks(admin);
+            });
+            filterBar.add(chip);
         }
     }
 
@@ -204,6 +361,11 @@ class ChoresPanel extends VerticalLayout {
 
     /** The single most relevant status line for a card. */
     private String badgeText(TaskView view, boolean rotating) {
+        // Before the due check on purpose: an out-of-season yearly chore would otherwise badge
+        // "in 200d", which is true and tells the member nothing useful.
+        if (view.lockReason() == LockReason.OUT_OF_SEASON) {
+            return T.tr("board.badge.season", Seasons.displayCompact(view.task().getSeasons()));
+        }
         if (!view.due()) {
             long d = ChronoUnit.DAYS.between(LocalDate.now(), view.nextDueDate());
             return d <= 0 ? T.tr("board.badge.dueNow") : T.tr("board.badge.dueIn", d);

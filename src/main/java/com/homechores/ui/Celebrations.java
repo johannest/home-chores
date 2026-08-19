@@ -1,6 +1,7 @@
 package com.homechores.ui;
 
 import com.homechores.domain.Feedback;
+import com.homechores.domain.Seasons;
 import com.homechores.service.ChoreService;
 import com.homechores.service.ChoreService.CompleteOutcome;
 import com.vaadin.flow.component.UI;
@@ -13,6 +14,8 @@ import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.FlexComponent;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
+import java.util.Locale;
+import java.util.stream.Collectors;
 
 /** Fires confetti and shows congratulation dialogs (with quick feedback capture). */
 final class Celebrations {
@@ -78,10 +81,19 @@ final class Celebrations {
             case NOT_ASSIGNED -> T.tr("blocked.notAssigned", chore);
             case OUTSIDE_HOURS -> T.tr("blocked.outsideHours", chore,
                     com.homechores.domain.TimeWindows.displayCompact(o.task().getAvailableWindows()));
+            case OUT_OF_SEASON -> T.tr("blocked.outOfSeason", chore,
+                    seasonWords(o.task().getSeasons()));
             default -> T.tr("blocked.generic", chore);
         };
         Notification n = Notification.show(msg, 4000, Notification.Position.MIDDLE);
         n.addThemeVariants(NotificationVariant.LUMO_CONTRAST);
+    }
+
+    /** Localized season names for a sentence. The card badge uses emoji; prose uses words. */
+    private static String seasonWords(String seasons) {
+        return Seasons.toList(seasons).stream()
+                .map(s -> T.tr("season." + s.name().toLowerCase(Locale.ROOT)))
+                .collect(Collectors.joining(", "));
     }
 
     private static void showDialog(ChoreService service, CompleteOutcome o, Runnable onUndo,

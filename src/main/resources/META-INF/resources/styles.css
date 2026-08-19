@@ -153,6 +153,44 @@ vaadin-select::part(label) {
 }
 
 /* ---- Task cards ---- */
+/* ---- Board filter chips ----
+   A single-select row of lenses above the grid. Wrapping is not cosmetic: the page sets
+   overflow-x: hidden, so a row that ran off the side would be silently clipped rather than
+   scrollable. Visuals deliberately reuse the leaderboard's chip recipe, selected ring included. */
+.filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lumo-space-xs);
+    width: 100%;
+    margin: 0 0 var(--lumo-space-s);
+}
+.filter-chip {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--lumo-base-color);
+    border: 1px solid var(--lumo-contrast-10pct);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+.filter-chip:hover {
+    border-color: var(--lumo-contrast-30pct);
+}
+.filter-chip.selected {
+    border-color: var(--lumo-primary-color);
+    box-shadow: 0 0 0 2px var(--lumo-primary-color-10pct);
+    color: var(--lumo-primary-text-color);
+}
+
+/* Four season labels are wider than a 320px dialog, and with overflow-x hidden the overflow
+   is truncated rather than scrollable. */
+vaadin-checkbox-group::part(group-field) {
+    flex-wrap: wrap;
+}
+
 .task-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -541,21 +579,42 @@ vaadin-select::part(label) {
     color: var(--lumo-secondary-text-color);
 }
 
-/* ---- Admin lists ---- */
+/* ---- Admin cards ----
+   Each admin tool is a <vaadin-details>: the card is the host, the title is the summary row,
+   and the body collapses. Which ones start open is decided in AdminPanel.section(). At rest the
+   whole page is about one phone screen instead of seven. */
 .admin-section {
     background: var(--lumo-base-color);
     border: 1px solid var(--lumo-contrast-10pct);
     border-radius: var(--lumo-border-radius-l);
     padding: var(--lumo-space-m);
-    margin-bottom: var(--lumo-space-m);
+    /* Lumo gives vaadin-details `margin: space-xs 0`; pin both ends so a stack of collapsed
+       cards has even gaps. */
+    margin: 0 0 var(--lumo-space-m);
     /* Span the page: the parent layout aligns children to the start, which would
        otherwise shrink each section to its content and truncate field labels. */
     width: 100%;
     box-sizing: border-box;
 }
-.admin-section h3 {
-    margin: 0 0 var(--lumo-space-s);
-    font-size: 1rem;
+/* The title row, which for a collapsed card is the only thing on screen. Lumo styles a summary
+   as muted secondary text at weight 500 — too quiet for that job — and ships
+   `white-space: nowrap`, which with the page's overflow-x: hidden would silently clip the longer
+   Finnish and Swedish headings instead of wrapping them. */
+.admin-section > vaadin-details-summary {
+    color: var(--lumo-body-text-color);
+    font-weight: 600;
+    white-space: normal;
+}
+/* Lumo pads the content part as well; the card already has padding, so keep only the gap the
+   old <h3> used to contribute below itself. */
+.admin-section::part(content) {
+    padding: var(--lumo-space-s) 0 0;
+}
+/* A card with something actually waiting in it. Same role as .nav-badge on the Admin tab:
+   readable as urgent even when folded. */
+.admin-urgent > vaadin-details-summary {
+    color: var(--lumo-primary-text-color);
+    font-weight: 700;
 }
 
 /* The one irreversible action on the page — visually separated so it isn't tapped
@@ -565,7 +624,7 @@ vaadin-select::part(label) {
     background: hsla(0, 84%, 60%, 0.04);
     margin-top: var(--lumo-space-l);
 }
-.danger-section h3 {
+.danger-section > vaadin-details-summary {
     color: var(--lumo-error-text-color, #b91c1c);
 }
 .list-row {
@@ -641,13 +700,23 @@ vaadin-select::part(label) {
         border-color: var(--lumo-contrast-10pct);
         transform: none;
     }
+    .filter-chip:hover {
+        border-color: var(--lumo-contrast-10pct);
+    }
+    .filter-chip.selected:hover {
+        border-color: var(--lumo-primary-color);
+    }
 }
 
 @media (pointer: coarse) {
     /* The grey flash Safari/Chrome paint over a tapped element fights the card's own
        press animation. */
-    .task-card, .feedback-btn, .member-chip {
+    .task-card, .feedback-btn, .member-chip, .filter-chip {
         -webkit-tap-highlight-color: transparent;
+    }
+    /* The min-height rules below only match vaadin-button, so a plain Div chip needs its own. */
+    .filter-chip {
+        min-height: 36px;
     }
     /* Small icon buttons are ~32px; a finger needs ~44px. Pad the hit area without
        growing the visual button. */
@@ -656,6 +725,10 @@ vaadin-select::part(label) {
     .list-row vaadin-button {
         min-height: 40px;
         min-width: 40px;
+    }
+    /* Lumo's summary padding lands at ~36px; opening a card is a primary action here. */
+    .admin-section > vaadin-details-summary {
+        min-height: 40px;
     }
 }
 
@@ -718,6 +791,14 @@ vaadin-select::part(label) {
     }
 
     /* Two columns of chores stay reachable down to the narrowest phones. */
+    /* Up to nine chips would otherwise stack three rows deep on a 375px phone. */
+    .filter-bar {
+        gap: 4px;
+    }
+    .filter-chip {
+        font-size: 0.8rem;
+        padding: 5px 10px;
+    }
     .task-grid {
         grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
         gap: var(--lumo-space-s);

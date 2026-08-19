@@ -6,6 +6,8 @@ import com.homechores.domain.DivisionStyle;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
 import com.homechores.domain.RejoinRequest;
+import com.homechores.domain.Season;
+import com.homechores.domain.Seasons;
 import com.homechores.domain.SpreeTier;
 import com.homechores.domain.TimeWindows;
 import com.homechores.service.BackupService;
@@ -15,6 +17,8 @@ import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.checkbox.Checkbox;
+import com.vaadin.flow.component.checkbox.CheckboxGroup;
+import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.Div;
@@ -35,7 +39,9 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 /** Admin-only tools: approvals, settings, members, chores CRUD, backup/restore. */
@@ -49,6 +55,22 @@ class AdminPanel extends VerticalLayout {
 
     /** How far back the correction list reaches — enough for "that was this morning". */
     private static final int RECENT_LIMIT = 15;
+
+    /** Stable identity for a card's open/closed preference — never the translated title, which
+     *  changes with the language switcher and now embeds a count. */
+    private enum Section {
+        REJOINS, HELP, APPROVALS, LOG_FOR, RECENT,
+        MEMBERS, CHORES, REWARDS, SETTINGS, BACKUP, DANGER
+    }
+
+    /**
+     * Cards the admin has opened or closed by hand; absent means "use the smart default".
+     *
+     * <p>This is what makes collapsing viable at all. Every settings toggle writes through
+     * immediately, which bumps HomeState and rebuilds all eleven sections from scratch — without a
+     * remembered choice, a card would slam shut under the admin's finger on every tap.
+     */
+    private final EnumMap<Section, Boolean> openState = new EnumMap<>(Section.class);
 
     AdminPanel(ChoreService service, CreditService creditService, BackupService backup,
                String homeCode, Long memberId) {
@@ -69,18 +91,34 @@ class AdminPanel extends VerticalLayout {
         add(approvalsSection());
         add(logForSection());
         add(recentSection());
-        add(settingsSection());
+        // Daily work above, weekly work here, set-once configuration below it: settings alone is
+        // ~950px of controls an admin touches at setup and then never again.
         add(membersSection());
         add(choresSection());
         add(rewardsSection());
+        add(settingsSection());
         add(backupSection());
         add(dangerSection());
     }
 
-    private Div section(String title) {
-        Div s = new Div();
+    /**
+     * One collapsible admin card. {@code defaultOpen} is the smart default; a tap on the summary
+     * overrides it for the rest of the visit.
+     */
+    private Details section(Section id, String title, boolean defaultOpen) {
+        Details s = new Details();
         s.addClassName("admin-section");
-        s.add(new com.vaadin.flow.component.html.H3(title));
+        s.setSummaryText(title);
+        // Set the state BEFORE registering the listener. Details reports opened-change from an
+        // element property listener, which fires for server-side writes too — so a programmatic
+        // setOpened during a rebuild looks exactly like a tap.
+        Boolean chosen = openState.get(id);
+        s.setOpened(chosen != null ? chosen : defaultOpen);
+        s.addOpenedChangeListener(e -> {
+            if (e.isFromClient()) {
+                openState.put(id, e.isOpened());
+            }
+        });
         return s;
     }
 
@@ -90,12 +128,13 @@ class AdminPanel extends VerticalLayout {
      * Devices asking to sign back in as an existing member after clearing their browser
      * storage. Rendered only when something is waiting — most families never see it.
      */
-    private Optional<Div> rejoinsSection() {
+    private Optional<Details> rejoinsSection() {
         var requests = service.pendingRejoins(homeCode);
         if (requests.isEmpty()) {
             return Optional.empty();
         }
-        Div s = section(T.tr("admin.rejoins", requests.size()));
+        Details s = section(Section.REJOINS, T.tr("admin.rejoins", requests.size()), true);
+        s.addClassName("admin-urgent");
         Span info = new Span(T.tr("admin.rejoins.info"));
         info.addClassName("sub");
         s.add(info);
@@ -119,11 +158,14 @@ class AdminPanel extends VerticalLayout {
             });
             approve.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SUCCESS,
                     ButtonVariant.LUMO_SMALL);
+            // Icon-only, so it needs a name of its own — as the Other help buttons already have.
+            approve.setAriaLabel(T.tr("admin.approve"));
             Button reject = new Button(VaadinIcon.CLOSE.create(), e -> {
                 service.decideRejoin(r.getId(), memberId, false);
                 refresh();
             });
             reject.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_SMALL);
+            reject.setAriaLabel(T.tr("admin.reject"));
 
             Div row = new Div(box, approve, reject);
             row.addClassName("list-row");
@@ -140,12 +182,13 @@ class AdminPanel extends VerticalLayout {
      * read a reward off, and a kind of help that keeps coming back probably deserves a card
      * of its own on the board.
      */
-    private Optional<Div> otherHelpSection() {
+    private Optional<Details> otherHelpSection() {
         var waiting = service.pendingOtherHelp(homeCode);
         if (waiting.isEmpty()) {
             return Optional.empty();
         }
-        Div s = section(T.tr("admin.help", waiting.size()));
+        Details s = section(Section.HELP, T.tr("admin.help", waiting.size()), true);
+        s.addClassName("admin-urgent");
         Span info = new Span(T.tr("admin.help.info"));
         info.addClassName("sub");
         s.add(info);
@@ -236,12 +279,7 @@ class AdminPanel extends VerticalLayout {
         emoji.setWidthFull();
         emoji.setMaxLength(4);
         emoji.setPlaceholder("🙋");
-        IntegerField interval = new IntegerField(T.tr("admin.chore.interval"));
-        interval.setMin(0);
-        interval.setValue(0);
-        interval.setStepButtonsVisible(true);
-        interval.setWidthFull();
-        interval.setHelperText(T.tr("admin.chore.interval.helper"));
+        FrequencyField freq = new FrequencyField();
         IntegerField credit = new IntegerField(T.tr("admin.chore.credits"));
         credit.setMin(0);
         credit.setValue(Math.max(0, credits));
@@ -255,8 +293,9 @@ class AdminPanel extends VerticalLayout {
                 name.setErrorMessage(T.tr("admin.chore.nameRequired"));
                 return;
             }
-            service.addTask(homeCode, name.getValue(), emoji.getValue(),
-                    interval.getValue() == null ? 0 : Math.max(0, interval.getValue()),
+            // Neither hours nor seasons are asked for here: help that just happened is available
+            // now by definition, and the admin can narrow it later from the chore editor.
+            service.addTask(homeCode, name.getValue(), emoji.getValue(), freq.getIntervalDays(),
                     credit.getValue() == null ? 0 : Math.max(0, credit.getValue()), null);
             d.close();
             toast(T.tr("admin.help.promote.added", name.getValue().trim()));
@@ -268,7 +307,7 @@ class AdminPanel extends VerticalLayout {
             refresh();
         });
 
-        VerticalLayout body = new VerticalLayout(question, name, emoji, interval, credit);
+        VerticalLayout body = new VerticalLayout(question, name, emoji, freq, credit);
         body.setPadding(false);
         d.add(body);
         d.getFooter().add(skip, add);
@@ -297,9 +336,13 @@ class AdminPanel extends VerticalLayout {
 
     // ---- Approvals ----------------------------------------------------------
 
-    private Div approvalsSection() {
+    private Details approvalsSection() {
         var pending = service.pendingApprovals(homeCode);
-        Div s = section(T.tr("admin.pending", pending.size()));
+        Details s = section(Section.APPROVALS, T.tr("admin.pending", pending.size()),
+                !pending.isEmpty());
+        if (!pending.isEmpty()) {
+            s.addClassName("admin-urgent");
+        }
         if (pending.isEmpty()) {
             Span none = new Span(T.tr("admin.pending.none"));
             none.addClassName("sub");
@@ -326,11 +369,14 @@ class AdminPanel extends VerticalLayout {
             });
             approve.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SUCCESS,
                     ButtonVariant.LUMO_SMALL);
+            // Icon-only, so it needs a name of its own — as the Other help buttons already have.
+            approve.setAriaLabel(T.tr("admin.approve"));
             Button reject = new Button(VaadinIcon.CLOSE.create(), e -> {
                 service.reject(c.getId(), memberId);
                 refresh();
             });
             reject.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_SMALL);
+            reject.setAriaLabel(T.tr("admin.reject"));
 
             Div row = new Div(info, approve, reject);
             row.addClassName("list-row");
@@ -346,8 +392,8 @@ class AdminPanel extends VerticalLayout {
      * did it and forgot to tap. The counterpart of the unmark list below — one puts a chore
      * into somebody's history, the other takes one out.
      */
-    private Div logForSection() {
-        Div s = section(T.tr("admin.logFor"));
+    private Details logForSection() {
+        Details s = section(Section.LOG_FOR, T.tr("admin.logFor"), false);
         List<Member> others = service.membersOf(homeCode).stream()
                 .filter(m -> !m.getId().equals(memberId))
                 .toList();
@@ -402,9 +448,9 @@ class AdminPanel extends VerticalLayout {
      * The last few completions, so an admin can unmark a chore that was tapped by mistake
      * — including one already approved, and long after the member's own undo window shut.
      */
-    private Div recentSection() {
-        Div s = section(T.tr("admin.recent"));
+    private Details recentSection() {
         var recent = service.recentCompletions(homeCode, RECENT_LIMIT);
+        Details s = section(Section.RECENT, T.tr("admin.recent", recent.size()), false);
         if (recent.isEmpty()) {
             Span none = new Span(T.tr("admin.recent.none"));
             none.addClassName("sub");
@@ -452,9 +498,9 @@ class AdminPanel extends VerticalLayout {
 
     // ---- Settings -----------------------------------------------------------
 
-    private Div settingsSection() {
+    private Details settingsSection() {
         Home home = service.findHome(homeCode).orElseThrow();
-        Div s = section(T.tr("admin.settings"));
+        Details s = section(Section.SETTINGS, T.tr("admin.settings"), false);
 
         Checkbox approval = new Checkbox(T.tr("admin.requireApproval"));
         approval.setValue(home.isRequireApproval());
@@ -613,9 +659,10 @@ class AdminPanel extends VerticalLayout {
 
     // ---- Members ------------------------------------------------------------
 
-    private Div membersSection() {
-        Div s = section(T.tr("admin.members"));
-        for (Member m : service.membersOf(homeCode)) {
+    private Details membersSection() {
+        List<Member> members = service.membersOf(homeCode);
+        Details s = section(Section.MEMBERS, T.tr("admin.members", members.size()), false);
+        for (Member m : members) {
             Div dot = new Div();
             dot.addClassName("dot");
             dot.getStyle().set("background", m.getColor());
@@ -689,13 +736,14 @@ class AdminPanel extends VerticalLayout {
 
     // ---- Chores -------------------------------------------------------------
 
-    private Div choresSection() {
-        Div s = section(T.tr("admin.chores"));
+    private Details choresSection() {
+        List<ChoreTask> chores = service.tasksOf(homeCode);
+        Details s = section(Section.CHORES, T.tr("admin.chores", chores.size()), false);
         Button add = new Button(T.tr("admin.addChore"), VaadinIcon.PLUS.create(), e -> choreDialog(null));
         add.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SMALL);
         s.add(add);
 
-        for (ChoreTask t : service.tasksOf(homeCode)) {
+        for (ChoreTask t : chores) {
             Div emoji = new Div();
             emoji.setText(t.getEmoji());
             emoji.getStyle().set("font-size", "1.4rem");
@@ -732,12 +780,7 @@ class AdminPanel extends VerticalLayout {
         TextField emoji = new TextField(T.tr("admin.chore.emoji"));
         emoji.setWidthFull();
         emoji.setMaxLength(4);
-        IntegerField interval = new IntegerField(T.tr("admin.chore.interval"));
-        interval.setStepButtonsVisible(true);
-        interval.setMin(0);
-        interval.setValue(0);
-        interval.setWidthFull();
-        interval.setHelperText(T.tr("admin.chore.interval.helper"));
+        FrequencyField freq = new FrequencyField();
         IntegerField credit = new IntegerField(T.tr("admin.chore.credits"));
         credit.setStepButtonsVisible(true);
         credit.setMin(0);
@@ -748,13 +791,21 @@ class AdminPanel extends VerticalLayout {
         hours.setWidthFull();
         hours.setPlaceholder("08:00-10:00, 18:00-22:00");
         hours.setHelperText(T.tr("admin.chore.hours.helper"));
+        // Time of day above, time of year below: the two availability constraints sit together so
+        // the difference between them is visible rather than explained.
+        CheckboxGroup<Season> seasons = new CheckboxGroup<>(T.tr("admin.chore.seasons"));
+        seasons.setItems(Season.values());
+        seasons.setItemLabelGenerator(x -> T.tr("season." + x.name().toLowerCase(Locale.ROOT)));
+        seasons.setHelperText(T.tr("admin.chore.seasons.helper"));
+        seasons.setWidthFull();
         if (existing != null) {
             name.setValue(existing.getName());
             emoji.setValue(existing.getEmoji());
-            interval.setValue(existing.getIntervalDays());
+            freq.setIntervalDays(existing.getIntervalDays());
             credit.setValue(existing.getCreditValue());
             hours.setValue(existing.getAvailableWindows() == null
                     ? "" : existing.getAvailableWindows());
+            seasons.setValue(Seasons.asSet(existing.getSeasons()));
         }
         Button save = new Button(T.tr("common.save"), e -> {
             if (name.isEmpty()) {
@@ -770,19 +821,22 @@ class AdminPanel extends VerticalLayout {
                 hours.setErrorMessage(T.tr("admin.chore.hours.error"));
                 return;
             }
-            int days = interval.getValue() == null ? 0 : Math.max(0, interval.getValue());
+            int days = freq.getIntervalDays();
             int credits = credit.getValue() == null ? 0 : Math.max(0, credit.getValue());
+            // The Set overload cannot fail — the values come straight from the enum.
+            String seasonValue = Seasons.normalize(seasons.getValue());
             if (existing == null) {
-                service.addTask(homeCode, name.getValue(), emoji.getValue(), days, credits, windows);
+                service.addTask(homeCode, name.getValue(), emoji.getValue(), days, credits, windows,
+                        seasonValue);
             } else {
                 service.updateTask(existing.getId(), name.getValue(), emoji.getValue(), days,
-                        credits, windows);
+                        credits, windows, seasonValue);
             }
             d.close();
             refresh();
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        VerticalLayout body = new VerticalLayout(name, emoji, interval, credit, hours);
+        VerticalLayout body = new VerticalLayout(name, emoji, freq, credit, hours, seasons);
         body.setPadding(false);
         d.add(body);
         d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), save);
@@ -791,8 +845,8 @@ class AdminPanel extends VerticalLayout {
 
     // ---- Rewards (credits) --------------------------------------------------
 
-    private Div rewardsSection() {
-        Div s = section(T.tr("admin.rewards"));
+    private Details rewardsSection() {
+        Details s = section(Section.REWARDS, T.tr("admin.rewards"), false);
 
         Div tiersTitle = new Div();
         tiersTitle.setText(T.tr("admin.spree.title"));
@@ -894,8 +948,8 @@ class AdminPanel extends VerticalLayout {
 
     // ---- Backup / restore ---------------------------------------------------
 
-    private Div backupSection() {
-        Div s = section(T.tr("admin.backup"));
+    private Details backupSection() {
+        Details s = section(Section.BACKUP, T.tr("admin.backup"), false);
         Span info = new Span(T.tr("admin.backup.info"));
         info.addClassName("sub");
 
@@ -953,8 +1007,8 @@ class AdminPanel extends VerticalLayout {
     // ---- Danger zone --------------------------------------------------------
 
     /** Deleting the whole home. Irreversible, so it sits apart from everything else. */
-    private Div dangerSection() {
-        Div s = section(T.tr("admin.danger"));
+    private Details dangerSection() {
+        Details s = section(Section.DANGER, T.tr("admin.danger"), false);
         s.addClassName("danger-section");
         Span info = new Span(T.tr("admin.deleteHome.info"));
         info.addClassName("sub");

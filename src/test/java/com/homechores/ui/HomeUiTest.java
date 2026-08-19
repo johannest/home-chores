@@ -1,6 +1,7 @@
 package com.homechores.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,12 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
+import com.homechores.domain.Season;
 import com.homechores.service.ChoreService;
 import com.vaadin.flow.component.ClickEvent;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.ComponentUtil;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
+import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.select.Select;
@@ -22,6 +25,8 @@ import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.server.VaadinSession;
 import com.vaadin.testbench.unit.SpringUIUnitTest;
+import java.time.LocalDate;
+import java.util.List;
 import java.util.Locale;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -136,6 +141,70 @@ class HomeUiTest extends SpringUIUnitTest {
         return $(Span.class).all().stream().anyMatch(s -> text.equals(s.getText()));
     }
 
+    /** An admin card by the start of its summary — the counts in some titles move around. */
+    private Details adminSection(String summaryPrefix) {
+        return $(Details.class).all().stream()
+                .filter(d -> d.getSummaryText() != null
+                        && d.getSummaryText().startsWith(summaryPrefix))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No admin section: " + summaryPrefix));
+    }
+
+    /**
+     * Toggles an admin card the way a tap does.
+     *
+     * <p>{@code DetailsTester.openDetails()} only calls {@code setOpened} server-side, which is
+     * exactly the case the panel must ignore. A real tap does two things: it changes the property
+     * and it reports the change as user-originated. Both are needed here, or the test would not
+     * touch the listener that remembers the admin's choice.
+     */
+    private void toggleSection(String summaryPrefix, boolean open) {
+        Details d = adminSection(summaryPrefix);
+        if (open) {
+            test(d).openDetails();
+        } else {
+            test(d).closeDetails();
+        }
+        ComponentUtil.fireEvent(d, new Details.OpenedChangeEvent(d, true));
+    }
+
+    private void openSection(String summaryPrefix) {
+        toggleSection(summaryPrefix, true);
+    }
+
+    private List<Div> filterChips() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("filter-chip") && usable(d))
+                .toList();
+    }
+
+    private void clickFilterChip(String label) {
+        Div chip = filterChips().stream()
+                .filter(d -> label.equals(d.getText()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No filter chip: " + label
+                        + " (have " + filterChips().stream().map(Div::getText).toList() + ")"));
+        ComponentUtil.fireEvent(chip, new ClickEvent<>(chip));
+    }
+
+    private List<String> chipLabels() {
+        return filterChips().stream().map(Div::getText).toList();
+    }
+
+    private String selectedChip() {
+        return filterChips().stream()
+                .filter(d -> d.getClassNames().contains("selected"))
+                .map(Div::getText)
+                .findFirst().orElse(null);
+    }
+
+    /** Chore cards currently on the board, excluding the "Other help" and "Add chore" tiles. */
+    private long visibleChoreCards() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("complete-area") && usable(d))
+                .count();
+    }
+
     // ---- tests --------------------------------------------------------------
 
     @Test
@@ -191,6 +260,7 @@ class HomeUiTest extends SpringUIUnitTest {
 
         // Switch to the Admin tab (index 2) and add a chore.
         $(Tabs.class).first().setSelectedIndex(2);
+        openSection("Chores");
         clickButton("Add chore");
         setField("Chore name", "Iron shirts");
         clickButton("Save");
@@ -250,6 +320,7 @@ class HomeUiTest extends SpringUIUnitTest {
         SessionContext.signIn(admin.getId(), code);
         navigate(HomeView.class);
         $(Tabs.class).first().setSelectedIndex(2); // Admin tab
+        openSection("Danger zone");
 
         clickButton("Delete this home");
         setField("Type the home code " + code + " to confirm", "WRONG");
@@ -324,6 +395,7 @@ class HomeUiTest extends SpringUIUnitTest {
         SessionContext.signIn(admin.getId(), code);
         navigate(HomeView.class);
         $(Tabs.class).first().setSelectedIndex(2); // Admin tab
+        openSection("Recent chores");
 
         clickButton("Unmark");
         clickButton("Confirm");
@@ -403,6 +475,7 @@ class HomeUiTest extends SpringUIUnitTest {
         SessionContext.signIn(admin.getId(), code);
         navigate(HomeView.class);
         $(Tabs.class).first().setSelectedIndex(2); // Admin tab
+        openSection("Log a chore for someone");
 
         // "Who did it" offers the other members only, so the default is already Sam.
         Select<Member> who = selectByLabel("Who did it");
@@ -443,5 +516,268 @@ class HomeUiTest extends SpringUIUnitTest {
         SessionContext.signIn(sam.getId(), sam.getHomeCode());
         navigate(HomeView.class);
         assertEquals(2, tabCount());
+    }
+
+    // ---- Board filter chips -------------------------------------------------
+
+    @Test
+    void freshHome_offersOnlyTheCadencesItActuallyHas() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        // Drop the seeded dog walk: it is the one chore with availability hours, so outside
+        // 08-10 / 18-22 it becomes the thing that makes "Due now" a real distinction — which
+        // would make this assertion depend on what time the suite happens to run.
+        service.tasksOf(code).stream()
+                .filter(t -> t.getAvailableWindows() != null)
+                .forEach(t -> service.deleteTask(t.getId()));
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+
+        // Nine seeded chores are "anytime", water plants is weekly. Nothing else exists, so no
+        // other bucket earns a chip — and "Due now" would select all ten, so it is suppressed.
+        assertEquals(List.of("All", "Anytime", "Weekly"), chipLabels());
+        assertEquals("All", selectedChip());
+    }
+
+    /** The mirror of the above: a chore outside its hours is exactly what "Due now" is for. */
+    @Test
+    void dueNowChip_appearsWhenSomethingIsNotTappableRightNow() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        // A window that cannot contain "now", whatever the hour, so this does not drift with
+        // the clock: complete one interval chore instead, which parks it until tomorrow.
+        ChoreTask weekly = service.tasksOf(code).stream()
+                .filter(t -> t.getIntervalDays() > 0).findFirst().orElseThrow();
+        service.completeFor(weekly.getId(), alex.getId(), alex.getId());
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+
+        assertTrue(chipLabels().contains("Due now"),
+                "something is parked, so filtering to what is actionable means something");
+        clickFilterChip("Due now");
+        assertFalse($(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("task-card") && usable(d))
+                .anyMatch(d -> d.getElement().getTextRecursively().contains("Water plants")),
+                "the chore we just did is not due now");
+    }
+
+    @Test
+    void narrowingToOneCadence_showsOnlyThoseChores_andHidesTheExtraTiles() {
+        Member alex = service.createHome("Shared", "Alex");
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+        assertEquals(11, visibleChoreCards());
+
+        clickFilterChip("Weekly");
+
+        assertEquals(1, visibleChoreCards(), "only water plants is weekly");
+        assertEquals("Weekly", selectedChip());
+        assertTrue($(Div.class).all().stream()
+                .noneMatch(d -> d.getClassNames().contains("help-card") && usable(d)),
+                "Other help is not a weekly chore");
+        assertTrue($(Div.class).all().stream()
+                .noneMatch(d -> d.getClassNames().contains("add-card") && usable(d)),
+                "nor is the Add chore tile");
+    }
+
+    @Test
+    void chosenFilter_survivesARebuildFromAnotherDevice() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        clickFilterChip("Weekly");
+
+        // Somebody else adds a chore, which bumps the home and rebuilds the whole view.
+        service.addTask(code, "Sweep the porch", "🧹", 0);
+
+        assertEquals("Weekly", selectedChip(), "a personal lens is not other people's business");
+    }
+
+    /** The one case that must never leave a blank board staring back at the member. */
+    @Test
+    void completingTheLastDueChore_fallsBackToAll_ratherThanEmptying() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        Home home = service.findHome(code).orElseThrow();
+        home.setConfirmCompletion(false);
+        service.saveHome(home);
+        // "Due now" can only run out if every chore has an interval, so replace the seeded set
+        // with three weekly ones and pre-do one — that third card is what makes "Due now" a real
+        // choice rather than a synonym for "All".
+        for (ChoreTask t : service.tasksOf(code)) {
+            service.deleteTask(t.getId());
+        }
+        service.addTask(code, "Weekly A", "🅰️", 7);
+        service.addTask(code, "Weekly B", "🅱️", 7);
+        ChoreTask done = service.addTask(code, "Weekly C", "🇨", 7);
+        service.completeFor(done.getId(), alex.getId(), alex.getId());
+
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        clickFilterChip("Due now");
+        assertEquals(2, visibleChoreCards(), "two of the three are still due");
+
+        clickChoreCard(0);
+        clickChoreCard(0); // the board re-rendered, so the survivor is index 0 again
+
+        assertEquals(3, service.completionCount(alex.getId()), "all three really were done");
+        // Nothing is due any more, so "Due now" is gone and with it the last real choice — the row
+        // retires itself. What matters is that the member is looking at their chores, not a blank.
+        assertEquals(3, visibleChoreCards(), "board must not be left empty by a filter");
+        assertTrue(filterChips().isEmpty(), "no alternatives left, so no row");
+    }
+
+    @Test
+    void offSeasonChore_isLockedAndGetsItsOwnChip() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        Season opposite = Season.values()[(Season.of(LocalDate.now().getMonth()).ordinal() + 2) % 4];
+        service.addTask(code, "Shovel snow", "❄️", 0, 0, null, opposite.name());
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+
+        assertTrue(chipLabels().contains("Off-season"), "a parked chore is discoverable");
+        clickFilterChip("Off-season");
+        assertEquals(1, visibleChoreCards());
+        assertTrue($(Div.class).all().stream()
+                .anyMatch(d -> d.getClassNames().contains("task-card")
+                        && d.getClassNames().contains("locked") && usable(d)),
+                "an out-of-season card reads as locked");
+
+        assertEquals(0, service.completionCount(alex.getId()));
+        clickChoreCard(0);
+        assertEquals(0, service.completionCount(alex.getId()), "and cannot be tapped through");
+    }
+
+    @Test
+    void offSeasonChip_isAbsentWhenNothingIsParked() {
+        Member alex = service.createHome("Shared", "Alex");
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+
+        assertFalse(chipLabels().contains("Off-season"));
+    }
+
+    // ---- Frequency presets --------------------------------------------------
+
+    /** Any interval must survive a trip through the editor, preset or not. */
+    @Test
+    void frequencyField_roundTripsEveryInterval() {
+        FrequencyField field = new FrequencyField();
+        for (int days : new int[] {0, 1, 7, 14, 30, 90, 365, 5, 45, 200}) {
+            field.setIntervalDays(days);
+            assertEquals(days, field.getIntervalDays(), days + " days should survive the editor");
+        }
+        field.setIntervalDays(-3);
+        assertEquals(0, field.getIntervalDays(), "a negative clamps to anytime");
+    }
+
+    @Test
+    void choreDialog_savesThePresetsDayCount() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        $(Tabs.class).first().setSelectedIndex(2);
+        openSection("Chores");
+        clickButton("Add chore");
+
+        setField("Chore name", "Change the tyres");
+        Select<FrequencyField.Preset> freq = selectByLabel("How often?");
+        freq.setValue(FrequencyField.Preset.QUARTERLY);
+        clickButton("Save");
+
+        ChoreTask saved = service.tasksOf(code).stream()
+                .filter(t -> t.getName().equals("Change the tyres")).findFirst().orElseThrow();
+        assertEquals(90, saved.getIntervalDays(), "the preset writes its canonical day count");
+    }
+
+    // ---- Admin panel sections ----------------------------------------------
+
+    @Test
+    void adminPanel_startsWithTheSetAndForgetSectionsCollapsed() {
+        Member alex = service.createHome("Shared", "Alex");
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+        $(Tabs.class).first().setSelectedIndex(2);
+
+        for (String title : List.of("Home settings", "Backup", "Danger zone", "Chores",
+                "Members", "Rewards", "Recent chores", "Log a chore")) {
+            assertFalse(adminSection(title).isOpened(), title + " should start collapsed");
+        }
+    }
+
+    @Test
+    void sectionCounts_showInTheSummary_soACollapsedCardStillTellsYouSomething() {
+        Member alex = service.createHome("Shared", "Alex");
+        service.joinHome(alex.getHomeCode(), "Sam");
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+        $(Tabs.class).first().setSelectedIndex(2);
+
+        assertEquals("Chores (11)", adminSection("Chores").getSummaryText());
+        assertEquals("Members (2)", adminSection("Members").getSummaryText());
+    }
+
+    /**
+     * The section that has teeth for the isFromClient guard: without it the programmatic
+     * auto-expand records a preference nobody expressed, and an empty queue would stay open forever.
+     */
+    @Test
+    void pendingApprovals_expandOnlyWhileSomethingIsWaiting() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        Home home = service.findHome(code).orElseThrow();
+        home.setRequireApproval(true);
+        service.saveHome(home);
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        service.complete(service.tasksOf(code).get(0).getId(), sam.getId());
+
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        $(Tabs.class).first().setSelectedIndex(2);
+        assertTrue(adminSection("Pending approvals").isOpened(), "a queue opens itself");
+
+        clickButton("Approve");
+
+        assertFalse(adminSection("Pending approvals").isOpened(),
+                "and folds away once it is empty");
+    }
+
+    @Test
+    void openingASection_survivesARebuild() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        $(Tabs.class).first().setSelectedIndex(2);
+        openSection("Home settings");
+
+        // Any mutation bumps the home and rebuilds all eleven sections from scratch.
+        service.addTask(code, "Sweep the porch", "🧹", 0);
+
+        assertTrue(adminSection("Home settings").isOpened(),
+                "the admin's choice outlives the rebuild");
+    }
+
+    @Test
+    void closingAnUrgentSection_sticks() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        Home home = service.findHome(code).orElseThrow();
+        home.setRequireApproval(true);
+        service.saveHome(home);
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        service.complete(service.tasksOf(code).get(0).getId(), sam.getId());
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        $(Tabs.class).first().setSelectedIndex(2);
+
+        toggleSection("Pending approvals", false);
+        service.addTask(code, "Sweep the porch", "🧹", 0);
+
+        assertFalse(adminSection("Pending approvals").isOpened(),
+                "folding a card away is also a choice worth remembering");
     }
 }

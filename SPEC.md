@@ -125,6 +125,10 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
 - **US-21 Booking.** As a member, I can book a chore ("🔖 I'll do it") so nobody
   does it before me; others see who booked it and are blocked. I can cancel my
   booking; completing the chore clears the booking automatically.
+- **US-21b Chore frequency.** As an admin, I can say how often a chore repeats by picking a
+  cadence rather than typing a day count, and I can limit a chore to certain seasons.
+- **US-21c Board filters.** As a member, I can narrow the board to what's due now or to one
+  frequency, and off-season chores stay out of my way without disappearing for good.
 - **US-22 Booking timeout.** As an admin, I can configure how long a booking holds
   (1/2/3/4/6/8/12/24 hours, default 4). Expired bookings free the chore, and the
   board I already have open updates by itself when the hold lapses.
@@ -371,6 +375,43 @@ message and shows a matching badge on the card (`LockReason`):
   only re-render on a bump and a hold quietly lapsing is not a mutation.
 - The booker can cancel; cards show "🔖 You" / "🔖 <name>". Available only in
   free-for-all division and only for currently-due chores.
+
+### 4.4b Chore frequency and seasons
+- **Frequency** is edited as a preset (Anytime / Every day / Every week / Every 2 weeks /
+  Every month / Every 3 months / Once a year / Custom…) which writes canonical values into
+  `ChoreTask.intervalDays` — 0/1/7/14/30/90/365. That int stays the single source of truth
+  for due dates; a hand-typed or legacy interval round-trips through "Custom…".
+  See `FrequencyField`.
+- **`Cadence.of(intervalDays)`** buckets any interval into ANYTIME / DAILY / WEEKLY / MONTHLY /
+  MULTI_MONTH / YEARLY, cutting at the geometric midpoints between the canonical values
+  (2 | 3, 14 | 15, 51 | 52, 180 | 181). Purely a lens for the board filter; nothing is stored.
+- **Seasons**: `ChoreTask.seasons` holds a canonical `"SPRING[,SUMMER…]"` (see `Seasons`),
+  null/blank = all year round; all four collapses to null. Where `availableWindows` says time of
+  day, this says time of year. Northern-hemisphere meteorological months, fixed — the app has
+  no hemisphere setting.
+- Out of season blocks completion with `LockReason.OUT_OF_SEASON`, checked **before** the
+  interval in both `computeLock` and `complete` so the badge reads "❄️ only" rather than
+  "🕒 in 200d". Evaluated on the server date, not the member's zone: hours are
+  member-local, but a season is a month-level notion and travelling must not change it.
+  Unparseable data fails open, as windows do.
+
+### 4.4c Board filters
+- A single-select chip row above the card grid: All · Due now · the non-empty cadence
+  buckets · Off-season. Chips are lenses, not a partition — an off-season chore appears
+  under both `Off-season` and its own cadence chip — so they carry no counts.
+- Empty buckets get no chip; a lone cadence bucket is dropped (it would just be `All` renamed);
+  `Due now` is dropped when it would select everything; and the row hides entirely unless it
+  offers at least one real alternative to `All`. A home of eleven anytime chores looks exactly as
+  it did before the feature.
+- The selection lives in a field on `ChoresPanel`, so it survives every `HomeState` rebuild but
+  resets on navigation. Clicking a chip re-renders that board only — it never bumps
+  `HomeState`, because one member's view preference is not the family's business.
+- **The board never renders empty because of a filter.** If the chosen bucket disappears or its
+  result is empty, the lens resets to `All`. Under rotating division the member's own assigned
+  card is always included, whatever the lens, so the board cannot become a dead end.
+- Filtering happens in `ChoresPanel` only. `rotationAssignedChoreId` indexes the chore list by
+  position, so a filtered service-side list would silently reassign everyone's daily chore.
+- "Other help" and "Add chore" are not chores, so they show only under `All`.
 
 ### 4.5 Rotating division
 - `Home.divisionStyle` ∈ {`DEFAULT`, `ROTATING`}; `Home.rotationEnforced`

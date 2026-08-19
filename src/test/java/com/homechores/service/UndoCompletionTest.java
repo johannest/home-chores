@@ -45,7 +45,7 @@ class UndoCompletionTest {
 
     private ChoreTask paidChore(String code, int creditValue) {
         ChoreTask task = service.tasksOf(code).get(0);
-        service.updateTask(task.getId(), task.getName(), task.getEmoji(), 0, creditValue, null);
+        service.updateTask(task.getId(), task.getName(), task.getEmoji(), 0, creditValue, null, null);
         return service.tasksOf(code).get(0);
     }
 

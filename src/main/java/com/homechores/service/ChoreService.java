@@ -14,6 +14,7 @@ import com.homechores.domain.MemberRepository;
 import com.homechores.domain.RejoinRequest;
 import com.homechores.domain.RejoinRequestRepository;
 import com.homechores.domain.RejoinStatus;
+import com.homechores.domain.Seasons;
 import com.homechores.domain.TimeWindows;
 import com.homechores.i18n.Translations;
 import java.security.SecureRandom;
@@ -358,25 +359,27 @@ public class ChoreService {
     private void seedDefaultTasks(String homeCode, Locale locale) {
         Instant base = Instant.now();
         int i = 0;
-        i = seed(homeCode, locale, base, i, "chore.default.emptyDishwasher", "🍽️", 0, null);
-        i = seed(homeCode, locale, base, i, "chore.default.trash", "🗑️", 0, null);
-        i = seed(homeCode, locale, base, i, "chore.default.vacuum", "🧹", 0, null);
-        i = seed(homeCode, locale, base, i, "chore.default.cookDinner", "🍳", 0, null);
-        i = seed(homeCode, locale, base, i, "chore.default.fillDishwasher", "🫧", 0, null);
-        i = seed(homeCode, locale, base, i, "chore.default.hangLaundry", "🧺", 0, null);
-        i = seed(homeCode, locale, base, i, "chore.default.foldLaundry", "👕", 0, null);
-        i = seed(homeCode, locale, base, i, "chore.default.vestibule", "🧥", 0, null);
-        i = seed(homeCode, locale, base, i, "chore.default.salad", "🥗", 0, null);
-        i = seed(homeCode, locale, base, i, "chore.default.waterPlants", "🪴", 7, null);
-        seed(homeCode, locale, base, i, "chore.default.dogOut", "🐕", 0, "08:00-10:00,18:00-22:00");
+        i = seed(homeCode, locale, base, i, "chore.default.emptyDishwasher", "🍽️", 0, null, null);
+        i = seed(homeCode, locale, base, i, "chore.default.trash", "🗑️", 0, null, null);
+        i = seed(homeCode, locale, base, i, "chore.default.vacuum", "🧹", 0, null, null);
+        i = seed(homeCode, locale, base, i, "chore.default.cookDinner", "🍳", 0, null, null);
+        i = seed(homeCode, locale, base, i, "chore.default.fillDishwasher", "🫧", 0, null, null);
+        i = seed(homeCode, locale, base, i, "chore.default.hangLaundry", "🧺", 0, null, null);
+        i = seed(homeCode, locale, base, i, "chore.default.foldLaundry", "👕", 0, null, null);
+        i = seed(homeCode, locale, base, i, "chore.default.vestibule", "🧥", 0, null, null);
+        i = seed(homeCode, locale, base, i, "chore.default.salad", "🥗", 0, null, null);
+        i = seed(homeCode, locale, base, i, "chore.default.waterPlants", "🪴", 7, null, null);
+        seed(homeCode, locale, base, i, "chore.default.dogOut", "🐕", 0, "08:00-10:00,18:00-22:00", null);
     }
 
     /** Saves one seeded chore with a strictly increasing createdAt so list order is stable. */
     private int seed(String homeCode, Locale locale, Instant base, int index,
-                     String nameKey, String emoji, int intervalDays, String windows) {
+                     String nameKey, String emoji, int intervalDays, String windows,
+                     String seasons) {
         ChoreTask t = new ChoreTask(homeCode, translations.getTranslation(nameKey, locale), emoji);
         t.setIntervalDays(intervalDays);
         t.setAvailableWindows(windows);
+        t.setSeasons(seasons);
         t.setCreatedAt(base.plusMillis(index));
         tasks.save(t);
         return index + 1;
@@ -401,24 +404,36 @@ public class ChoreService {
     @Transactional
     public ChoreTask addTask(String homeCode, String name, String emoji, int intervalDays,
                              int creditValue, String availableWindows) {
+        return addTask(homeCode, name, emoji, intervalDays, creditValue, availableWindows, null);
+    }
+
+    @Transactional
+    public ChoreTask addTask(String homeCode, String name, String emoji, int intervalDays,
+                             int creditValue, String availableWindows, String seasons) {
         ChoreTask t = new ChoreTask(homeCode, name.trim(), cleanEmoji(emoji));
         t.setIntervalDays(Math.max(0, intervalDays));
         t.setCreditValue(Math.max(0, creditValue));
         t.setAvailableWindows(availableWindows);
+        t.setSeasons(seasons);
         t = tasks.save(t);
         homeState.bump(homeCode);
         return t;
     }
 
+    /**
+     * Replaces every editable field of a chore. There is deliberately no shorter overload: a
+     * full-replace method that silently nulled a field the caller forgot would quietly delete data.
+     */
     @Transactional
     public void updateTask(Long taskId, String name, String emoji, int intervalDays,
-                           int creditValue, String availableWindows) {
+                           int creditValue, String availableWindows, String seasons) {
         ChoreTask t = tasks.findById(taskId).orElseThrow();
         t.setName(name.trim());
         t.setEmoji(cleanEmoji(emoji));
         t.setIntervalDays(Math.max(0, intervalDays));
         t.setCreditValue(Math.max(0, creditValue));
         t.setAvailableWindows(availableWindows);
+        t.setSeasons(seasons);
         tasks.save(t);
         homeState.bump(t.getHomeCode());
     }
@@ -481,13 +496,14 @@ public class ChoreService {
             boolean due = isDue(task);
             LocalDate nextDue = nextDueDate(task);
             boolean inHours = TimeWindows.isWithinAny(task.getAvailableWindows(), localNow);
+            boolean inSeason = Seasons.isInSeason(task.getSeasons(), today);
 
             Long assignedMemberId = rotating
                     ? rotationAssignedMemberId(home, task, memberList, chores, today) : null;
             String assignedName = assignedMemberId == null ? null : memberName(assignedMemberId);
 
             LockReason reason = computeLock(home, task, memberId, streak, holderId,
-                    bookerId, due, inHours, rotating, myAssignedChore);
+                    bookerId, due, inHours, inSeason, rotating, myAssignedChore);
 
             result.add(new TaskView(task, recent.size(), streak, holderId, holderName,
                     bookerId, bookerName, bookingExpires, due, nextDue,
@@ -498,7 +514,13 @@ public class ChoreService {
 
     private LockReason computeLock(Home home, ChoreTask task, Long memberId, int streak,
                                   Long holderId, Long bookerId, boolean due, boolean inHours,
-                                  boolean rotating, Long myAssignedChore) {
+                                  boolean inSeason, boolean rotating, Long myAssignedChore) {
+        // Season comes first on purpose: a snow-shovelling chore in July is out of scope, not
+        // "not due yet". Checked later, a winter chore on a yearly interval would badge
+        // "in 200 days" — true, and useless.
+        if (!inSeason) {
+            return LockReason.OUT_OF_SEASON;
+        }
         if (!due) {
             return LockReason.NOT_DUE;
         }
@@ -714,6 +736,13 @@ public class ChoreService {
         Home home = homes.findById(task.getHomeCode()).orElseThrow();
         boolean rotating = home.getDivisionStyle() == DivisionStyle.ROTATING;
 
+        // 0) Season: does this chore apply at all right now? Uses the server date rather than
+        // the member's zone, on purpose — hours are member-local (see the windows check below),
+        // but a season is a month-level notion and a travelling member must not slip into a
+        // different one.
+        if (!Seasons.isInSeason(task.getSeasons(), LocalDate.now())) {
+            return CompleteOutcome.blocked(LockReason.OUT_OF_SEASON, task, member);
+        }
         // 1) Interval: is the chore due yet?
         if (!isDue(task)) {
             return CompleteOutcome.blocked(LockReason.NOT_DUE, task, member);
@@ -1063,7 +1092,9 @@ public class ChoreService {
     // ---- DTOs ---------------------------------------------------------------
 
     /** Why a chore can't be completed right now by a given member (NONE = it can). */
-    public enum LockReason { NONE, STREAK, BOOKED, NOT_DUE, NOT_ASSIGNED, OUTSIDE_HOURS }
+    public enum LockReason {
+        NONE, STREAK, BOOKED, NOT_DUE, NOT_ASSIGNED, OUTSIDE_HOURS, OUT_OF_SEASON
+    }
 
     /** A task enriched for one member: streak, booking, interval, rotation and lock state. */
     public record TaskView(

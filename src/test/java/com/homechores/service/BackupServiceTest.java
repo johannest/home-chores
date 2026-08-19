@@ -42,6 +42,11 @@ class BackupServiceTest {
         chores.saveHome(before);
         String pin = chores.findHome(code).orElseThrow().getAdminPin();
 
+        // Tag one chore so seasons ride along with the windows through the round-trip.
+        ChoreTask tagged = chores.tasksOf(code).get(0);
+        chores.updateTask(tagged.getId(), tagged.getName(), tagged.getEmoji(),
+                tagged.getIntervalDays(), tagged.getCreditValue(), null, "SPRING,SUMMER");
+
         String json = backup.export(code);
         assertTrue(json.contains("Backup Home"));
 
@@ -65,6 +70,10 @@ class BackupServiceTest {
         // The seeded windowed chore round-trips its availability windows.
         assertTrue(chores.tasksOf(code).stream()
                 .anyMatch(task -> "08:00-10:00,18:00-22:00".equals(task.getAvailableWindows())));
+        // ...and the seasonal tag survives alongside it.
+        assertTrue(chores.tasksOf(code).stream()
+                .anyMatch(task -> "SPRING,SUMMER".equals(task.getSeasons())),
+                "seasonal tag round-trips");
 
         // Sam still has 2 approved completions after the id remap.
         Member restoredSam = chores.membersOf(code).stream()
@@ -76,5 +85,25 @@ class BackupServiceTest {
     void restore_rejectsGarbage() {
         assertThrows(IllegalArgumentException.class,
                 () -> backup.restore("not json".getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /**
+     * A backup written before seasons existed has no such key. Jackson only rejects *unknown*
+     * properties, so a missing one must deserialize to null — which already means "all year round".
+     */
+    @Test
+    void legacyBackupWithoutSeasons_restoresAsAllYearRound() {
+        Member alex = chores.createHome("Old Backup", "Alex");
+        String code = alex.getHomeCode();
+        String json = backup.export(code).replaceAll("\\s*\"seasons\"\\s*:\\s*(null|\"[^\"]*\")\\s*,", "");
+        assertFalse(json.contains("\"seasons\""), "the key really is gone from the payload");
+
+        backup.restore(json.getBytes(StandardCharsets.UTF_8));
+
+        List<ChoreTask> restored = chores.tasksOf(code);
+        assertEquals(11, restored.size());
+        assertTrue(restored.stream().allMatch(t -> t.getSeasons() == null));
+        assertTrue(chores.complete(restored.get(0).getId(), chores.membersOf(code).get(0).getId())
+                .allowed(), "no tag means doable today");
     }
 }

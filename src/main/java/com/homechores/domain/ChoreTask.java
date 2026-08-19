@@ -32,6 +32,11 @@ public class ChoreTask {
      *  "HH:mm-HH:mm[,…]" (see {@link TimeWindows}); null/blank = available all day. */
     private String availableWindows;
 
+    /** Seasons this chore applies to, canonical "SPRING[,SUMMER…]" (see {@link Seasons});
+     *  null/blank = all year round. Where availableWindows says time of day, this says
+     *  time of year. */
+    private String seasons;
+
     /** Member who has currently booked ("I'll do it") this chore, or null. */
     private Long bookedByMemberId;
 
@@ -95,6 +100,14 @@ public class ChoreTask {
 
     public void setAvailableWindows(String availableWindows) {
         this.availableWindows = availableWindows;
+    }
+
+    public String getSeasons() {
+        return seasons;
+    }
+
+    public void setSeasons(String seasons) {
+        this.seasons = seasons;
     }
 
     public Long getBookedByMemberId() {
