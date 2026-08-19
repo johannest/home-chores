@@ -126,7 +126,8 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   does it before me; others see who booked it and are blocked. I can cancel my
   booking; completing the chore clears the booking automatically.
 - **US-22 Booking timeout.** As an admin, I can configure how long a booking holds
-  (1/2/3/4/6/8/12/24 hours, default 4). Expired bookings free the chore.
+  (1/2/3/4/6/8/12/24 hours, default 4). Expired bookings free the chore, and the
+  board I already have open updates by itself when the hold lapses.
 - **US-23 Rotating division.** As an admin, I can switch the home from
   *free-for-all* to *rotating*: every member gets one assigned chore per day
   ("⭐ Your turn"), rotating daily and deterministically. I can choose whether the
@@ -361,6 +362,13 @@ message and shows a matching badge on the card (`LockReason`):
 - One live booking per chore. Booking fails if someone else holds a live one.
 - A booking expires `Home.bookingTimeoutHours` after it was made
   (1/2/3/4/6/8/12/24 h, default 4); expiry frees the chore silently.
+- Expiry works two ways. `ChoreService.effectiveBookerId` derives it on every read, so
+  a lapsed hold stops blocking anyone the instant it lapses. A scheduled sweep,
+  `ChoreService.releaseExpiredBookings` (every `homechores.booking.sweep-ms`, default
+  60 s), then writes the release back: it nulls `bookedByMemberId`/`bookedAt` and bumps
+  `HomeState` for the home. Without the sweep, an already-open board would keep showing
+  "🔖 <name>" and a locked card until some unrelated change redrew it, because boards
+  only re-render on a bump and a hold quietly lapsing is not a mutation.
 - The booker can cancel; cards show "🔖 You" / "🔖 <name>". Available only in
   free-for-all division and only for currently-due chores.
 

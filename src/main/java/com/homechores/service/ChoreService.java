@@ -23,9 +23,14 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +39,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class ChoreService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChoreService.class);
 
     /** A member may complete the SAME chore at most this many times in a row. */
     public static final int MAX_IN_A_ROW = 3;
@@ -590,6 +597,54 @@ public class ChoreService {
             tasks.save(task);
             homeState.bump(task.getHomeCode());
         }
+    }
+
+    /**
+     * Clears bookings whose hold has lapsed, and returns how many were freed.
+     *
+     * <p>Expiry itself is derived at read time by {@link #effectiveBookerId} — a lapsed
+     * booking never blocks anyone even before this runs. What the sweep adds is
+     * <em>visibility</em>: boards only re-render when {@link HomeState} is bumped, and a
+     * booking quietly crossing its expiry instant is not a mutation, so an open board would
+     * otherwise keep showing "🔖 Alex" and a locked card until some unrelated change or a
+     * page reload. Writing the release back also stops dead bookedBy/bookedAt columns from
+     * accumulating in the database and riding along through backups.
+     *
+     * <p>Both paths share {@link #bookingExpiry}, so the write can never disagree with the
+     * read-time derivation.
+     */
+    @Scheduled(fixedDelayString = "${homechores.booking.sweep-ms:60000}",
+               initialDelayString = "${homechores.booking.sweep-ms:60000}")
+    @Transactional
+    public int releaseExpiredBookings() {
+        Instant now = Instant.now();
+        List<ChoreTask> released = new ArrayList<>();
+        Set<String> affectedHomes = new LinkedHashSet<>();
+
+        for (ChoreTask task : tasks.findByBookedByMemberIdIsNotNull()) {
+            Home home = homes.findById(task.getHomeCode()).orElse(null);
+            // An orphaned task (its home is gone) can never be un-booked by anyone: free it.
+            if (home != null) {
+                Instant expiry = bookingExpiry(task, home);
+                if (expiry != null && now.isBefore(expiry)) {
+                    continue; // still a live hold
+                }
+            }
+            task.setBookedByMemberId(null);
+            task.setBookedAt(null);
+            released.add(task);
+            affectedHomes.add(task.getHomeCode());
+        }
+
+        if (released.isEmpty()) {
+            return 0;
+        }
+        tasks.saveAll(released);
+        // One bump per home, not per task — each bump re-renders every board in that home.
+        affectedHomes.forEach(homeState::bump);
+        log.info("Released {} expired booking(s) across {} home(s)",
+                released.size(), affectedHomes.size());
+        return released.size();
     }
 
     // ---- Rotation division --------------------------------------------------
