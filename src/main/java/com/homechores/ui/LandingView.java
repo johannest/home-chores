@@ -6,6 +6,7 @@ import com.homechores.domain.RejoinRequest;
 import com.homechores.domain.RejoinStatus;
 import com.homechores.service.ChoreService;
 import com.homechores.service.HomeState;
+import com.homechores.service.RateLimiter;
 import com.vaadin.flow.component.AttachEvent;
 import com.vaadin.flow.component.Key;
 import com.vaadin.flow.component.button.Button;
@@ -41,6 +42,13 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
 
     private final ChoreService service;
     private final HomeState homeState;
+    private final RateLimiter rateLimiter;
+
+    /** Per-IP hourly allowances for the unauthenticated landing actions. A real family
+     *  creates one home and joins a handful of times; these only bite scripted abuse. */
+    private static final int MAX_CREATES_PER_HOUR = 10;
+    private static final int MAX_JOINS_PER_HOUR = 20;
+    private static final java.time.Duration RATE_WINDOW = java.time.Duration.ofHours(1);
 
     /** Join-form code, kept as a field so a ?join= link can prefill it in beforeEnter. */
     private final ValueSignal<String> joinCode = new ValueSignal<>("");
@@ -54,9 +62,10 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
     /** Token of the rejoin request this device is waiting on, while the waiting card shows. */
     private String waitingToken;
 
-    public LandingView(ChoreService service, HomeState homeState) {
+    public LandingView(ChoreService service, HomeState homeState, RateLimiter rateLimiter) {
         this.service = service;
         this.homeState = homeState;
+        this.rateLimiter = rateLimiter;
         addClassName("centered-page");
         // Width only — see PrivacyView: full height + centered content clips the top edge
         // on small screens.
@@ -148,6 +157,10 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
             if (homeName.peek().isBlank() || yourName.peek().isBlank()) {
                 return;
             }
+            if (!rateLimiter.allow("create:" + clientKey(), MAX_CREATES_PER_HOUR, RATE_WINDOW)) {
+                warn(T.tr("landing.rateLimited"));
+                return;
+            }
             Member m = service.createHome(homeName.peek(), yourName.peek(), getLocale());
             signIn(m.getId(), m.getHomeCode());
             String pin = service.findHome(m.getHomeCode()).map(h -> h.getAdminPin()).orElse("----");
@@ -185,6 +198,10 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
 
         Runnable submit = () -> {
             if (code.peek().isBlank() || yourName.peek().isBlank()) {
+                return;
+            }
+            if (!rateLimiter.allow("join:" + clientKey(), MAX_JOINS_PER_HOUR, RATE_WINDOW)) {
+                warn(T.tr("landing.rateLimited"));
                 return;
             }
             ChoreService.JoinOutcome outcome = service.requestJoin(code.peek(), yourName.peek());
@@ -483,6 +500,17 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         a.getStyle().set("color", "var(--lumo-secondary-text-color)")
                 .set("display", "inline-flex").set("align-items", "center").set("gap", "6px");
         return a;
+    }
+
+    /**
+     * The rate-limit bucket for this visitor: the client IP. With
+     * {@code forward-headers-strategy=native} behind the reverse proxy, {@code getRemoteAddr}
+     * is the real client address; falls back to a shared bucket if it can't be read.
+     */
+    private static String clientKey() {
+        var request = com.vaadin.flow.server.VaadinService.getCurrentRequest();
+        String ip = request == null ? null : request.getRemoteAddr();
+        return ip == null || ip.isBlank() ? "unknown" : ip;
     }
 
     private void warn(String message) {
