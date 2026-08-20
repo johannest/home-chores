@@ -74,13 +74,23 @@ public class ChoreService {
      *  external property override once their existing devices have all visited. */
     private final boolean legacyIdentityMigration;
 
+    /** Hours after this server first started during which legacy migration stays open;
+     *  past it, a returning pre-upgrade device uses the normal (gated) rejoin flow. */
+    private final long legacyMigrationWindowHours;
+
+    /** When this service instance started — the anchor for the migration time-box. */
+    private final Instant serverStart = Instant.now();
+
     public ChoreService(HomeRepository homes, MemberRepository members,
                         ChoreTaskRepository tasks, CompletionRepository completions,
                         RejoinRequestRepository rejoins, HomeState homeState,
                         CreditService creditService, Translations translations,
                         @org.springframework.beans.factory.annotation.Value(
                                 "${homechores.identity.legacy-migration:true}")
-                        boolean legacyIdentityMigration) {
+                        boolean legacyIdentityMigration,
+                        @org.springframework.beans.factory.annotation.Value(
+                                "${homechores.identity.legacy-migration-window-hours:168}")
+                        long legacyMigrationWindowHours) {
         this.homes = homes;
         this.members = members;
         this.tasks = tasks;
@@ -90,6 +100,7 @@ public class ChoreService {
         this.creditService = creditService;
         this.translations = translations;
         this.legacyIdentityMigration = legacyIdentityMigration;
+        this.legacyMigrationWindowHours = legacyMigrationWindowHours;
     }
 
     // ---- Home create / join -------------------------------------------------
@@ -250,16 +261,54 @@ public class ChoreService {
         return secret;
     }
 
+    /** Legacy-migration attempts allowed per home inside {@link #MIGRATION_ATTEMPT_WINDOW},
+     *  enough for a whole family to migrate but far too few to enumerate member ids. */
+    static final int MAX_MIGRATION_ATTEMPTS = 10;
+    static final Duration MIGRATION_ATTEMPT_WINDOW = Duration.ofHours(1);
+
+    private static final class AttemptWindow {
+        int count;
+        Instant windowStart;
+    }
+
+    private final java.util.concurrent.ConcurrentHashMap<String, AttemptWindow> migrationAttempts =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Spends one from a home's rolling migration budget; false once it is exhausted. */
+    private boolean migrationAttemptAllowed(String homeCode) {
+        AttemptWindow w = migrationAttempts.computeIfAbsent(homeCode, k -> new AttemptWindow());
+        synchronized (w) {
+            Instant now = Instant.now();
+            if (w.windowStart == null || now.isAfter(w.windowStart.plus(MIGRATION_ATTEMPT_WINDOW))) {
+                w.windowStart = now;
+                w.count = 0;
+            }
+            if (w.count >= MAX_MIGRATION_ATTEMPTS) {
+                return false;
+            }
+            w.count++;
+            return true;
+        }
+    }
+
     /**
      * Upgrades a device that stored its identity before secrets existed: trust it once,
      * issue it a secret, and from then on require that secret like everyone else.
      *
-     * <p>Trust-on-first-use, deliberately narrow: it only ever works while the member has
-     * <em>no</em> secret yet, so exactly one device gets the free pass — every later
-     * secret-less claim on that member is refused and lands in the rejoin flow. The
-     * remaining exposure is the window between deploying the secrets feature and each
-     * member's first visit; the {@code homechores.identity.legacy-migration} flag exists so
-     * an operator can close that window for good once the fleet has migrated.
+     * <p>Trust-on-first-use, and deliberately bounded, because a legacy value carries
+     * nothing the server can verify — so an outsider who knew a home code could otherwise
+     * present {@code memberId|homeCode} and be signed in as any not-yet-migrated member.
+     * Four guards keep that window small:
+     * <ul>
+     *   <li>the {@code legacy-migration} flag (an operator can switch it off entirely);
+     *   <li>a hard time-box — migration is only open for a window after this server started;
+     *   <li>a per-home rate limit, so member ids can't be enumerated against a known code;
+     *   <li>eligibility limited to rows that predate this feature (null {@code createdAt}),
+     *       so a freshly approved join or a restored member — which the migration must never
+     *       let bypass approval — is excluded and uses the normal gated rejoin flow.
+     * </ul>
+     * A member is also only ever migratable while it still has no secret, so each one gets
+     * exactly one free pass and issuing the secret cuts any other device off.
      *
      * @return the freshly issued secret, or empty when this identity doesn't qualify
      */
@@ -268,9 +317,19 @@ public class ChoreService {
         if (!legacyIdentityMigration || memberId == null) {
             return Optional.empty();
         }
+        if (Instant.now().isAfter(serverStart.plus(Duration.ofHours(legacyMigrationWindowHours)))) {
+            return Optional.empty(); // past the one-time migration window
+        }
+        // Spend from the budget BEFORE any lookup, so a miss (wrong/guessed id) costs the
+        // attacker just as much as a hit — that is what makes enumeration infeasible.
+        String norm = normalizeCode(homeCode);
+        if (!migrationAttemptAllowed(norm)) {
+            return Optional.empty();
+        }
         Member member = members.findById(memberId).orElse(null);
-        if (member == null || !member.getHomeCode().equals(normalizeCode(homeCode))
-                || member.getDeviceSecretHash() != null) {
+        if (member == null || !member.getHomeCode().equals(norm)
+                || member.getDeviceSecretHash() != null
+                || member.getCreatedAt() != null) {
             return Optional.empty();
         }
         return Optional.of(issueDeviceSecret(memberId));

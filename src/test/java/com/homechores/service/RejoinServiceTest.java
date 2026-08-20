@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
+import com.homechores.domain.MemberRepository;
 import com.homechores.domain.RejoinRequest;
 import com.homechores.domain.RejoinStatus;
 import com.homechores.service.ChoreService.Rejoin;
@@ -25,8 +26,19 @@ class RejoinServiceTest {
     @Autowired
     ChoreService service;
 
+    @Autowired
+    MemberRepository memberRepo;
+
     private String wrongPin(Home home) {
         return "0000".equals(home.getAdminPin()) ? "1111" : "0000";
+    }
+
+    /** Makes a member look like it predates the secrets feature (null row-createdAt), so it
+     *  qualifies for legacy migration — otherwise every test-created member is "new". */
+    private void markPreExisting(Long memberId) {
+        Member m = memberRepo.findById(memberId).orElseThrow();
+        m.setCreatedAt(null);
+        memberRepo.save(m);
     }
 
     @Test
@@ -295,6 +307,7 @@ class RejoinServiceTest {
     @Test
     void legacyIdentity_migratesExactlyOnce() {
         Member admin = service.createHome("Nest", "Alex");
+        markPreExisting(admin.getId());
 
         String secret = service.migrateLegacyIdentity(admin.getId(), admin.getHomeCode())
                 .orElseThrow();
@@ -307,6 +320,7 @@ class RejoinServiceTest {
     @Test
     void legacyIdentity_wrongHomeOrMember_isRefused() {
         Member admin = service.createHome("Nest", "Alex");
+        markPreExisting(admin.getId());
         assertTrue(service.migrateLegacyIdentity(admin.getId(), "ZZZZZZZ").isEmpty());
         assertTrue(service.migrateLegacyIdentity(999999L, admin.getHomeCode()).isEmpty());
         assertTrue(service.migrateLegacyIdentity(null, admin.getHomeCode()).isEmpty());
@@ -315,9 +329,43 @@ class RejoinServiceTest {
     @Test
     void legacyIdentity_afterARealSignIn_isRefused() {
         Member admin = service.createHome("Nest", "Alex");
+        markPreExisting(admin.getId());
         service.issueDeviceSecret(admin.getId()); // the member's device signed in normally
         assertTrue(service.migrateLegacyIdentity(admin.getId(), admin.getHomeCode()).isEmpty(),
                 "a member with a secret can never be claimed by a secret-less identity");
+    }
+
+    @Test
+    void legacyIdentity_freshMemberIsNotEligible() {
+        // A member minted by the running server (a new join, or one recreated by a restore)
+        // has a non-null createdAt and must NOT be silently claimable — it uses the gated flow.
+        Member admin = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(admin.getHomeCode(), "Sam").orElseThrow();
+        assertTrue(service.migrateLegacyIdentity(sam.getId(), sam.getHomeCode()).isEmpty(),
+                "a member created since startup is excluded from migration");
+        assertNull(memberRepo.findById(sam.getId()).orElseThrow().getDeviceSecretHash(),
+                "no secret was issued to a non-eligible member");
+    }
+
+    @Test
+    void legacyIdentity_isRateLimitedPerHome_soIdsCannotBeEnumerated() {
+        Member admin = service.createHome("Nest", "Alex");
+        markPreExisting(admin.getId());
+        String code = admin.getHomeCode();
+
+        // Burn the home's whole migration budget with guessed (missing) member ids.
+        for (int i = 0; i < ChoreService.MAX_MIGRATION_ATTEMPTS; i++) {
+            assertTrue(service.migrateLegacyIdentity(900000L + i, code).isEmpty());
+        }
+        // Now even the genuine pre-existing member is refused — the enumerator is locked out.
+        assertTrue(service.migrateLegacyIdentity(admin.getId(), code).isEmpty(),
+                "past the per-home budget, migration is refused even for a valid target");
+
+        // A different home has its own budget and is unaffected.
+        Member other = service.createHome("Elsewhere", "Vera");
+        markPreExisting(other.getId());
+        assertTrue(service.migrateLegacyIdentity(other.getId(), other.getHomeCode()).isPresent(),
+                "the rate limit is scoped per home");
     }
 
     // ---- PIN brute-force gate ---------------------------------------------------

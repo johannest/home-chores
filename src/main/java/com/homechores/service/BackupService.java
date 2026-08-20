@@ -99,9 +99,16 @@ public class BackupService {
 
     // ---- Restore ------------------------------------------------------------
 
-    /** Replaces the backup's home with the file contents. Returns a short summary. */
+    /**
+     * Replaces {@code ownHomeCode}'s data with the uploaded file. Returns a short summary.
+     *
+     * <p>{@code ownHomeCode} is the home the acting admin is signed into, and the file's
+     * own {@code home.code} must match it. Without that check an admin of one home could
+     * upload a backup naming a different family's code and overwrite (or hijack) that
+     * home — restore is a full wipe-and-replace, so it must never touch another home.
+     */
     @Transactional
-    public RestoreResult restore(byte[] json) {
+    public RestoreResult restore(byte[] json, String ownHomeCode) {
         Backup b;
         try {
             b = mapper.readValue(json, Backup.class);
@@ -112,6 +119,11 @@ public class BackupService {
             throw new IllegalArgumentException("Backup file is missing home data.");
         }
         String code = b.home.code.trim().toUpperCase();
+        String own = ownHomeCode == null ? "" : ownHomeCode.trim().toUpperCase();
+        if (!code.equals(own)) {
+            throw new IllegalArgumentException("This backup is for a different home (" + code
+                    + "). You can only restore your own home's backup.");
+        }
 
         // Upsert the home.
         Home home = homes.findById(code).orElseGet(() -> new Home(code, b.home.name, b.home.adminPin));

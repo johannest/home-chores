@@ -9,10 +9,12 @@ Terms in **bold** map to concepts in the code.
 - **Home** — a household. Identified by a short, shareable **home code**
   (7 characters from an alphabet without I/O/0/1).
 - **Member** — a person in a home. Identified per device (a phone = a member): the member
-  id is kept in the browser's **local storage** and restored into each new session.
-- **Rejoin request** — a device asking to sign back in as an existing member after losing
-  its stored identity (browsing data cleared). Held as `PENDING` / `APPROVED` / `REJECTED`
-  with a secret **device token** that only the requesting browser holds.
+  id and a per-device **secret** are kept in the browser's **local storage** and restored
+  into each new session; the secret is what proves the device is that member.
+- **Join / rejoin request** — a device asking an admin to let it in: either a first-time
+  **join** (default) or an existing member **signing back in** after losing its stored
+  identity (browsing data cleared). Held as `PENDING` / `APPROVED` / `REJECTED` with a
+  secret **device token** that only the requesting browser holds.
 - **Admin** — a member with elevated rights. The creator of a home is the first admin.
   Proven by the **admin PIN**; admins can promote other members.
 - **Chore** (a.k.a. task) — a repeatable household task (e.g. "Empty dishwasher").
@@ -56,7 +58,7 @@ Terms in **bold** map to concepts in the code.
 | Delete / correct any completion | — | ✅ |
 | Rename / remove members, promote / demote admins | — | ✅ |
 | Ask to sign back in as an existing member | ✅ | ✅ |
-| Approve / reject a rejoin request | — | ✅ |
+| Approve / reject a join or rejoin request | — | ✅ |
 | Change home settings (approval, rejoin gate, division style, booking hold, daily target, other help, PIN, name) | — | ✅ |
 | Manage spree tiers, view balances, redeem credits | — | ✅ |
 | Backup / restore the family's data | — | ✅ |
@@ -72,8 +74,9 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
 - **US-01 Create a home.** As a new user, I can create a home with a name and my
   own name, so that I get a shareable home code and become its admin. The name
   fields hint at privacy-friendly values ("Our family", "Mom / Dad", nickname tips).
-- **US-02 Join a home.** As a family member, I can join with a home code and my
-  name, so that I share the same chore board.
+- **US-02 Join a home.** As a family member, I can ask to join with a home code and my
+  name; by default an admin approves the request before I'm added, so a guessed or leaked
+  code alone can't put a stranger on the board. (An admin can turn the gate off per home.)
 - **US-03 Share the code.** As a member, I can copy/share the home code, so that
   others can join.
 - **US-04 Complete a chore.** As a member, I can tap a chore card when I do it, so
@@ -174,10 +177,11 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   identity lives in the phone's local storage rather than in server memory. The server
   keeps sessions short (§4.1.2) so idle phones cost it nothing.
 - **US-35 Sign back in after clearing browsing data.** As a member whose phone forgot
-  me, I can enter the home code, pick myself from the home's member list, and get my
-  own record back — chores, credits, streaks and admin role intact — instead of joining
-  again as a duplicate person. If the home requires it, an admin approves my request
-  first; the waiting screen flips to the board the moment they do, live.
+  me, I can enter the home code and type my nickname, and get my own record back — chores,
+  credits, streaks and admin role intact — instead of joining again as a duplicate person.
+  (The app never lists the members, so a home code alone can't reveal the family's names.)
+  If the home requires it, an admin approves my request first; the waiting screen flips to
+  the board the moment they do, live.
 - **US-36 Rejoin gate (admin).** As an admin, I can choose whether signing back in needs
   my approval (default **on**, since the home code travels in join links). Pending
   requests appear at the top of the Admin tab and in its badge count, with Approve /
@@ -257,36 +261,55 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
 ### 4.1 Login & identity
 - Passwordless. Session stores `memberId` + `homeCode` (`SessionContext`), plus the
   member's browser **time zone** (fetched once per session for availability hours).
-- **Device identity** (`DeviceIdentity`): on sign-in the pair `memberId|homeCode` is
-  written to the browser's local storage under `flashchores.identity`, and re-stamped on
-  every visit to the board. The landing page reads it on attach, validates that both the
-  member and the home still exist, and signs the session in — so server sessions stay
-  short-lived and hold no state for phones that aren't actively using the app. A stale
-  entry (removed member, restored home) is cleared and the user sent to the landing page.
-  While the browser is being asked, a full-screen overlay covers the landing card; it's
-  an overlay rather than a hidden form so that a lookup which never answers leaves a
-  working page rather than a spinner.
+- **Device identity** (`DeviceIdentity`): each sign-in issues a fresh 128-bit **device
+  secret** and writes `memberId|homeCode|secret` to the browser's local storage under
+  `flashchores.identity`, re-stamped on every visit to the board. Only the SHA-256 of the
+  secret is held server-side (`Member.deviceSecretHash`). The landing page reads the value
+  on attach and signs the session in only when the member and home still exist **and** the
+  secret matches the stored hash (constant-time compare). A member id is a small, guessable
+  number, so it is the secret — not the id — that proves the device is that member: a
+  hand-edited `localStorage` value cannot impersonate anyone. Issuing a new secret on each
+  sign-in also cuts any previous device off, so an approved rejoin revokes a lost phone. A
+  stale or unverifiable entry (removed member, restored home, wrong secret) is cleared and
+  the user sent to the landing page. While the browser is being asked, a full-screen
+  overlay covers the landing card, so a lookup that never answers leaves a working page.
 - **Leave**, self-removal and backup restore all clear the stored identity.
 
-#### 4.1.1 Signing back in (rejoin)
-Clearing browsing data is the one thing local storage doesn't survive. The Join tab
-therefore offers "I'm already a member — sign me back in":
-1. The member enters the home code and opens the picker, which lists the home's members.
-2. Picking a member calls `requestRejoin(code, memberId, pin)`, which returns:
-   - `SIGNED_IN` — the supplied PIN matched the home's admin PIN, or
-     `Home.approveRejoin` is off. The device signs in immediately.
-   - `PENDING` — a `RejoinRequest` is created and its **device token** returned; the
-     browser stores it under `flashchores.rejoin` and shows a waiting screen.
+#### 4.1.1 Joining and signing back in (admin-gated)
+Both doors into a home are gated by an admin by default, so knowing the home code is never
+enough on its own to get onto the board or into a member's identity. Both raise a
+`RejoinRequest` (`PENDING` / `APPROVED` / `REJECTED`) carrying a 128-bit **device token**
+the browser stores under `flashchores.rejoin`; both surface at the top of the Admin tab
+(and in its badge) with Approve / Reject.
+
+**First-time join** — `requestJoin(code, name)`, gated by `Home.approveJoin` (default **on**):
+- Gate on → `PENDING`: **no member is created yet**. The joiner waits, and the member is
+  brought into being only when an admin approves — so a guessed or leaked code cannot plant
+  anyone on the board by itself.
+- Gate off → the member is created and signed in immediately (for homes that opt out).
+
+**Signing back in** — clearing browsing data is the one thing local storage doesn't
+survive, so the Join tab offers "I'm already a member — sign me back in":
+1. The member enters the home code and **types the nickname** they use in this home. The
+   app does *not* list the members — a home code alone must never reveal the family's
+   names; someone who forgot their nickname asks their home admin, who can see it.
+2. A matching nickname calls `requestRejoin(code, memberId, pin)`, which returns:
+   - `SIGNED_IN` — the supplied PIN matched the home's admin PIN, or `Home.approveRejoin`
+     is off. The device signs in immediately.
+   - `PENDING` — a `RejoinRequest` + **device token**; the browser shows a waiting screen.
    - `WRONG_PIN` / `UNKNOWN` — rejected with a message; nothing is recorded.
-3. Admins see pending requests at the top of the Admin tab (and in its badge) and
-   Approve / Reject each. The decision bumps the home revision, so the waiting device
-   picks it up over push and navigates straight to the board — no polling or reload.
-4. A device that reloaded or closed in the meantime re-checks its stored token on the
-   next visit, so an approval granted while it was away still lands. Approved requests
-   are **consumed** on sign-in so a token can't be replayed; re-requesting for the same
-   member deletes any older pending request, so only the newest device can be let in.
-- The PIN is a *bypass*, not a promotion: the member keeps whatever role their existing
-  record has, and "Admin?" in the header remains the way to claim admin.
+
+Common to both:
+3. An admin's decision bumps the home revision, so the waiting device picks it up over push
+   and navigates straight to the board — no polling or reload.
+4. A device that reloaded or closed in the meantime re-checks its stored token on the next
+   visit, so an approval granted while it was away still lands. Approved requests are
+   **consumed** on sign-in so a token can't be replayed; re-requesting for the same member
+   drops any older pending request, so only the newest device can be let in. Abandoned
+   requests are swept after 48h.
+- The PIN is a *bypass*, not a promotion: the member keeps whatever role their record has,
+  and "Admin?" in the header remains the way to claim admin. Both PIN checks (claim-admin
+  and the rejoin bypass) lock a home's PIN for 15 minutes after 5 wrong tries.
 - Requests are deleted when the member is removed or the home is restored from a backup.
 - **Home code**: 7 characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no I/O/0/1),
   ≈ 34 billion combinations — codes can't realistically be enumerated.
@@ -473,9 +496,11 @@ message and shows a matching badge on the card (`LockReason`):
 - **Restore**: upload a backup JSON. After a confirmation dialog warning that current
   data will be replaced, the home's data is deleted and recreated from the file, and
   home settings (name, PIN, approval, division style, booking hold, target) are
-  applied. IDs are remapped internally; orphaned records are skipped — an other-help entry
-  has no task to remap and is not an orphan. Invalid files
-  are rejected with a message. The restoring admin is signed out and rejoins.
+  applied. **The file's home code must match the admin's own home** — an admin can only
+  restore over their own home, never another family's. IDs are remapped internally;
+  orphaned records are skipped — an other-help entry has no task to remap and is not an
+  orphan. Invalid files (including a mismatched home code) are rejected with a message.
+  The restoring admin is signed out and rejoins.
 
 ### 4.11.1 Deleting the home (admin)
 - A **Danger zone** section at the bottom of the Admin tab, visually separated because it
@@ -672,11 +697,16 @@ scales up, not the other way round.
 - **Time zones**: availability hours are evaluated in the member's browser time
   zone (per session, server zone as fallback); interval due-dates, daily targets
   and spree streaks use the server's zone.
-- The admin PIN is a lightweight household credential, not a security boundary
-  against a determined attacker; it gates casual misuse only. Codes are long enough
-  not to be guessable; HTTPS is expected in production.
-- **Identity storage**: the browser holds only `memberId|homeCode` and, while a rejoin is
-  pending, a random 128-bit device token — no personal data and no credential. Server
+- The admin PIN is a lightweight household credential, not a strong secret; it gates
+  casual misuse and is **rate-limited** (5 wrong tries → 15-minute per-home lockout on both
+  the claim-admin and rejoin-bypass checks) rather than being brute-force-proof. Codes are
+  long enough not to be guessable. **HTTPS is required in production**: the app binds
+  loopback and expects a TLS-terminating reverse proxy — enforce HTTPS + HSTS and a Secure
+  session cookie there, since nothing in the app itself does.
+- **Identity storage**: the browser holds `memberId|homeCode|secret` — a per-device 128-bit
+  secret whose SHA-256 the server checks on every restore — and, while a join/rejoin is
+  pending, a separate 128-bit device token. No personal data. The secret *is* the
+  credential: a hand-edited `localStorage` value cannot impersonate a member. Server
   sessions are short-lived (§4.1.2); local storage, not session length, is what keeps a
   phone signed in.
 - **Browser auto-translation is off** (`translate="no"` + `notranslate` + the Google meta
@@ -709,9 +739,10 @@ scales up, not the other way round.
 - **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest`,
   browserless): create-home flow navigates to the board with three tabs; join flow
   (two tabs, no Admin); PIN claim reveals the Admin tab; admin adds a chore from the
-  Admin panel; members never see the Admin tab; the sign-back-in picker signs in as the
-  existing member without duplicating them (gate off) and raises a pending request
-  instead of signing in (gate on); deleting the home needs the code typed correctly and
+  Admin panel; members never see the Admin tab; the sign-back-in dialog matches a member by
+  nickname and signs in as the existing member without duplicating them (gate off) and
+  raises a pending request instead of signing in (gate on); a first-time join with the
+  gate on raises a request instead of creating a member; deleting the home needs the code typed correctly and
   signs the admin out; a member logs other help from the board and it waits uncounted, while an
   admin accepts it (counted) and promotes it to a chore, or declines it (no chore added); an
   admin logs a chore for another member from the Admin tab; and the session lifetime is the

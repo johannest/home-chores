@@ -999,7 +999,7 @@ class AdminPanel extends VerticalLayout {
     private void confirmRestore(byte[] bytes) {
         confirm(T.tr("admin.restore.title"), T.tr("admin.restore.text"), () -> {
                     try {
-                        var result = backup.restore(bytes);
+                        var result = backup.restore(bytes, homeCode);
                         // Restoring remaps every member id, so the stored identity is stale.
                         DeviceIdentity.forget();
                         SessionContext.signOut();

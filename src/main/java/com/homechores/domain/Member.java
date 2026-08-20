@@ -29,6 +29,16 @@ public class Member {
     private Instant joinedAt = Instant.now();
 
     /**
+     * When this row was created by the running server. Distinct from {@link #joinedAt},
+     * which is the business "member since" date and can be back-dated by a backup restore.
+     * This one is stamped by the constructor and never copied from a backup, so a member
+     * minted since the app started (a fresh join, or one recreated by a restore) always has
+     * it set, while rows that predate the column read back null. The legacy-identity
+     * migration keys on that to tell genuine pre-upgrade devices from new arrivals.
+     */
+    private Instant createdAt = Instant.now();
+
+    /**
      * SHA-256 of the secret this member's device holds in its local storage. A member id is
      * a small sequential number anyone can guess; the secret is what actually proves "this
      * browser is that member". Only the hash is kept, so the database (and its backups)
@@ -89,6 +99,14 @@ public class Member {
 
     public void setJoinedAt(Instant joinedAt) {
         this.joinedAt = joinedAt;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
     }
 
     public String getDeviceSecretHash() {

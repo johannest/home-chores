@@ -51,7 +51,7 @@ class BackupServiceTest {
         assertTrue(json.contains("Backup Home"));
 
         // Wipe by deleting the whole home's members/tasks, then restore.
-        RestoreResult result = backup.restore(json.getBytes(StandardCharsets.UTF_8));
+        RestoreResult result = backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
 
         assertEquals(code, result.homeCode());
         assertEquals(2, result.members());
@@ -84,7 +84,25 @@ class BackupServiceTest {
     @Test
     void restore_rejectsGarbage() {
         assertThrows(IllegalArgumentException.class,
-                () -> backup.restore("not json".getBytes(StandardCharsets.UTF_8)));
+                () -> backup.restore("not json".getBytes(StandardCharsets.UTF_8), "XXXXXXX"));
+    }
+
+    /** A backup may only be restored into the home it came from — never over another family. */
+    @Test
+    void restore_rejectsBackupForADifferentHome() {
+        Member mine = chores.createHome("Mine", "Alex");
+        Member victim = chores.createHome("Victim", "Vera");
+        String myCode = mine.getHomeCode();
+        String victimCode = victim.getHomeCode();
+        String victimBackup = backup.export(victimCode);
+
+        // Admin of "Mine" uploads a file that names the victim's home code.
+        assertThrows(IllegalArgumentException.class,
+                () -> backup.restore(victimBackup.getBytes(StandardCharsets.UTF_8), myCode));
+
+        // The victim home is completely untouched.
+        assertEquals("Victim", chores.findHome(victimCode).orElseThrow().getName());
+        assertEquals(1, chores.membersOf(victimCode).size());
     }
 
     /**
@@ -98,7 +116,7 @@ class BackupServiceTest {
         String json = backup.export(code).replaceAll("\\s*\"seasons\"\\s*:\\s*(null|\"[^\"]*\")\\s*,", "");
         assertFalse(json.contains("\"seasons\""), "the key really is gone from the payload");
 
-        backup.restore(json.getBytes(StandardCharsets.UTF_8));
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
 
         List<ChoreTask> restored = chores.tasksOf(code);
         assertEquals(11, restored.size());
