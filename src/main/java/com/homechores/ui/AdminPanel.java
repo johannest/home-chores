@@ -33,9 +33,11 @@ import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.textfield.IntegerField;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.component.upload.Upload;
-import com.vaadin.flow.component.upload.receivers.MemoryBuffer;
 import com.vaadin.flow.server.StreamResource;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -55,6 +57,11 @@ class AdminPanel extends VerticalLayout {
 
     /** How far back the correction list reaches — enough for "that was this morning". */
     private static final int RECENT_LIMIT = 15;
+
+    /** Cap on an uploaded backup, enforced as the bytes stream in. A family's backup is a
+     *  few KB, so 512 KiB is generous while stopping an oversized upload from being read
+     *  into memory without bound during restore. */
+    private static final int MAX_BACKUP_BYTES = 512 * 1024;
 
     /** Stable identity for a card's open/closed preference — never the translated title, which
      *  changes with the language switcher and now embeds a count. */
@@ -974,20 +981,47 @@ class AdminPanel extends VerticalLayout {
         downloadBtn.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         download.add(downloadBtn);
 
-        MemoryBuffer buffer = new MemoryBuffer();
-        Upload upload = new Upload(buffer);
+        // Receive into a byte sink that aborts once it passes the cap, so a client that
+        // ignores setMaxFileSize (which is only enforced in the browser) still can't stream
+        // an unbounded file into the server's memory.
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        Upload upload = new Upload((fileName, mimeType) -> {
+            sink.reset();
+            return new OutputStream() {
+                @Override
+                public void write(int b) throws IOException {
+                    if (sink.size() >= MAX_BACKUP_BYTES) {
+                        throw new IOException("backup exceeds " + MAX_BACKUP_BYTES + " bytes");
+                    }
+                    sink.write(b);
+                }
+
+                @Override
+                public void write(byte[] b, int off, int len) throws IOException {
+                    if (sink.size() + len > MAX_BACKUP_BYTES) {
+                        throw new IOException("backup exceeds " + MAX_BACKUP_BYTES + " bytes");
+                    }
+                    sink.write(b, off, len);
+                }
+            };
+        });
         upload.setMaxFiles(1);
+        upload.setMaxFileSize(MAX_BACKUP_BYTES); // client-side: reject before sending
         upload.setAcceptedFileTypes("application/json", ".json");
         upload.setDropLabel(new Span(T.tr("admin.backup.restore")));
         upload.addSucceededListener(e -> {
-            try {
-                byte[] bytes = buffer.getInputStream().readAllBytes();
-                confirmRestore(bytes);
-            } catch (Exception ex) {
-                toastError(T.tr("admin.restore.readError", ex.getMessage()));
-            }
+            confirmRestore(sink.toByteArray());
             upload.clearFileList();
         });
+        // Fires when the sink aborts a too-large stream (a client that bypassed the client
+        // check), or the upload otherwise fails.
+        upload.addFailedListener(e -> {
+            sink.reset();
+            upload.clearFileList();
+            toastError(T.tr("admin.restore.tooBig"));
+        });
+        // Client-side rejection (too large / wrong type) — say why.
+        upload.addFileRejectedListener(e -> toastError(T.tr("admin.restore.tooBig")));
 
         VerticalLayout body = new VerticalLayout(info, download, upload);
         body.setPadding(false);
