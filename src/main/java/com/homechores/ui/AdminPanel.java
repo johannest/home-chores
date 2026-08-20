@@ -125,8 +125,9 @@ class AdminPanel extends VerticalLayout {
     // ---- Rejoin requests ----------------------------------------------------
 
     /**
-     * Devices asking to sign back in as an existing member after clearing their browser
-     * storage. Rendered only when something is waiting — most families never see it.
+     * People waiting at the door: devices asking to sign back in as an existing member
+     * after clearing their browser storage, and strangers asking to join for the first
+     * time. Rendered only when something is waiting — most families never see it.
      */
     private Optional<Details> rejoinsSection() {
         var requests = service.pendingRejoins(homeCode);
@@ -140,11 +141,12 @@ class AdminPanel extends VerticalLayout {
         s.add(info);
 
         for (RejoinRequest r : requests) {
-            String name = service.findMember(r.getMemberId()).map(Member::getName).orElse("?");
+            String name = r.isJoin() ? r.getRequestedName()
+                    : service.findMember(r.getMemberId()).map(Member::getName).orElse("?");
 
             Div box = new Div();
             Div line = new Div();
-            line.setText(T.tr("admin.rejoins.row", name));
+            line.setText(T.tr(r.isJoin() ? "admin.rejoins.rowJoin" : "admin.rejoins.row", name));
             line.getStyle().set("font-weight", "600");
             Span sub = new Span(ago(r.getRequestedAt()));
             sub.addClassName("sub");
@@ -153,7 +155,8 @@ class AdminPanel extends VerticalLayout {
 
             Button approve = new Button(VaadinIcon.CHECK.create(), e -> {
                 service.decideRejoin(r.getId(), memberId, true);
-                toast(T.tr("admin.rejoins.approved", name));
+                toast(T.tr(r.isJoin() ? "admin.rejoins.approvedJoin"
+                        : "admin.rejoins.approved", name));
                 refresh();
             });
             approve.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SUCCESS,
@@ -540,6 +543,16 @@ class AdminPanel extends VerticalLayout {
         Span rejoinHint = new Span(T.tr("admin.approveRejoin.helper"));
         rejoinHint.addClassName("sub");
 
+        Checkbox joinGate = new Checkbox(T.tr("admin.approveJoin"));
+        joinGate.setValue(home.isApproveJoin());
+        joinGate.addValueChangeListener(e -> {
+            Home h = service.findHome(homeCode).orElseThrow();
+            h.setApproveJoin(e.getValue());
+            service.saveHome(h);
+        });
+        Span joinHint = new Span(T.tr("admin.approveJoin.helper"));
+        joinHint.addClassName("sub");
+
         Select<Integer> target = new Select<>();
         target.setLabel(T.tr("admin.dailyTarget"));
         target.setWidthFull();
@@ -622,7 +635,7 @@ class AdminPanel extends VerticalLayout {
 
         VerticalLayout body = new VerticalLayout(confirmTaps, confirmHint, approval,
                 otherHelp, otherHelpHint, style, enforced, bookingHours, target,
-                rejoinGate, rejoinHint, nameRow, pinLabel, pinRow);
+                joinGate, joinHint, rejoinGate, rejoinHint, nameRow, pinLabel, pinRow);
         body.setPadding(false);
         body.setSpacing(true);
         body.setWidthFull();

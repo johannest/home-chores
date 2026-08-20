@@ -69,10 +69,18 @@ public class ChoreService {
     private final CreditService creditService;
     private final Translations translations;
 
+    /** Whether pre-secret devices may still be silently upgraded — see
+     *  {@link #migrateLegacyIdentity}. On by default; an operator flips it off with an
+     *  external property override once their existing devices have all visited. */
+    private final boolean legacyIdentityMigration;
+
     public ChoreService(HomeRepository homes, MemberRepository members,
                         ChoreTaskRepository tasks, CompletionRepository completions,
                         RejoinRequestRepository rejoins, HomeState homeState,
-                        CreditService creditService, Translations translations) {
+                        CreditService creditService, Translations translations,
+                        @org.springframework.beans.factory.annotation.Value(
+                                "${homechores.identity.legacy-migration:true}")
+                        boolean legacyIdentityMigration) {
         this.homes = homes;
         this.members = members;
         this.tasks = tasks;
@@ -81,6 +89,7 @@ public class ChoreService {
         this.homeState = homeState;
         this.creditService = creditService;
         this.translations = translations;
+        this.legacyIdentityMigration = legacyIdentityMigration;
     }
 
     // ---- Home create / join -------------------------------------------------
@@ -145,7 +154,14 @@ public class ChoreService {
         homeState.bump(home.getCode());
     }
 
-    /** Adds a member to an existing home. Returns empty if the code is unknown. */
+    /**
+     * Adds a member to an existing home, bypassing the join-approval gate. Returns empty if
+     * the code is unknown.
+     *
+     * <p>Not what the landing page calls — that is {@link #requestJoin}, which honours
+     * {@link Home#isApproveJoin()}. This is the trusted path: an admin approving a join
+     * request, and test fixtures.
+     */
     @Transactional
     public Optional<Member> joinHome(String code, String memberName) {
         String norm = normalizeCode(code);
@@ -154,6 +170,51 @@ public class ChoreService {
         }
         touchHome(norm);
         return Optional.of(addMember(norm, memberName, false));
+    }
+
+    /** Outcome of a first-time join attempt; exactly one of {@code token} (PENDING) and
+     *  {@code member} (SIGNED_IN) is set. */
+    public record JoinOutcome(RejoinResult result, String token, Member member) {
+    }
+
+    /**
+     * A stranger at the door: someone asking to join the home for the first time with just
+     * the code. When the home gates joins (the default), no member is created yet — a
+     * pending request is raised for an admin to decide on, so a guessed or leaked code
+     * can't plant anyone on the board by itself. The member only comes into being in
+     * {@link #decideRejoin} when an admin approves.
+     */
+    @Transactional
+    public JoinOutcome requestJoin(String code, String memberName) {
+        String norm = normalizeCode(code);
+        Home home = homes.findById(norm).orElse(null);
+        if (home == null || memberName == null || memberName.isBlank()) {
+            return new JoinOutcome(RejoinResult.UNKNOWN, null, null);
+        }
+        if (!home.isApproveJoin()) {
+            touchHome(norm);
+            return new JoinOutcome(RejoinResult.SIGNED_IN, null,
+                    addMember(norm, memberName, false));
+        }
+        String token = generateToken();
+        rejoins.save(RejoinRequest.joinRequest(norm, memberName.trim(), token));
+        homeState.bump(norm);
+        return new JoinOutcome(RejoinResult.PENDING, token, null);
+    }
+
+    /**
+     * The member using this nickname, matched case-insensitively — how a returning device
+     * points at itself without the app ever listing the home's members to someone who only
+     * knows the code.
+     */
+    public Optional<Member> findMemberByName(String homeCode, String name) {
+        if (name == null || name.isBlank()) {
+            return Optional.empty();
+        }
+        String wanted = name.trim();
+        return membersOf(normalizeCode(homeCode)).stream()
+                .filter(m -> m.getName().equalsIgnoreCase(wanted))
+                .findFirst();
     }
 
     private Member addMember(String homeCode, String name, boolean admin) {
@@ -166,6 +227,80 @@ public class ChoreService {
 
     public Optional<Member> findMember(Long id) {
         return id == null ? Optional.empty() : members.findById(id);
+    }
+
+    // ---- Device secrets -------------------------------------------------------
+    //
+    // A member id is a small sequential number, so "memberId|homeCode" in a browser's local
+    // storage proves nothing — anyone could write another member's id there and walk in as
+    // them, admin rights included. Each sign-in therefore issues a fresh 128-bit secret that
+    // travels with the stored identity; restoring silently requires presenting it. Only its
+    // hash is persisted. Issuing on every sign-in also means an approved rejoin cuts the
+    // *previous* device's stored identity off — exactly what you want when the old device
+    // was lost or the identity stolen.
+
+    /** Issues a fresh secret for this member's device and returns it (the only time the
+     *  plaintext exists server-side); any previously issued secret stops working. */
+    @Transactional
+    public String issueDeviceSecret(Long memberId) {
+        Member member = members.findById(memberId).orElseThrow();
+        String secret = generateToken();
+        member.setDeviceSecretHash(sha256(secret));
+        members.save(member);
+        return secret;
+    }
+
+    /**
+     * Upgrades a device that stored its identity before secrets existed: trust it once,
+     * issue it a secret, and from then on require that secret like everyone else.
+     *
+     * <p>Trust-on-first-use, deliberately narrow: it only ever works while the member has
+     * <em>no</em> secret yet, so exactly one device gets the free pass — every later
+     * secret-less claim on that member is refused and lands in the rejoin flow. The
+     * remaining exposure is the window between deploying the secrets feature and each
+     * member's first visit; the {@code homechores.identity.legacy-migration} flag exists so
+     * an operator can close that window for good once the fleet has migrated.
+     *
+     * @return the freshly issued secret, or empty when this identity doesn't qualify
+     */
+    @Transactional
+    public Optional<String> migrateLegacyIdentity(Long memberId, String homeCode) {
+        if (!legacyIdentityMigration || memberId == null) {
+            return Optional.empty();
+        }
+        Member member = members.findById(memberId).orElse(null);
+        if (member == null || !member.getHomeCode().equals(normalizeCode(homeCode))
+                || member.getDeviceSecretHash() != null) {
+            return Optional.empty();
+        }
+        return Optional.of(issueDeviceSecret(memberId));
+    }
+
+    /** Whether this secret is the one last issued to the member's device. */
+    public boolean verifyDeviceSecret(Long memberId, String secret) {
+        if (memberId == null || secret == null || secret.isBlank()) {
+            return false;
+        }
+        return members.findById(memberId)
+                .map(Member::getDeviceSecretHash)
+                .map(hash -> java.security.MessageDigest.isEqual(
+                        hash.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        sha256(secret).getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .orElse(false);
+    }
+
+    private static String sha256(String value) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e); // mandated by the JLS
+        }
     }
 
     public List<Member> membersOf(String homeCode) {
@@ -234,22 +369,32 @@ public class ChoreService {
             return new Rejoin(RejoinResult.UNKNOWN, null);
         }
         boolean pinGiven = pin != null && !pin.isBlank();
-        if (pinGiven && !pin.trim().equals(home.getAdminPin())) {
+        if (pinGiven && !checkPin(norm, home.getAdminPin(), pin)) {
             return new Rejoin(RejoinResult.WRONG_PIN, null);
         }
         if (pinGiven || !home.isApproveRejoin()) {
+            // Signing in settles the matter — a pending request this member abandoned on
+            // another attempt must not stay approvable in the admin's queue.
+            dropPendingRejoins(norm, memberId);
             touchHome(norm);
             return new Rejoin(RejoinResult.SIGNED_IN, null);
         }
         // Only the newest device may be waiting for a given member, so an abandoned request
         // on an old phone can't be used to walk in later.
-        rejoins.findByHomeCodeAndStatusOrderByRequestedAtAsc(norm, RejoinStatus.PENDING).stream()
-                .filter(r -> r.getMemberId().equals(memberId))
-                .forEach(rejoins::delete);
+        dropPendingRejoins(norm, memberId);
         String token = generateToken();
         rejoins.save(new RejoinRequest(norm, memberId, token));
         homeState.bump(norm);
         return new Rejoin(RejoinResult.PENDING, token);
+    }
+
+    /** Removes this member's waiting requests. (memberId is on the left of the equals: a
+     *  pending first-time join request has no member id.) */
+    private void dropPendingRejoins(String homeCode, Long memberId) {
+        rejoins.findByHomeCodeAndStatusOrderByRequestedAtAsc(homeCode, RejoinStatus.PENDING)
+                .stream()
+                .filter(r -> memberId.equals(r.getMemberId()))
+                .forEach(rejoins::delete);
     }
 
     /** Looks a rejoin request up by the secret held in the requesting browser's storage. */
@@ -266,13 +411,17 @@ public class ChoreService {
         return rejoins.countByHomeCodeAndStatus(homeCode, RejoinStatus.PENDING);
     }
 
-    /** Approves (or rejects) a pending rejoin request. The waiting device picks the
-     *  decision up through the home's revision signal. */
+    /** Approves (or rejects) a pending rejoin or first-time join request. Approving a join
+     *  is the moment the member is actually created. The waiting device picks the decision
+     *  up through the home's revision signal. */
     @Transactional
     public boolean decideRejoin(Long requestId, Long adminId, boolean approve) {
         RejoinRequest r = rejoins.findById(requestId).orElse(null);
         if (r == null || r.getStatus() != RejoinStatus.PENDING) {
             return false;
+        }
+        if (approve && r.isJoin()) {
+            r.setMemberId(addMember(r.getHomeCode(), r.getRequestedName(), false).getId());
         }
         r.setStatus(approve ? RejoinStatus.APPROVED : RejoinStatus.REJECTED);
         r.setDecidedAt(Instant.now());
@@ -298,6 +447,96 @@ public class ChoreService {
         });
     }
 
+    /** How old a join/rejoin request may get before the sweep removes it. */
+    public static final Duration REJOIN_MAX_AGE = Duration.ofHours(48);
+
+    /**
+     * Deletes join/rejoin requests past {@link #REJOIN_MAX_AGE}, whatever their status.
+     * Pending ones are abandoned attempts that would otherwise sit in the admin's queue
+     * (and keep a stranger's requested nickname in the database) forever; an APPROVED one
+     * whose device never came back is worse — a live sign-in token nobody is watching.
+     */
+    @Scheduled(fixedDelayString = "${homechores.rejoin.sweep-ms:3600000}",
+               initialDelayString = "${homechores.rejoin.sweep-ms:3600000}")
+    @Transactional
+    public int expireStaleRejoins() {
+        List<RejoinRequest> stale =
+                rejoins.findByRequestedAtBefore(Instant.now().minus(REJOIN_MAX_AGE));
+        if (stale.isEmpty()) {
+            return 0;
+        }
+        Set<String> affectedHomes = new LinkedHashSet<>();
+        for (RejoinRequest r : stale) {
+            rejoins.delete(r);
+            if (r.getStatus() == RejoinStatus.PENDING) {
+                affectedHomes.add(r.getHomeCode()); // its row in an open admin queue
+            }
+        }
+        affectedHomes.forEach(homeState::bump);
+        log.info("Expired {} stale join/rejoin request(s)", stale.size());
+        return stale.size();
+    }
+
+    // ---- Admin PIN brute-force gate ------------------------------------------
+    //
+    // The PIN is 4 digits: 10,000 possibilities, trivially enumerable without a brake.
+    // Both places that check it (claiming admin, skipping the rejoin gate) go through this
+    // per-home counter — a handful of typos costs nothing, a scripted sweep hits the wall
+    // after five tries. In-memory on purpose: this is a single-node app, and a restart
+    // forgetting the counters is fine.
+
+    /** Wrong-PIN attempts allowed per home before the PIN check locks. */
+    static final int MAX_PIN_FAILURES = 5;
+    /** How long the PIN check stays locked after too many failures. */
+    static final Duration PIN_LOCKOUT = Duration.ofMinutes(15);
+
+    private static final class PinGate {
+        int failures;
+        Instant lockedUntil;
+    }
+
+    private final java.util.concurrent.ConcurrentHashMap<String, PinGate> pinGates =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Whether this home's PIN may even be checked right now. */
+    private boolean pinAttemptAllowed(String homeCode) {
+        PinGate g = pinGates.get(homeCode);
+        if (g == null) {
+            return true;
+        }
+        synchronized (g) {
+            return g.lockedUntil == null || Instant.now().isAfter(g.lockedUntil);
+        }
+    }
+
+    private void recordPinFailure(String homeCode) {
+        PinGate g = pinGates.computeIfAbsent(homeCode, k -> new PinGate());
+        synchronized (g) {
+            if (++g.failures >= MAX_PIN_FAILURES) {
+                g.lockedUntil = Instant.now().plus(PIN_LOCKOUT);
+                g.failures = 0;
+            }
+        }
+    }
+
+    private void clearPinFailures(String homeCode) {
+        pinGates.remove(homeCode);
+    }
+
+    /** One guarded PIN check: false for a wrong PIN or a locked gate, and each wrong
+     *  answer moves the gate closer to locking. */
+    private boolean checkPin(String homeCode, String expected, String given) {
+        if (!pinAttemptAllowed(homeCode)) {
+            return false;
+        }
+        if (given == null || !given.trim().equals(expected)) {
+            recordPinFailure(homeCode);
+            return false;
+        }
+        clearPinFailures(homeCode);
+        return true;
+    }
+
     // ---- Admin & member management -----------------------------------------
 
     /** Attempts to grant admin rights to a member by verifying the home's admin PIN. */
@@ -305,7 +544,7 @@ public class ChoreService {
     public boolean claimAdmin(Long memberId, String pin) {
         Member member = members.findById(memberId).orElseThrow();
         Home home = homes.findById(member.getHomeCode()).orElseThrow();
-        if (pin != null && pin.trim().equals(home.getAdminPin())) {
+        if (checkPin(home.getCode(), home.getAdminPin(), pin)) {
             member.setAdmin(true);
             members.save(member);
             homeState.bump(home.getCode());

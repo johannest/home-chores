@@ -181,4 +181,173 @@ class RejoinServiceTest {
         assertTrue(service.findRejoinByToken(null).isEmpty());
         assertTrue(service.findRejoinByToken("  ").isEmpty());
     }
+
+    // ---- First-time joins (gated by default) ---------------------------------
+
+    @Test
+    void newHome_gatesFirstJoinsByDefault() {
+        Member admin = service.createHome("Nest", "Alex");
+        assertTrue(service.findHome(admin.getHomeCode()).orElseThrow().isApproveJoin());
+    }
+
+    @Test
+    void gatedJoin_createsNoMemberUntilAnAdminApproves() {
+        Member admin = service.createHome("Nest", "Alex");
+
+        var outcome = service.requestJoin(admin.getHomeCode(), "Sam");
+        assertEquals(RejoinResult.PENDING, outcome.result());
+        assertNotNull(outcome.token());
+        assertNull(outcome.member());
+        assertEquals(1, service.membersOf(admin.getHomeCode()).size(), "still only Alex");
+
+        RejoinRequest request = service.pendingRejoins(admin.getHomeCode()).get(0);
+        assertTrue(request.isJoin());
+        assertEquals("Sam", request.getRequestedName());
+        assertTrue(service.decideRejoin(request.getId(), admin.getId(), true));
+
+        RejoinRequest approved = service.findRejoinByToken(outcome.token()).orElseThrow();
+        assertEquals(RejoinStatus.APPROVED, approved.getStatus());
+        assertNotNull(approved.getMemberId(), "approval created the member");
+        Member sam = service.findMember(approved.getMemberId()).orElseThrow();
+        assertEquals("Sam", sam.getName());
+        assertFalse(sam.isAdmin());
+    }
+
+    @Test
+    void gatedJoin_rejected_createsNobody() {
+        Member admin = service.createHome("Nest", "Alex");
+        var outcome = service.requestJoin(admin.getHomeCode(), "Sam");
+        RejoinRequest request = service.pendingRejoins(admin.getHomeCode()).get(0);
+
+        assertTrue(service.decideRejoin(request.getId(), admin.getId(), false));
+        assertEquals(1, service.membersOf(admin.getHomeCode()).size());
+        assertEquals(RejoinStatus.REJECTED,
+                service.findRejoinByToken(outcome.token()).orElseThrow().getStatus());
+    }
+
+    @Test
+    void joinGateOff_signsInImmediately() {
+        Member admin = service.createHome("Nest", "Alex");
+        Home home = service.findHome(admin.getHomeCode()).orElseThrow();
+        home.setApproveJoin(false);
+        service.saveHome(home);
+
+        var outcome = service.requestJoin(home.getCode(), "Sam");
+        assertEquals(RejoinResult.SIGNED_IN, outcome.result());
+        assertEquals("Sam", outcome.member().getName());
+        assertTrue(service.pendingRejoins(home.getCode()).isEmpty());
+    }
+
+    @Test
+    void join_unknownCodeOrBlankName_isUnknown() {
+        Member admin = service.createHome("Nest", "Alex");
+        assertEquals(RejoinResult.UNKNOWN, service.requestJoin("ZZZZZZZ", "Sam").result());
+        assertEquals(RejoinResult.UNKNOWN, service.requestJoin(admin.getHomeCode(), "  ").result());
+    }
+
+    @Test
+    void pendingJoinRequest_doesNotBreakAMembersReRequest() {
+        Member admin = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(admin.getHomeCode(), "Sam").orElseThrow();
+        service.requestJoin(admin.getHomeCode(), "Newcomer"); // memberless request in the queue
+
+        Rejoin r = service.requestRejoin(admin.getHomeCode(), sam.getId(), null);
+        assertEquals(RejoinResult.PENDING, r.result());
+        assertEquals(2, service.pendingRejoins(admin.getHomeCode()).size(),
+                "the join request survives Sam's rejoin");
+    }
+
+    // ---- Finding oneself by nickname -----------------------------------------
+
+    @Test
+    void findMemberByName_matchesCaseInsensitively_andOnlyWithinTheHome() {
+        Member admin = service.createHome("Nest", "Alex");
+        Member other = service.createHome("Elsewhere", "Sam");
+        service.joinHome(admin.getHomeCode(), "Sam").orElseThrow();
+
+        Member found = service.findMemberByName(admin.getHomeCode(), "  sam ").orElseThrow();
+        assertEquals(admin.getHomeCode(), found.getHomeCode());
+        assertFalse(found.getId().equals(other.getId()), "not the Sam from the other home");
+        assertTrue(service.findMemberByName(admin.getHomeCode(), "Mallory").isEmpty());
+        assertTrue(service.findMemberByName(admin.getHomeCode(), null).isEmpty());
+    }
+
+    // ---- Device secrets --------------------------------------------------------
+
+    @Test
+    void deviceSecret_verifies_andRotatesOnReissue() {
+        Member admin = service.createHome("Nest", "Alex");
+
+        assertFalse(service.verifyDeviceSecret(admin.getId(), "guess"),
+                "no secret issued yet — nothing verifies");
+        String first = service.issueDeviceSecret(admin.getId());
+        assertTrue(service.verifyDeviceSecret(admin.getId(), first));
+        assertFalse(service.verifyDeviceSecret(admin.getId(), "guess"));
+        assertFalse(service.verifyDeviceSecret(admin.getId(), null));
+
+        String second = service.issueDeviceSecret(admin.getId());
+        assertFalse(service.verifyDeviceSecret(admin.getId(), first), "old device cut off");
+        assertTrue(service.verifyDeviceSecret(admin.getId(), second));
+    }
+
+    // ---- Legacy identity migration (trust-on-first-use) -------------------------
+
+    @Test
+    void legacyIdentity_migratesExactlyOnce() {
+        Member admin = service.createHome("Nest", "Alex");
+
+        String secret = service.migrateLegacyIdentity(admin.getId(), admin.getHomeCode())
+                .orElseThrow();
+        assertTrue(service.verifyDeviceSecret(admin.getId(), secret),
+                "the upgraded device holds a working secret");
+        assertTrue(service.migrateLegacyIdentity(admin.getId(), admin.getHomeCode()).isEmpty(),
+                "a second secret-less claim on the same member is refused");
+    }
+
+    @Test
+    void legacyIdentity_wrongHomeOrMember_isRefused() {
+        Member admin = service.createHome("Nest", "Alex");
+        assertTrue(service.migrateLegacyIdentity(admin.getId(), "ZZZZZZZ").isEmpty());
+        assertTrue(service.migrateLegacyIdentity(999999L, admin.getHomeCode()).isEmpty());
+        assertTrue(service.migrateLegacyIdentity(null, admin.getHomeCode()).isEmpty());
+    }
+
+    @Test
+    void legacyIdentity_afterARealSignIn_isRefused() {
+        Member admin = service.createHome("Nest", "Alex");
+        service.issueDeviceSecret(admin.getId()); // the member's device signed in normally
+        assertTrue(service.migrateLegacyIdentity(admin.getId(), admin.getHomeCode()).isEmpty(),
+                "a member with a secret can never be claimed by a secret-less identity");
+    }
+
+    // ---- PIN brute-force gate ---------------------------------------------------
+
+    @Test
+    void pinGate_locksAfterRepeatedFailures_evenForTheRightPin() {
+        Member admin = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(admin.getHomeCode(), "Sam").orElseThrow();
+        Home home = service.findHome(admin.getHomeCode()).orElseThrow();
+
+        for (int i = 0; i < ChoreService.MAX_PIN_FAILURES; i++) {
+            assertFalse(service.claimAdmin(sam.getId(), wrongPin(home)));
+        }
+        assertFalse(service.claimAdmin(sam.getId(), home.getAdminPin()),
+                "locked: even the correct PIN is refused for a while");
+        assertEquals(RejoinResult.WRONG_PIN,
+                service.requestRejoin(home.getCode(), sam.getId(), home.getAdminPin()).result(),
+                "the rejoin PIN shortcut shares the same gate");
+        assertFalse(service.findMember(sam.getId()).orElseThrow().isAdmin());
+    }
+
+    @Test
+    void pinGate_typosBelowTheLimit_dontBlockTheRightPin() {
+        Member admin = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(admin.getHomeCode(), "Sam").orElseThrow();
+        Home home = service.findHome(admin.getHomeCode()).orElseThrow();
+
+        for (int i = 0; i < ChoreService.MAX_PIN_FAILURES - 1; i++) {
+            assertFalse(service.claimAdmin(sam.getId(), wrongPin(home)));
+        }
+        assertTrue(service.claimAdmin(sam.getId(), home.getAdminPin()));
+    }
 }

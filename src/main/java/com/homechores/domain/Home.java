@@ -54,6 +54,16 @@ public class Home {
     private boolean approveRejoin = true;
 
     /**
+     * When on, someone joining the home for the first time with just the code waits for an
+     * admin's approval before a member is created. Defaults to on: a home code is short
+     * enough to be guessed or leaked, and without the gate a guess immediately plants a
+     * stranger on the family's board. See the note on {@code approveRejoin} for why the
+     * column carries an explicit default.
+     */
+    @Column(columnDefinition = "boolean not null default true")
+    private boolean approveJoin = true;
+
+    /**
      * When on, tapping a chore asks "did you do this?" before recording it. Defaults to on
      * because the cards are large and close together on a phone, and user testing showed
      * people completing several by accident. See the note on {@code approveRejoin} for why
@@ -159,6 +169,14 @@ public class Home {
 
     public void setApproveRejoin(boolean approveRejoin) {
         this.approveRejoin = approveRejoin;
+    }
+
+    public boolean isApproveJoin() {
+        return approveJoin;
+    }
+
+    public void setApproveJoin(boolean approveJoin) {
+        this.approveJoin = approveJoin;
     }
 
     public boolean isConfirmCompletion() {

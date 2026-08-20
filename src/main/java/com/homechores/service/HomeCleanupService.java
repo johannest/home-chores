@@ -71,8 +71,10 @@ public class HomeCleanupService {
         }
         List<String> purged = purgeAbandonedHomes();
         if (!purged.isEmpty()) {
-            log.info("Retention: purged {} abandoned home(s) unused for {}+ days: {}",
-                    purged.size(), abandonedHomeDays, purged);
+            // Count only: a home code is the home's access credential, so it stays out of
+            // log files. The offline maintenance tool is the place to inspect specifics.
+            log.info("Retention: purged {} abandoned home(s) unused for {}+ days",
+                    purged.size(), abandonedHomeDays);
         }
     }
 

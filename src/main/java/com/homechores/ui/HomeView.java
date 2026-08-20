@@ -329,7 +329,11 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         }
         // Re-stamp the device's stored identity on every visit, so it heals itself if the
         // write was lost (private mode, storage pressure) and outlives the server session.
-        DeviceIdentity.remember(memberId, homeCode);
+        // Only with the secret in hand — stamping without one would corrupt a good identity.
+        String secret = SessionContext.deviceSecret();
+        if (secret != null) {
+            DeviceIdentity.remember(memberId, homeCode, secret);
+        }
         // Chore availability windows ("dog out 8-10") are evaluated in the member's local
         // time, so fetch the browser's time zone once and re-render when it arrives.
         event.getUI().getPage().retrieveExtendedClientDetails(details -> {

@@ -1,5 +1,6 @@
 package com.homechores.domain;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -26,6 +27,15 @@ public class Member {
     private boolean admin = false;
 
     private Instant joinedAt = Instant.now();
+
+    /**
+     * SHA-256 of the secret this member's device holds in its local storage. A member id is
+     * a small sequential number anyone can guess; the secret is what actually proves "this
+     * browser is that member". Only the hash is kept, so the database (and its backups)
+     * can't impersonate a device. Null until the member's first sign-in issues one.
+     */
+    @Column(length = 64)
+    private String deviceSecretHash;
 
     protected Member() {
     }
@@ -79,5 +89,13 @@ public class Member {
 
     public void setJoinedAt(Instant joinedAt) {
         this.joinedAt = joinedAt;
+    }
+
+    public String getDeviceSecretHash() {
+        return deviceSecretHash;
+    }
+
+    public void setDeviceSecretHash(String deviceSecretHash) {
+        this.deviceSecretHash = deviceSecretHash;
     }
 }

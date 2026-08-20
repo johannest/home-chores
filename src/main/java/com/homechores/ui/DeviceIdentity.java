@@ -18,7 +18,9 @@ import java.util.Optional;
  */
 final class DeviceIdentity {
 
-    /** Stored as "memberId|homeCode" — no JSON parsing needed on the way back. */
+    /** Stored as "memberId|homeCode|secret" — no JSON parsing needed on the way back.
+     *  The secret (issued per sign-in, hash held server-side) is what stops a forged
+     *  localStorage value from stepping into another member's identity. */
     private static final String IDENTITY_KEY = "flashchores.identity";
 
     /** Secret for a rejoin request this device is waiting on. */
@@ -30,13 +32,14 @@ final class DeviceIdentity {
     private DeviceIdentity() {
     }
 
-    /** A member id + home code recovered from the browser. */
-    record Stored(Long memberId, String homeCode) {
+    /** A member id + home code + device secret recovered from the browser. {@code secret}
+     *  is null for a value written before secrets existed (see {@link #parse}). */
+    record Stored(Long memberId, String homeCode, String secret) {
     }
 
-    static void remember(Long memberId, String homeCode) {
+    static void remember(Long memberId, String homeCode, String secret) {
         exec("try{localStorage.setItem($0,$1)}catch(e){}",
-                IDENTITY_KEY, memberId + "|" + homeCode);
+                IDENTITY_KEY, memberId + "|" + homeCode + "|" + secret);
     }
 
     /** Clears everything this app stored — used on Leave and on a stale/invalid identity. */
@@ -79,12 +82,17 @@ final class DeviceIdentity {
         if (raw == null || raw.isBlank()) {
             return Optional.empty();
         }
-        String[] parts = raw.split("\\|", 2);
-        if (parts.length != 2 || parts[1].isBlank()) {
+        String[] parts = raw.split("\\|", 3);
+        // Two parts is the pre-secret format. It surfaces with a null secret so the
+        // landing view can offer it for one-time migration (see LandingView.restoreFrom);
+        // it is never enough to sign in by itself.
+        if (parts.length < 2 || parts[1].isBlank()
+                || (parts.length == 3 && parts[2].isBlank())) {
             return Optional.empty();
         }
         try {
-            return Optional.of(new Stored(Long.valueOf(parts[0]), parts[1]));
+            return Optional.of(new Stored(Long.valueOf(parts[0]), parts[1],
+                    parts.length == 3 ? parts[2] : null));
         } catch (NumberFormatException e) {
             return Optional.empty(); // storage tampered with or written by an older version
         }

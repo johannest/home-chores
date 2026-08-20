@@ -187,13 +187,19 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
             if (code.peek().isBlank() || yourName.peek().isBlank()) {
                 return;
             }
-            Optional<Member> m = service.joinHome(code.peek(), yourName.peek());
-            if (m.isEmpty()) {
-                warn(T.tr("landing.join.notFound", code.peek().trim().toUpperCase()));
-                return;
+            ChoreService.JoinOutcome outcome = service.requestJoin(code.peek(), yourName.peek());
+            switch (outcome.result()) {
+                case SIGNED_IN -> {
+                    signIn(outcome.member().getId(), outcome.member().getHomeCode());
+                    getUI().ifPresent(ui -> ui.navigate(HomeView.class));
+                }
+                case PENDING -> {
+                    DeviceIdentity.rememberRejoinToken(outcome.token());
+                    showWaiting(outcome.token(), code.peek().trim().toUpperCase(),
+                            yourName.peek().trim());
+                }
+                default -> warn(T.tr("landing.join.notFound", code.peek().trim().toUpperCase()));
             }
-            signIn(m.get().getId(), m.get().getHomeCode());
-            getUI().ifPresent(ui -> ui.navigate(HomeView.class));
         };
         join.addClickListener(e -> submit.run());
         yourNameField.addKeyPressListener(Key.ENTER, e -> submit.run());
@@ -215,7 +221,12 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
 
     // ---- Rejoining as an existing member ------------------------------------
 
-    /** Lists the home's members so a returning device can point at itself. */
+    /**
+     * Asks the returning device for its nickname rather than listing the home's members:
+     * a home code travels in join links and can be guessed, and it alone must not be
+     * enough to read every family member's name off the screen. Someone who forgot their
+     * exact nickname asks their home admin — the admin's member list shows it.
+     */
     private void openRejoinDialog(String rawCode) {
         if (rawCode == null || rawCode.isBlank()) {
             warn(T.tr("landing.rejoin.needCode"));
@@ -234,8 +245,12 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         d.setHeaderTitle(T.tr("landing.rejoin.title"));
         d.setWidth("min(90vw, 24em)");
 
-        Span intro = new Span(T.tr("landing.rejoin.intro", h.getName()));
+        Span intro = new Span(T.tr("landing.rejoin.nameIntro"));
         intro.addClassName("sub");
+
+        TextField name = new TextField(T.tr("landing.rejoin.name"));
+        name.setWidthFull();
+        name.setHelperText(T.tr("landing.rejoin.name.helper"));
 
         // The PIN is optional and only useful where the gate is on — it skips the wait.
         TextField pin = new TextField(T.tr("landing.rejoin.pin"));
@@ -244,32 +259,23 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         pin.setHelperText(T.tr("landing.rejoin.pin.helper"));
         pin.setVisible(h.isApproveRejoin());
 
-        VerticalLayout body = new VerticalLayout(intro);
+        Button me = new Button(T.tr("landing.rejoin.thisIsMe"), e -> {
+            Optional<Member> m = service.findMemberByName(h.getCode(), name.getValue());
+            if (m.isEmpty()) {
+                name.setInvalid(true);
+                name.setErrorMessage(T.tr("landing.rejoin.noMatch"));
+                return;
+            }
+            attemptRejoin(d, pin, h, m.get());
+        });
+        me.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        me.setWidthFull();
+        name.addKeyPressListener(Key.ENTER, e -> me.click());
+
+        VerticalLayout body = new VerticalLayout(intro, name, pin, me);
         body.setPadding(false);
         body.setSpacing(true);
         body.setWidthFull();
-
-        for (Member m : service.membersOf(h.getCode())) {
-            Div dot = new Div();
-            dot.addClassName("dot");
-            dot.getStyle().set("background", m.getColor());
-            dot.setText(m.getName().isEmpty() ? "?" : m.getName().substring(0, 1).toUpperCase());
-
-            Div name = new Div();
-            name.setText(m.getName() + (m.isAdmin() ? " 👑" : ""));
-            name.getStyle().set("font-weight", "600");
-            name.addClassName("grow");
-
-            Button pick = new Button(T.tr("landing.rejoin.thisIsMe"),
-                    e -> attemptRejoin(d, pin, h, m));
-            pick.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SMALL);
-
-            Div row = new Div(dot, name, pick);
-            row.addClassName("list-row");
-            body.add(row);
-        }
-
-        body.add(pin);
         d.add(body);
         d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()));
         d.open();
@@ -381,14 +387,36 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         });
     }
 
-    /** Signs in from a stored identity, if the member and home are both still there. */
+    /**
+     * Signs in from a stored identity, if the member and home are both still there and the
+     * stored secret is the one issued to this member's device. The secret is the actual
+     * proof — member ids are guessable, so without it a hand-written localStorage value
+     * would sign anyone in as any member.
+     *
+     * <p>A value written before secrets existed carries none. The first such device to
+     * show up for a member is trusted once and upgraded in place (see
+     * {@link ChoreService#migrateLegacyIdentity}), so existing families keep signing in
+     * silently across the deploy instead of all being sent through the rejoin flow.
+     */
     private boolean restoreFrom(DeviceIdentity.Stored stored) {
         Optional<Member> m = service.findMember(stored.memberId());
         if (m.isEmpty() || !m.get().getHomeCode().equals(stored.homeCode())
                 || service.findHome(stored.homeCode()).isEmpty()) {
             return false;
         }
+        String secret = stored.secret();
+        if (secret == null) {
+            secret = service.migrateLegacyIdentity(stored.memberId(), stored.homeCode())
+                    .orElse(null);
+            if (secret == null) {
+                return false; // migration off, or this member's device already has a secret
+            }
+            DeviceIdentity.remember(stored.memberId(), stored.homeCode(), secret);
+        } else if (!service.verifyDeviceSecret(stored.memberId(), secret)) {
+            return false;
+        }
         SessionContext.signIn(m.get().getId(), m.get().getHomeCode());
+        SessionContext.setDeviceSecret(secret);
         SessionContext.applyTimeout(m.get().isAdmin());
         getUI().ifPresent(ui -> ui.navigate(HomeView.class));
         return true;
@@ -418,7 +446,9 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
                     showCard();
                 }
                 case PENDING -> showWaiting(req.getDeviceToken(), req.getHomeCode(),
-                        service.findMember(req.getMemberId()).map(Member::getName).orElse("?"));
+                        req.isJoin() ? req.getRequestedName()
+                                : service.findMember(req.getMemberId())
+                                        .map(Member::getName).orElse("?"));
             }
         });
     }
@@ -429,11 +459,17 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         card.setVisible(true);
     }
 
-    /** Signs in for this session and remembers the identity on the device itself. */
+    /**
+     * Signs in for this session and remembers the identity on the device itself, under a
+     * freshly issued secret. Issuing invalidates whatever secret the member's previous
+     * device held — so an approved rejoin doubles as revocation of the old device.
+     */
     private void signIn(Long memberId, String homeCode) {
+        String secret = service.issueDeviceSecret(memberId);
         SessionContext.signIn(memberId, homeCode);
+        SessionContext.setDeviceSecret(secret);
         SessionContext.applyTimeout(service.findMember(memberId).map(Member::isAdmin).orElse(false));
-        DeviceIdentity.remember(memberId, homeCode);
+        DeviceIdentity.remember(memberId, homeCode, secret);
     }
 
     /** A small footer row: icon + text linking to an external site (new tab). */

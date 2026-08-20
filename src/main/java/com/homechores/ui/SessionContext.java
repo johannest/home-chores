@@ -12,6 +12,7 @@ public final class SessionContext {
     private static final String MEMBER_ID = "memberId";
     private static final String HOME_CODE = "homeCode";
     private static final String TIME_ZONE = "timeZone";
+    private static final String DEVICE_SECRET = "deviceSecret";
 
     /**
      * How long a member's session survives without them touching the app. Short on purpose:
@@ -71,6 +72,17 @@ public final class SessionContext {
         VaadinSession s = VaadinSession.getCurrent();
         s.setAttribute(MEMBER_ID, null);
         s.setAttribute(HOME_CODE, null);
+        s.setAttribute(DEVICE_SECRET, null);
+    }
+
+    /** Keeps the device secret for the session, so the board can re-stamp the browser's
+     *  stored identity without re-issuing (see {@code HomeView#onAttach}). */
+    public static void setDeviceSecret(String secret) {
+        VaadinSession.getCurrent().setAttribute(DEVICE_SECRET, secret);
+    }
+
+    public static String deviceSecret() {
+        return (String) VaadinSession.getCurrent().getAttribute(DEVICE_SECRET);
     }
 
     public static Long memberId() {

@@ -223,6 +223,9 @@ class HomeUiTest extends SpringUIUnitTest {
     @Test
     void joinHome_navigatesToBoard_asMember_withTwoTabs() {
         Member admin = service.createHome("Shared", "Alex");
+        Home home = service.findHome(admin.getHomeCode()).orElseThrow();
+        home.setApproveJoin(false); // no gate: joining signs in straight away
+        service.saveHome(home);
 
         navigate(LandingView.class);
         $(Tabs.class).first().setSelectedIndex(1); // switch to the "Join a home" tab
@@ -232,6 +235,30 @@ class HomeUiTest extends SpringUIUnitTest {
 
         assertInstanceOf(HomeView.class, getCurrentView());
         assertEquals(2, tabCount(), "a plain member has no Admin tab");
+    }
+
+    /** By default a first-time join waits for an admin — a guessed code alone creates nobody. */
+    @Test
+    void joinHome_withGateOn_raisesARequestInsteadOfCreatingAMember() {
+        Member admin = service.createHome("Shared", "Alex");
+        assertTrue(service.findHome(admin.getHomeCode()).orElseThrow().isApproveJoin());
+
+        navigate(LandingView.class);
+        $(Tabs.class).first().setSelectedIndex(1);
+        setField("Home code", admin.getHomeCode());
+        setField("Your name", "Sam");
+        clickButton("Join home 🙌");
+
+        assertInstanceOf(LandingView.class, getCurrentView(), "still waiting, not signed in");
+        assertNull(SessionContext.memberId());
+        assertEquals(1, service.membersOf(admin.getHomeCode()).size(), "no member created yet");
+        assertEquals(1, service.pendingRejoins(admin.getHomeCode()).size());
+
+        // The admin letting Sam in is the moment the member comes into being.
+        var request = service.pendingRejoins(admin.getHomeCode()).get(0);
+        assertTrue(service.decideRejoin(request.getId(), admin.getId(), true));
+        assertEquals(2, service.membersOf(admin.getHomeCode()).size());
+        assertEquals("Sam", service.membersOf(admin.getHomeCode()).get(1).getName());
     }
 
     @Test
@@ -269,15 +296,16 @@ class HomeUiTest extends SpringUIUnitTest {
     }
 
     /**
-     * The recovery path a family member takes after clearing their browser storage: pick
-     * yourself out of the member list instead of joining again under the same name.
+     * The recovery path a family member takes after clearing their browser storage: type
+     * your own nickname instead of joining again under the same name. Nobody is listed —
+     * a home code alone must not read the family's names off the screen.
      */
     @Test
-    void rejoinPicker_signsBackInAsTheExistingMember_withoutDuplicating() {
+    void rejoinDialog_signsBackInByNickname_withoutDuplicating_orListingMembers() {
         Member admin = service.createHome("Shared", "Alex");
         Member sam = service.joinHome(admin.getHomeCode(), "Sam").orElseThrow();
         Home home = service.findHome(admin.getHomeCode()).orElseThrow();
-        home.setApproveRejoin(false); // no gate: the picker signs in straight away
+        home.setApproveRejoin(false); // no gate: a matching nickname signs in straight away
         service.saveHome(home);
 
         navigate(LandingView.class);
@@ -285,19 +313,38 @@ class HomeUiTest extends SpringUIUnitTest {
         setField("Home code", admin.getHomeCode());
         clickButton("I'm already a member — sign me back in");
 
-        // Two rows, one per member; tap the "That's me" next to Sam.
-        assertEquals(2, $(Button.class).all().stream()
-                .filter(b -> "That's me".equals(b.getText())).count());
-        clickButton("That's me"); // rows are listed join-order, so Alex is first
+        // One submit button and a name field — no per-member rows revealing the roster.
+        assertEquals(1, $(Button.class).all().stream()
+                .filter(b -> "That's me".equals(b.getText()) && usable(b)).count());
+
+        setField("Your nickname in this home", "alex"); // case-insensitive on purpose
+        clickButton("That's me");
         assertInstanceOf(HomeView.class, getCurrentView());
         assertEquals(admin.getId(), SessionContext.memberId(), "signed in as the existing Alex");
         assertEquals(2, service.membersOf(admin.getHomeCode()).size(), "no third member created");
         assertEquals(sam.getId(), service.membersOf(admin.getHomeCode()).get(1).getId());
     }
 
-    /** With the gate on and no PIN, the picker parks the device in the approval queue. */
+    /** A nickname that matches nobody stays in the dialog and creates nothing. */
     @Test
-    void rejoinPicker_withGateOn_raisesARequestInsteadOfSigningIn() {
+    void rejoinDialog_unknownNickname_isRejectedWithoutARequest() {
+        Member admin = service.createHome("Shared", "Alex");
+
+        navigate(LandingView.class);
+        $(Tabs.class).first().setSelectedIndex(1);
+        setField("Home code", admin.getHomeCode());
+        clickButton("I'm already a member — sign me back in");
+        setField("Your nickname in this home", "Mallory");
+        clickButton("That's me");
+
+        assertInstanceOf(LandingView.class, getCurrentView());
+        assertNull(SessionContext.memberId());
+        assertTrue(service.pendingRejoins(admin.getHomeCode()).isEmpty());
+    }
+
+    /** With the gate on and no PIN, a matching nickname parks the device in the queue. */
+    @Test
+    void rejoinDialog_withGateOn_raisesARequestInsteadOfSigningIn() {
         Member admin = service.createHome("Shared", "Alex");
         assertTrue(service.findHome(admin.getHomeCode()).orElseThrow().isApproveRejoin());
 
@@ -305,6 +352,7 @@ class HomeUiTest extends SpringUIUnitTest {
         $(Tabs.class).first().setSelectedIndex(1);
         setField("Home code", admin.getHomeCode());
         clickButton("I'm already a member — sign me back in");
+        setField("Your nickname in this home", "Alex");
         clickButton("That's me");
 
         assertInstanceOf(LandingView.class, getCurrentView(), "still waiting, not signed in");
