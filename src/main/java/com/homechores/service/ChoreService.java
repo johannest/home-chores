@@ -89,7 +89,7 @@ public class ChoreService {
                                 "${homechores.identity.legacy-migration:true}")
                         boolean legacyIdentityMigration,
                         @org.springframework.beans.factory.annotation.Value(
-                                "${homechores.identity.legacy-migration-window-hours:168}")
+                                "${homechores.identity.legacy-migration-window-hours:48}")
                         long legacyMigrationWindowHours) {
         this.homes = homes;
         this.members = members;
