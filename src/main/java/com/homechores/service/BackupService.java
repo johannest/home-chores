@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.homechores.domain.ChoreGroup;
+import com.homechores.domain.ChoreGroupRepository;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.ChoreTaskRepository;
 import com.homechores.domain.Completion;
@@ -35,11 +37,18 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class BackupService {
 
+    /**
+     * Informational. Nothing on the restore path branches on it: unknown keys are ignored and
+     * missing ones take their defaults, so a purely additive change (chore groups, seasons,
+     * avatars) is compatible in both directions and does not bump this. Bump it only when a
+     * reader must actually behave differently.
+     */
     public static final int VERSION = 1;
 
     private final HomeRepository homes;
     private final MemberRepository members;
     private final ChoreTaskRepository tasks;
+    private final ChoreGroupRepository groups;
     private final CompletionRepository completions;
     private final CreditEntryRepository creditEntries;
     private final SpreeTierRepository spreeTiers;
@@ -55,12 +64,14 @@ public class BackupService {
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
     public BackupService(HomeRepository homes, MemberRepository members,
-                        ChoreTaskRepository tasks, CompletionRepository completions,
+                        ChoreTaskRepository tasks, ChoreGroupRepository groups,
+                        CompletionRepository completions,
                         CreditEntryRepository creditEntries, SpreeTierRepository spreeTiers,
                         RejoinRequestRepository rejoins, HomeState homeState) {
         this.homes = homes;
         this.members = members;
         this.tasks = tasks;
+        this.groups = groups;
         this.completions = completions;
         this.creditEntries = creditEntries;
         this.spreeTiers = spreeTiers;
@@ -83,9 +94,15 @@ public class BackupService {
             b.members.add(new MemberDto(m.getId(), m.getName(), m.getColor(), m.isAdmin(),
                     m.getJoinedAt(), m.getAvatar()));
         }
+        for (ChoreGroup g : groups.findByHomeCodeOrderBySortOrderAscIdAsc(homeCode)) {
+            b.groups.add(new GroupDto(g.getId(), g.getName(), g.getEmoji(), g.getSortOrder()));
+        }
+        // Creation order, not board order: the file's row order never was the board's, and
+        // sortOrder now carries the arrangement explicitly.
         for (ChoreTask t : tasks.findByHomeCodeOrderByCreatedAtAsc(homeCode)) {
             b.tasks.add(new TaskDto(t.getId(), t.getName(), t.getEmoji(), t.getIntervalDays(),
-                    t.getCreditValue(), t.getAvailableWindows(), t.getSeasons(), t.getCreatedAt()));
+                    t.getCreditValue(), t.getAvailableWindows(), t.getSeasons(), t.getCreatedAt(),
+                    t.getGroupId(), t.getSortOrder()));
         }
         for (Completion c : completions.findByHomeCode(homeCode)) {
             b.completions.add(new CompletionDto(c.getId(), c.getTaskId(), c.getMemberId(),
@@ -204,6 +221,7 @@ public class BackupService {
         creditEntries.deleteByHomeCode(code);
         spreeTiers.deleteByHomeCode(code);
         tasks.deleteByHomeCode(code);
+        groups.deleteByHomeCode(code);
         members.deleteByHomeCode(code);
 
         // Recreate members and tasks, remapping their (identity-generated) ids.
@@ -222,6 +240,16 @@ public class BackupService {
             Member saved = members.save(entity);
             memberIdMap.put(m.id, saved.getId());
         }
+        // Groups first: tasks point at them, and restore never trusts the ids in the file.
+        Map<Long, Long> groupIdMap = new HashMap<>();
+        for (GroupDto g : b.groups) {
+            ChoreGroup entity = new ChoreGroup(code,
+                    InputLimits.clip(g.name, InputLimits.GROUP_NAME),
+                    InputLimits.clip(g.emoji, InputLimits.EMOJI));
+            entity.setSortOrder(Math.max(0, g.sortOrder));
+            groupIdMap.put(g.id, groups.save(entity).getId());
+        }
+
         Map<Long, Long> taskIdMap = new HashMap<>();
         for (TaskDto t : b.tasks) {
             ChoreTask entity = new ChoreTask(code,
@@ -238,6 +266,12 @@ public class BackupService {
             if (t.createdAt != null) {
                 entity.setCreatedAt(t.createdAt);
             }
+            // A groupId that doesn't resolve makes the chore ungrouped rather than dropping it —
+            // deliberately the opposite of the completion rule below. A completion pointing at a
+            // vanished chore has no meaning left; a chore that lost its label is still a chore the
+            // family does. A backup is hand-editable, so both cases are reachable.
+            entity.setGroupId(t.groupId == null ? null : groupIdMap.get(t.groupId));
+            entity.setSortOrder(Math.max(0, t.sortOrder));
             ChoreTask saved = tasks.save(entity);
             taskIdMap.put(t.id, saved.getId());
         }
@@ -321,6 +355,7 @@ public class BackupService {
         public int version = VERSION;
         public HomeDto home;
         public List<MemberDto> members = new ArrayList<>();
+        public List<GroupDto> groups = new ArrayList<>();
         public List<TaskDto> tasks = new ArrayList<>();
         public List<CompletionDto> completions = new ArrayList<>();
         public List<SpreeTierDto> spreeTiers = new ArrayList<>();
@@ -341,8 +376,18 @@ public class BackupService {
                             String avatar) {
     }
 
+    /** Absent in pre-groups backups: Jackson leaves the array empty, and every task's groupId
+     *  then deserializes to null — which already means "ungrouped". */
+    public record GroupDto(Long id, String name, String emoji, int sortOrder) {
+    }
+
+    /** {@code groupId} is boxed because null is a real value (ungrouped). {@code sortOrder} is a
+     *  primitive on purpose, unlike {@code HomeDto}'s boxed booleans: there, Jackson's {@code
+     *  false} default would be the wrong answer for a missing key, whereas here its {@code 0}
+     *  default means exactly the right thing — "legacy order", which createdAt then resolves. */
     public record TaskDto(Long id, String name, String emoji, int intervalDays, int creditValue,
-                          String availableWindows, String seasons, Instant createdAt) {
+                          String availableWindows, String seasons, Instant createdAt,
+                          Long groupId, int sortOrder) {
     }
 
     public record SpreeTierDto(int days, int credits) {

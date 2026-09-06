@@ -130,9 +130,11 @@ public class StatsService {
             perDay.merge(dateOf(c), 1L, Long::sum);
         }
 
-        // Chore order follows the home's chore list, so the bars match the board.
+        // Chore order follows the home's chore list, so the bars match the board — group by
+        // group, in the order the admin arranged them. Reading the repository's creation order
+        // here instead would silently stop matching the moment anyone reordered anything.
         List<CountBar> byChore = new ArrayList<>();
-        for (ChoreTask t : tasks.findByHomeCodeOrderByCreatedAtAsc(homeCode)) {
+        for (ChoreTask t : tasks.findByHomeCodeOrderBySortOrderAscCreatedAtAscIdAsc(homeCode)) {
             long n = byTask.getOrDefault(t.getId(), 0L);
             if (n > 0) {
                 byChore.add(new CountBar(t.getEmoji() + " " + t.getName(), n));
@@ -173,7 +175,7 @@ public class StatsService {
     public HomeStats homeStats(String homeCode) {
         Home home = homes.findById(homeCode).orElseThrow();
         List<Member> memberList = members.findByHomeCodeOrderByJoinedAtAsc(homeCode);
-        List<ChoreTask> taskList = tasks.findByHomeCodeOrderByCreatedAtAsc(homeCode);
+        List<ChoreTask> taskList = tasks.findByHomeCodeOrderBySortOrderAscCreatedAtAscIdAsc(homeCode);
         List<Completion> all = completions.findByHomeCode(homeCode);
         LocalDate today = LocalDate.now();
 
@@ -217,7 +219,7 @@ public class StatsService {
             }
         }
 
-        // Member and chore order are the home's own (join time, creation time), and every
+        // Member and chore order are the home's own (join time, board order), and every
         // row is emitted even at zero — the charts' categories must not shift about.
         List<CountBar> perMember = new ArrayList<>(memberList.size());
         List<MemberDaily> adherence = new ArrayList<>(memberList.size());
