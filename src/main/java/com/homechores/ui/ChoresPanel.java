@@ -1,9 +1,11 @@
 package com.homechores.ui;
 
 import com.homechores.domain.Cadence;
+import com.homechores.domain.ChoreTask;
 import com.homechores.domain.Completion;
 import com.homechores.domain.DivisionStyle;
 import com.homechores.domain.Home;
+import com.homechores.domain.InputLimits;
 import com.homechores.domain.Member;
 import com.homechores.domain.Seasons;
 import com.homechores.domain.TimeWindows;
@@ -14,6 +16,7 @@ import com.homechores.service.ChoreService.LockReason;
 import com.homechores.service.ChoreService.TaskView;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
+import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
@@ -41,6 +44,7 @@ class ChoresPanel extends VerticalLayout {
     private final Long memberId;
 
     private final Div dailyStrip = new Div();
+    private final Div doneTodayHolder = new Div();
     private final Div undoStrip = new Div();
     private final Div leaderboard = new Div();
     private final Div filterBar = new Div();
@@ -55,7 +59,7 @@ class ChoresPanel extends VerticalLayout {
      */
     private enum Filter {
         ALL(null, "board.filter.all"),
-        DUE_NOW(null, "board.filter.dueNow"),
+        TODAY(null, "board.filter.today"),
         ANYTIME(Cadence.ANYTIME, "board.filter.anytime"),
         DAILY(Cadence.DAILY, "board.filter.daily"),
         WEEKLY(Cadence.WEEKLY, "board.filter.weekly"),
@@ -77,8 +81,15 @@ class ChoresPanel extends VerticalLayout {
      * The member's chosen lens. A plain field is enough: HomeView builds this panel once per
      * navigation and holds it, so it survives every HomeState rebuild — the same trick
      * StatsPanel uses for its sub-tab.
+     *
+     * <p>TODAY is the default: the board opens on "what is on today's list". When TODAY
+     * would select everything its chip is suppressed and the vanished-chip reset below
+     * lands on ALL — which renders the identical board, so nothing is lost.
      */
-    private Filter filter = Filter.ALL;
+    private Filter filter = Filter.TODAY;
+
+    /** Whether the "Done today" list is expanded — same plain-field trick as the lens. */
+    private boolean doneTodayOpen = false;
 
     ChoresPanel(ChoreService service, CreditService creditService, String homeCode, Long memberId) {
         this.service = service;
@@ -97,8 +108,8 @@ class ChoresPanel extends VerticalLayout {
         // Hidden until there is something worth choosing between, so a simple home looks
         // exactly as it did before.
         filterBar.setVisible(false);
-        add(dailyStrip, undoStrip, sectionLabel(T.tr("board.leaderboard")), leaderboard,
-                sectionLabel(T.tr("board.tapPrompt")), filterBar, taskGrid);
+        add(dailyStrip, doneTodayHolder, undoStrip, sectionLabel(T.tr("board.leaderboard")),
+                leaderboard, sectionLabel(T.tr("board.tapPrompt")), filterBar, taskGrid);
     }
 
     private Div sectionLabel(String text) {
@@ -111,9 +122,47 @@ class ChoresPanel extends VerticalLayout {
     void refresh() {
         boolean admin = service.findMember(memberId).map(Member::isAdmin).orElse(false);
         renderDaily();
+        renderDoneToday();
         renderUndo();
         renderLeaderboard();
         renderTasks(admin);
+    }
+
+    /** The collapsible home-wide "Done today" list, directly under the daily strip. */
+    private void renderDoneToday() {
+        doneTodayHolder.removeAll();
+        List<ChoreService.DoneToday> rows = service.doneTodayList(homeCode);
+        doneTodayHolder.setVisible(!rows.isEmpty());
+        if (rows.isEmpty()) {
+            return; // no empty shell — the section earns its place by having content
+        }
+        Details section = new Details(T.tr("board.doneToday", rows.size()));
+        section.addClassName("done-today");
+        for (ChoreService.DoneToday row : rows) {
+            Completion c = row.completion();
+            Div line = new Div();
+            line.setText(row.memberName() + " — " + row.text());
+            line.getStyle().set("font-weight", "600");
+            String pending = c.getStatus() == com.homechores.domain.CompletionStatus.PENDING
+                    ? "  ·  ⏳ " + T.tr("board.doneToday.pending") : "";
+            Span sub = new Span(T.ago(c.getDoneAt()) + pending
+                    + (c.getFeedback() != null ? "  ·  " + c.getFeedback().getEmoji() : ""));
+            sub.addClassName("sub");
+            Div info = new Div(line, sub);
+            info.addClassName("grow");
+            Div rowEl = new Div(info);
+            rowEl.addClassName("list-row");
+            section.add(rowEl);
+        }
+        // Order matters: setOpened before the listener, or the programmatic restore would
+        // be recorded as the member's own choice (see AdminPanel's sections for the trick).
+        section.setOpened(doneTodayOpen);
+        section.addOpenedChangeListener(e -> {
+            if (e.isFromClient()) {
+                doneTodayOpen = e.isOpened();
+            }
+        });
+        doneTodayHolder.add(section);
     }
 
     private void renderDaily() {
@@ -150,10 +199,7 @@ class ChoresPanel extends VerticalLayout {
         for (Member m : service.membersOf(homeCode)) {
             long count = service.completionCount(m.getId());
 
-            Div dot = new Div();
-            dot.addClassName("dot");
-            dot.getStyle().set("background", m.getColor());
-            dot.setText(initials(m.getName()));
+            Div dot = MemberAvatar.dot(m);
 
             Span nameEl = new Span(m.getName());
             if (m.isAdmin()) {
@@ -174,6 +220,10 @@ class ChoresPanel extends VerticalLayout {
             chip.addClassName("member-chip");
             if (m.getId().equals(memberId)) {
                 chip.addClassName("me");
+                // Your own chip is the door to your avatar — the most discoverable spot
+                // there is, since it's literally the picture being changed.
+                chip.addClickListener(e ->
+                        new AvatarPickerDialog(service, m, this::refresh).open());
             }
             leaderboard.add(chip);
         }
@@ -195,7 +245,7 @@ class ChoresPanel extends VerticalLayout {
         List<TaskView> shown = select(all, rotating);
         if (shown.isEmpty() && filter != Filter.ALL) {
             // Never leave the member staring at a blank board wondering what they broke.
-            // Fires in practice when you filter to "Due now" and complete the last due chore.
+            // Fires in practice when the last chore on today's list gets completed.
             filter = Filter.ALL;
             shown = select(all, rotating);
         }
@@ -206,9 +256,10 @@ class ChoresPanel extends VerticalLayout {
         for (TaskView view : shown) {
             taskGrid.add(taskCard(view, rotating));
         }
-        // Neither tile is a chore, so under a narrowed lens they would just dilute the answer.
-        // "All" is always the first chip, so both stay one tap away.
-        if (filter == Filter.ALL) {
+        // Neither tile is a chore, so under a narrowed lens they would just dilute the answer —
+        // but the default TODAY lens must not hide them, or a fresh board loses "Other help"
+        // and the admin's "Add chore". "All" is always the first chip, so both stay one tap away.
+        if (filter == Filter.ALL || filter == Filter.TODAY) {
             if (home == null || home.isAllowOtherHelp()) {
                 taskGrid.add(otherHelpCard());
             }
@@ -235,10 +286,11 @@ class ChoresPanel extends VerticalLayout {
     private Predicate<TaskView> matches(Filter f) {
         return switch (f) {
             case ALL -> v -> true;
-            // "Could I tap this right now, time-wise?" — a chore booked by someone else or capped
-            // by the streak rule is still due, so it stays listed.
-            case DUE_NOW -> v -> v.lockReason() != LockReason.NOT_DUE
-                    && v.lockReason() != LockReason.OUTSIDE_HOURS
+            // "Is this on today's list?" — interval elapsed (or anytime) and in season. A chore
+            // outside its hours (dog walk at noon) still belongs to today, so it stays listed,
+            // locked; a chore booked by someone else or streak-capped likewise. Off-season
+            // chores have their own chip and would only be noise here.
+            case TODAY -> v -> v.lockReason() != LockReason.NOT_DUE
                     && v.lockReason() != LockReason.OUT_OF_SEASON;
             case OFF_SEASON -> v -> v.lockReason() == LockReason.OUT_OF_SEASON;
             default -> v -> Cadence.of(v.task().getIntervalDays()) == f.cadence;
@@ -270,8 +322,8 @@ class ChoresPanel extends VerticalLayout {
 
         List<Filter> chips = new ArrayList<>();
         chips.add(Filter.ALL);
-        if (counts.get(Filter.DUE_NOW) > 0 && counts.get(Filter.DUE_NOW) < all.size()) {
-            chips.add(Filter.DUE_NOW);
+        if (counts.get(Filter.TODAY) > 0 && counts.get(Filter.TODAY) < all.size()) {
+            chips.add(Filter.TODAY);
         }
         // A single non-empty cadence bucket is just "All" wearing a different label.
         if (cadenceChips.size() >= 2) {
@@ -575,12 +627,11 @@ class ChoresPanel extends VerticalLayout {
 
     /** How a completion reads on the board: the chore, or the member's own words. */
     private String describe(Completion c) {
-        if (c.isOtherHelp()) {
-            return "🙋 " + c.getNote();
-        }
-        return service.tasksOf(homeCode).stream()
-                .filter(t -> t.getId().equals(c.getTaskId()))
-                .findFirst().map(t -> t.getEmoji() + " " + t.getName()).orElse("?");
+        ChoreTask task = c.getTaskId() == null ? null
+                : service.tasksOf(homeCode).stream()
+                        .filter(t -> t.getId().equals(c.getTaskId()))
+                        .findFirst().orElse(null);
+        return ChoreService.describe(c, task);
     }
 
     private void handleBook(Long taskId) {
@@ -598,6 +649,7 @@ class ChoresPanel extends VerticalLayout {
 
         TextField name = new TextField(T.tr("board.add.name"));
         name.setPlaceholder(T.tr("board.add.name.placeholder"));
+        name.setMaxLength(InputLimits.TASK_NAME);
         name.setWidthFull();
         name.focus();
 
@@ -627,15 +679,4 @@ class ChoresPanel extends VerticalLayout {
         dialog.open();
     }
 
-    private static String initials(String name) {
-        String trimmed = name == null ? "" : name.trim();
-        if (trimmed.isEmpty()) {
-            return "?";
-        }
-        String[] parts = trimmed.split("\\s+");
-        if (parts.length >= 2) {
-            return ("" + parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
-        }
-        return trimmed.substring(0, Math.min(2, trimmed.length())).toUpperCase();
-    }
 }

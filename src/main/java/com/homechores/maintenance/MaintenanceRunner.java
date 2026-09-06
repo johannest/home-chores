@@ -96,6 +96,8 @@ public class MaintenanceRunner implements ApplicationRunner, ExitCodeGenerator {
                 case "export" -> result.putAll(export(required(args, "maintenance.code"),
                         required(args, "maintenance.out")));
                 case "delete" -> result.putAll(delete(required(args, "maintenance.code")));
+                case "restore" -> result.putAll(restore(required(args, "maintenance.in"),
+                        Boolean.parseBoolean(value(args, "maintenance.force", "false"))));
                 case "purge" -> result.putAll(purge(
                         Integer.parseInt(required(args, "maintenance.days")),
                         Boolean.parseBoolean(value(args, "maintenance.dry-run", "false"))));
@@ -158,6 +160,41 @@ public class MaintenanceRunner implements ApplicationRunner, ExitCodeGenerator {
         Files.writeString(path, json, StandardCharsets.UTF_8);
         return Map.of("code", normalized, "exportedTo", path.toAbsolutePath().toString(),
                 "bytes", json.getBytes(StandardCharsets.UTF_8).length);
+    }
+
+    /**
+     * Brings a home back from a JSON backup — the other half of {@code export}, and the
+     * only way to act on the safety export the inactive-home sweep writes before deleting
+     * a family's board ({@link HomeCleanupService}). Without it that export is a file
+     * nothing can read back, while §4.11.2 and the privacy notice both tell families they
+     * can ask for it.
+     *
+     * <p>Refuses to write over a home that still exists unless {@code force} is given:
+     * restore is a wipe-and-replace, and the overwhelmingly common case here is putting
+     * back something that is gone, not overwriting something that is not.
+     */
+    private Map<String, Object> restore(String in, boolean force) throws Exception {
+        Path path = Path.of(in);
+        if (!Files.isRegularFile(path)) {
+            throw new IllegalArgumentException("No such backup file: " + path.toAbsolutePath());
+        }
+        byte[] json = Files.readAllBytes(path);
+        String code = backupService.homeCodeIn(json);
+        boolean existed = homes.findById(code).isPresent();
+        if (existed && !force) {
+            throw new IllegalArgumentException("Home " + code + " still exists. Restoring "
+                    + "replaces everything it currently holds — pass --force if that is "
+                    + "what you mean, after taking an export of it.");
+        }
+        BackupService.RestoreResult result = backupService.restoreAnyHome(json);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("code", result.homeCode());
+        out.put("restoredFrom", path.toAbsolutePath().toString());
+        out.put("overwroteExistingHome", existed);
+        out.put("members", result.members());
+        out.put("chores", result.tasks());
+        out.put("completions", result.completions());
+        return out;
     }
 
     private Map<String, Object> delete(String code) {

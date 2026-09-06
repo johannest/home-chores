@@ -48,6 +48,14 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Web Push chore reminders (see WebPushSender). Vaadin's first-party wrapper
+             around com.interaso:webpush — plain java.security + java.net.http, no
+             BouncyCastle. Inert unless VAPID keys are configured. -->
+        <dependency>
+            <groupId>com.vaadin</groupId>
+            <artifactId>flow-webpush</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>

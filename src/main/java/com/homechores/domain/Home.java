@@ -18,9 +18,13 @@ public class Home {
     @Column(length = 8)
     private String code;
 
+    /** Length backstop for {@link InputLimits#HOME_NAME}; the service layer clips first.
+     *  ({@code ddl-auto=update} won't narrow the column on databases that predate it.) */
+    @Column(length = InputLimits.HOME_NAME)
     private String name;
 
     /** 4-digit admin PIN — the credential for (re)claiming admin rights. */
+    @Column(length = 8)
     private String adminPin;
 
     /** When on, completions start PENDING and must be approved by an admin. */

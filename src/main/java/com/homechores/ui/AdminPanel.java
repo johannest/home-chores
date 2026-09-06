@@ -4,6 +4,7 @@ import com.homechores.domain.ChoreTask;
 import com.homechores.domain.Completion;
 import com.homechores.domain.DivisionStyle;
 import com.homechores.domain.Home;
+import com.homechores.domain.InputLimits;
 import com.homechores.domain.Member;
 import com.homechores.domain.RejoinRequest;
 import com.homechores.domain.Season;
@@ -39,11 +40,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 /** Admin-only tools: approvals, settings, members, chores CRUD, backup/restore. */
@@ -247,6 +248,7 @@ class AdminPanel extends VerticalLayout {
 
         IntegerField credits = new IntegerField(T.tr("admin.help.accept.credits"));
         credits.setMin(0);
+        credits.setMax(InputLimits.MAX_CREDITS);
         credits.setValue(0);
         credits.setStepButtonsVisible(true);
         credits.setWidthFull();
@@ -283,6 +285,7 @@ class AdminPanel extends VerticalLayout {
         Span question = new Span(T.tr("admin.help.promote.text"));
 
         TextField name = new TextField(T.tr("admin.chore.name"));
+        name.setMaxLength(InputLimits.TASK_NAME);
         name.setValue(shortName(description));
         name.setWidthFull();
         TextField emoji = new TextField(T.tr("admin.chore.emoji"));
@@ -292,6 +295,7 @@ class AdminPanel extends VerticalLayout {
         FrequencyField freq = new FrequencyField();
         IntegerField credit = new IntegerField(T.tr("admin.chore.credits"));
         credit.setMin(0);
+        credit.setMax(InputLimits.MAX_CREDITS);
         credit.setValue(Math.max(0, credits));
         credit.setStepButtonsVisible(true);
         credit.setWidthFull();
@@ -359,9 +363,10 @@ class AdminPanel extends VerticalLayout {
             s.add(none);
             return s;
         }
+        var describe = describer();
         for (Completion c : pending) {
             String member = service.findMember(c.getMemberId()).map(Member::getName).orElse("?");
-            String chore = describe(c);
+            String chore = describe.apply(c);
 
             Div info = new Div();
             Div line = new Div();
@@ -471,9 +476,10 @@ class AdminPanel extends VerticalLayout {
         info.addClassName("sub");
         s.add(info);
 
+        var describe = describer();
         for (Completion c : recent) {
             String member = service.findMember(c.getMemberId()).map(Member::getName).orElse("?");
-            String chore = describe(c);
+            String chore = describe.apply(c);
 
             Div info2 = new Div();
             Div line = new Div();
@@ -615,6 +621,7 @@ class AdminPanel extends VerticalLayout {
         });
 
         TextField homeName = new TextField(T.tr("admin.homeName"));
+        homeName.setMaxLength(InputLimits.HOME_NAME);
         homeName.setValue(home.getName());
         Button rename = new Button(T.tr("admin.saveName"), e -> {
             if (!homeName.isEmpty()) {
@@ -683,10 +690,7 @@ class AdminPanel extends VerticalLayout {
         List<Member> members = service.membersOf(homeCode);
         Details s = section(Section.MEMBERS, T.tr("admin.members", members.size()), false);
         for (Member m : members) {
-            Div dot = new Div();
-            dot.addClassName("dot");
-            dot.getStyle().set("background", m.getColor());
-            dot.setText(m.getName().isEmpty() ? "?" : m.getName().substring(0, 1).toUpperCase());
+            Div dot = MemberAvatar.dot(m);
 
             Div info = new Div();
             Div line = new Div();
@@ -723,6 +727,7 @@ class AdminPanel extends VerticalLayout {
         Dialog d = new Dialog();
         d.setHeaderTitle(T.tr("admin.renameMember"));
         TextField name = new TextField(T.tr("admin.name"));
+        name.setMaxLength(InputLimits.MEMBER_NAME);
         name.setValue(m.getName());
         Button save = new Button(T.tr("common.save"), e -> {
             if (!name.isEmpty()) {
@@ -732,7 +737,13 @@ class AdminPanel extends VerticalLayout {
             }
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        d.add(name);
+        // Avatar lives here too: this dialog is where an adult manages a device-less kid.
+        Button avatar = new Button(T.tr("avatar.pick.button"), VaadinIcon.SMILEY_O.create(), e -> {
+            d.close();
+            new AvatarPickerDialog(service, m, this::refresh).open();
+        });
+        avatar.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+        d.add(new Div(name), new Div(avatar));
         d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), save);
         d.open();
     }
@@ -796,6 +807,7 @@ class AdminPanel extends VerticalLayout {
         d.setHeaderTitle(T.tr(existing == null ? "admin.chore.title.add" : "admin.chore.title.edit"));
         d.setWidth("min(90vw, 24em)");
         TextField name = new TextField(T.tr("admin.chore.name"));
+        name.setMaxLength(InputLimits.TASK_NAME);
         name.setWidthFull();
         TextField emoji = new TextField(T.tr("admin.chore.emoji"));
         emoji.setWidthFull();
@@ -804,10 +816,12 @@ class AdminPanel extends VerticalLayout {
         IntegerField credit = new IntegerField(T.tr("admin.chore.credits"));
         credit.setStepButtonsVisible(true);
         credit.setMin(0);
+        credit.setMax(InputLimits.MAX_CREDITS);
         credit.setValue(0);
         credit.setWidthFull();
         credit.setHelperText(T.tr("admin.chore.credits.helper"));
         TextField hours = new TextField(T.tr("admin.chore.hours"));
+        hours.setMaxLength(InputLimits.TIME_WINDOWS);
         hours.setWidthFull();
         hours.setPlaceholder("08:00-10:00, 18:00-22:00");
         hours.setHelperText(T.tr("admin.chore.hours.helper"));
@@ -890,10 +904,12 @@ class AdminPanel extends VerticalLayout {
 
         IntegerField days = new IntegerField(T.tr("admin.spree.days"));
         days.setMin(1);
+        days.setMax(InputLimits.MAX_DAYS);
         days.setStepButtonsVisible(true);
         days.setWidth("7.5em");
         IntegerField cr = new IntegerField(T.tr("admin.spree.credits"));
         cr.setMin(1);
+        cr.setMax(InputLimits.MAX_CREDITS);
         cr.setStepButtonsVisible(true);
         cr.setWidth("7.5em");
         Button addTier = new Button(T.tr("admin.spree.add"), e -> {
@@ -943,6 +959,7 @@ class AdminPanel extends VerticalLayout {
         amount.setValue(balance);
         amount.setStepButtonsVisible(true);
         TextField note = new TextField(T.tr("admin.redeem.note"));
+        note.setMaxLength(InputLimits.REASON);
         note.setWidthFull();
         Button ok = new Button(T.tr("admin.redeem"), e -> {
             Integer amt = amount.getValue();
@@ -1086,6 +1103,7 @@ class AdminPanel extends VerticalLayout {
         backupHint.addClassName("sub");
 
         TextField confirm = new TextField(T.tr("admin.deleteHome.confirmLabel", homeCode));
+        confirm.setMaxLength(10);
         confirm.setWidthFull();
         confirm.setPlaceholder(homeCode);
 
@@ -1125,14 +1143,11 @@ class AdminPanel extends VerticalLayout {
 
     // ---- Small helpers ------------------------------------------------------
 
-    /** How a completion reads in the admin lists: the chore, or the helper's own words. */
-    private String describe(Completion c) {
-        if (c.isOtherHelp()) {
-            return "🙋 " + c.getNote();
-        }
-        return service.tasksOf(homeCode).stream()
-                .filter(t -> t.getId().equals(c.getTaskId()))
-                .findFirst().map(t -> t.getEmoji() + " " + t.getName()).orElse("?");
+    /** How a completion reads in the admin lists — one task fetch per list, not per row. */
+    private java.util.function.Function<Completion, String> describer() {
+        Map<Long, ChoreTask> byId = service.tasksOf(homeCode).stream()
+                .collect(java.util.stream.Collectors.toMap(ChoreTask::getId, t -> t));
+        return c -> ChoreService.describe(c, c.getTaskId() == null ? null : byId.get(c.getTaskId()));
     }
 
     private void confirm(String title, String text, Runnable onConfirm) {
@@ -1159,18 +1174,6 @@ class AdminPanel extends VerticalLayout {
     }
 
     private static String ago(Instant when) {
-        Duration d = Duration.between(when, Instant.now());
-        long mins = d.toMinutes();
-        if (mins < 1) {
-            return T.tr("admin.ago.justNow");
-        }
-        if (mins < 60) {
-            return T.tr("admin.ago.min", mins);
-        }
-        long hours = d.toHours();
-        if (hours < 24) {
-            return T.tr("admin.ago.hours", hours);
-        }
-        return T.tr("admin.ago.days", d.toDays());
+        return T.ago(when);
     }
 }

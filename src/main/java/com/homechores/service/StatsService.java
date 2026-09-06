@@ -10,12 +10,16 @@ import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
+import java.time.DayOfWeek;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 /** Read-only aggregations for the statistics / chart views. */
@@ -43,23 +47,90 @@ public class StatsService {
         return c.getDoneAt().atZone(zone()).toLocalDate();
     }
 
+    // ---- Chore master of last week -------------------------------------------
+
+    /** Last week's champion: who, and how many approved chores they did. */
+    public record ChoreMaster(Member member, long count) {
+    }
+
+    /**
+     * The member with the most APPROVED completions in the previous ISO week (Mon–Sun,
+     * server zone — the same clock every other aggregate here uses). Ties go to the
+     * earliest-joined member, so the badge is stable within a week. Empty for a solo home
+     * (a competition of one is no competition) and for a week nobody did anything.
+     */
+    public Optional<ChoreMaster> lastWeekChoreMaster(String homeCode) {
+        List<Member> memberList = members.findByHomeCodeOrderByJoinedAtAsc(homeCode);
+        if (memberList.size() < 2) {
+            return Optional.empty();
+        }
+        LocalDate thisMonday = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        Instant from = thisMonday.minusWeeks(1).atStartOfDay(zone()).toInstant();
+        Instant to = thisMonday.atStartOfDay(zone()).toInstant();
+        Map<Long, Long> byMember = new HashMap<>();
+        completions
+                .findByHomeCodeAndStatusInAndDoneAtGreaterThanEqualAndDoneAtLessThanOrderByDoneAtDesc(
+                        homeCode, List.of(CompletionStatus.APPROVED), from, to)
+                .forEach(c -> byMember.merge(c.getMemberId(), 1L, Long::sum));
+        ChoreMaster best = null;
+        for (Member m : memberList) { // join order + strictly-greater = stable tie-break
+            long count = byMember.getOrDefault(m.getId(), 0L);
+            if (count > 0 && (best == null || count > best.count())) {
+                best = new ChoreMaster(m, count);
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
     // ---- Per-member ("My stats") -------------------------------------------
 
+    /**
+     * One member's numbers, from a single query for that member's own completions.
+     *
+     * <p>It used to fetch the whole home's history a second time just to work out one
+     * person's feedback split — every other member's rows loaded and thrown away. The
+     * member's own rows answer both questions: the APPROVED ones drive the counts, the
+     * non-REJECTED ones the split.
+     */
     public MyStats myStats(Long memberId, String homeCode) {
         Home home = homes.findById(homeCode).orElseThrow();
-        List<Completion> approved = completions.findByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
+        List<Completion> mine = completions.findByMemberId(memberId);
+        LocalDate today = LocalDate.now();
 
-        // by chore ("other help" has no task, so it's counted separately and labelled
-        // by the caller — the label is UI wording, not data like a chore name)
+        // One pass: chore tallies, other help, per-day counts and the feedback split.
+        // ("Other help" has no task, so it's counted separately and labelled by the caller
+        // — the label is UI wording, not data like a chore name.)
         Map<Long, Long> byTask = new HashMap<>();
+        Map<LocalDate, Long> perDay = new HashMap<>();
+        long totalApproved = 0;
         long otherHelp = 0;
-        for (Completion c : approved) {
+        long hate = 0;
+        long ok = 0;
+        long love = 0;
+        for (Completion c : mine) {
+            if (c.getStatus() == CompletionStatus.REJECTED) {
+                continue; // excluded from every count, and from the feedback split
+            }
+            if (c.getFeedback() == Feedback.HATE) {
+                hate++;
+            } else if (c.getFeedback() == Feedback.OK) {
+                ok++;
+            } else if (c.getFeedback() == Feedback.LOVE) {
+                love++;
+            }
+            if (c.getStatus() != CompletionStatus.APPROVED) {
+                continue; // pending: it has feedback to show, but it counts for nothing yet
+            }
+            totalApproved++;
             if (c.isOtherHelp()) {
                 otherHelp++;
             } else {
                 byTask.merge(c.getTaskId(), 1L, Long::sum);
             }
+            perDay.merge(dateOf(c), 1L, Long::sum);
         }
+
+        // Chore order follows the home's chore list, so the bars match the board.
         List<CountBar> byChore = new ArrayList<>();
         for (ChoreTask t : tasks.findByHomeCodeOrderByCreatedAtAsc(homeCode)) {
             long n = byTask.getOrDefault(t.getId(), 0L);
@@ -68,32 +139,37 @@ public class StatsService {
             }
         }
 
-        // feedback split (across this member's non-rejected completions)
-        FeedbackSplit fb = feedbackSplit(
-                completions.findByHomeCode(homeCode).stream()
-                        .filter(c -> c.getMemberId().equals(memberId))
-                        .filter(c -> c.getStatus() != CompletionStatus.REJECTED)
-                        .toList());
-
-        // last 7 days adherence
-        List<DayCount> last7 = new ArrayList<>();
-        LocalDate today = LocalDate.now();
-        Map<LocalDate, Long> perDay = new HashMap<>();
-        for (Completion c : approved) {
-            perDay.merge(dateOf(c), 1L, Long::sum);
-        }
-        for (int i = 6; i >= 0; i--) {
-            LocalDate d = today.minusDays(i);
-            last7.add(new DayCount(d, perDay.getOrDefault(d, 0L)));
-        }
-
+        List<DayCount> last7 = daySeries(perDay, today, 7);
         long doneToday = perDay.getOrDefault(today, 0L);
-        return new MyStats(approved.size(), byChore, fb, last7, doneToday,
-                home.getDailyTargetPerMember(), otherHelp);
+        return new MyStats(totalApproved, byChore, new FeedbackSplit(hate, ok, love), last7,
+                doneToday, home.getDailyTargetPerMember(), otherHelp);
+    }
+
+    /** The last {@code days} days ending today, zero-filled — a chart needs every column. */
+    private static List<DayCount> daySeries(Map<LocalDate, Long> perDay, LocalDate today,
+                                            int days) {
+        List<DayCount> series = new ArrayList<>(days);
+        for (int i = days - 1; i >= 0; i--) {
+            LocalDate d = today.minusDays(i);
+            series.add(new DayCount(d, perDay.getOrDefault(d, 0L)));
+        }
+        return series;
     }
 
     // ---- Home-wide ("Admin stats") -----------------------------------------
 
+    /**
+     * The whole home's numbers, in one pass over its completions.
+     *
+     * <p>This is the most expensive read in the app and it re-runs for every connected
+     * admin on every {@link HomeState} bump, so how it is written matters. It used to walk
+     * the home's completion list once per member, twice per chore, and once more per
+     * member for today's adherence — cost proportional to
+     * (members + 2·chores + members) × history, which for a family with a couple of years
+     * of taps is hundreds of thousands of predicate evaluations to draw one screen. Every
+     * one of those tallies is a group-by over the same rows, so they are gathered in a
+     * single traversal into maps and read off by key.
+     */
     public HomeStats homeStats(String homeCode) {
         Home home = homes.findById(homeCode).orElseThrow();
         List<Member> memberList = members.findByHomeCodeOrderByJoinedAtAsc(homeCode);
@@ -101,74 +177,70 @@ public class StatsService {
         List<Completion> all = completions.findByHomeCode(homeCode);
         LocalDate today = LocalDate.now();
 
-        // approved completions per member
-        List<CountBar> perMember = new ArrayList<>();
-        for (Member m : memberList) {
-            long n = all.stream()
-                    .filter(c -> c.getMemberId().equals(m.getId()))
-                    .filter(c -> c.getStatus() == CompletionStatus.APPROVED)
-                    .count();
-            perMember.add(new CountBar(m.getName(), n));
+        Map<Long, Long> approvedByMember = new HashMap<>();
+        Map<Long, Long> todayByMember = new HashMap<>();
+        Map<Long, Long> approvedByTask = new HashMap<>();
+        Map<Long, long[]> feedbackByTaskId = new HashMap<>(); // [hate, ok, love]
+        Map<LocalDate, Long> perDay = new HashMap<>();
+        long otherHelp = 0;
+        long pending = 0;
+
+        for (Completion c : all) {
+            CompletionStatus status = c.getStatus();
+            if (status == CompletionStatus.PENDING) {
+                pending++;
+            }
+            if (status != CompletionStatus.REJECTED && c.getTaskId() != null
+                    && c.getFeedback() != null) {
+                long[] split = feedbackByTaskId.computeIfAbsent(c.getTaskId(), k -> new long[3]);
+                switch (c.getFeedback()) {
+                    case HATE -> split[0]++;
+                    case OK -> split[1]++;
+                    case LOVE -> split[2]++;
+                    default -> { }
+                }
+            }
+            if (status != CompletionStatus.APPROVED) {
+                continue;
+            }
+            approvedByMember.merge(c.getMemberId(), 1L, Long::sum);
+            LocalDate on = dateOf(c);
+            perDay.merge(on, 1L, Long::sum);
+            if (on.equals(today)) {
+                todayByMember.merge(c.getMemberId(), 1L, Long::sum);
+            }
+            if (c.isOtherHelp()) {
+                // Accepted other help belongs in the picture, but has no chore to hang off.
+                otherHelp++;
+            } else {
+                approvedByTask.merge(c.getTaskId(), 1L, Long::sum);
+            }
         }
 
-        // chore popularity (approved)
-        List<CountBar> popularity = new ArrayList<>();
+        // Member and chore order are the home's own (join time, creation time), and every
+        // row is emitted even at zero — the charts' categories must not shift about.
+        List<CountBar> perMember = new ArrayList<>(memberList.size());
+        List<MemberDaily> adherence = new ArrayList<>(memberList.size());
+        for (Member m : memberList) {
+            perMember.add(new CountBar(m.getName(), approvedByMember.getOrDefault(m.getId(), 0L)));
+            adherence.add(new MemberDaily(m, todayByMember.getOrDefault(m.getId(), 0L),
+                    home.getDailyTargetPerMember()));
+        }
+
+        List<CountBar> popularity = new ArrayList<>(taskList.size());
         List<ChoreFeedback> feedbackByChore = new ArrayList<>();
         for (ChoreTask t : taskList) {
-            long n = all.stream()
-                    .filter(c -> t.getId().equals(c.getTaskId()))
-                    .filter(c -> c.getStatus() == CompletionStatus.APPROVED)
-                    .count();
-            popularity.add(new CountBar(t.getEmoji() + " " + t.getName(), n));
-
-            FeedbackSplit fb = feedbackSplit(all.stream()
-                    .filter(c -> t.getId().equals(c.getTaskId()))
-                    .filter(c -> c.getStatus() != CompletionStatus.REJECTED)
-                    .toList());
-            if (fb.total() > 0) {
-                feedbackByChore.add(new ChoreFeedback(t, fb));
+            popularity.add(new CountBar(t.getEmoji() + " " + t.getName(),
+                    approvedByTask.getOrDefault(t.getId(), 0L)));
+            long[] split = feedbackByTaskId.get(t.getId());
+            if (split != null) { // only chores anyone actually reacted to get a row
+                feedbackByChore.add(new ChoreFeedback(t,
+                        new FeedbackSplit(split[0], split[1], split[2])));
             }
         }
-        // Accepted other help belongs in the same picture, but it has no chore to hang off.
-        long otherHelp = all.stream()
-                .filter(Completion::isOtherHelp)
-                .filter(c -> c.getStatus() == CompletionStatus.APPROVED)
-                .count();
 
-        // 14-day activity trend (approved, home-wide)
-        Map<LocalDate, Long> perDay = new HashMap<>();
-        for (Completion c : all) {
-            if (c.getStatus() == CompletionStatus.APPROVED) {
-                perDay.merge(dateOf(c), 1L, Long::sum);
-            }
-        }
-        List<DayCount> trend14 = new ArrayList<>();
-        for (int i = 13; i >= 0; i--) {
-            LocalDate d = today.minusDays(i);
-            trend14.add(new DayCount(d, perDay.getOrDefault(d, 0L)));
-        }
-
-        // today's adherence per member
-        List<MemberDaily> adherence = new ArrayList<>();
-        for (Member m : memberList) {
-            long doneToday = all.stream()
-                    .filter(c -> c.getMemberId().equals(m.getId()))
-                    .filter(c -> c.getStatus() == CompletionStatus.APPROVED)
-                    .filter(c -> dateOf(c).equals(today))
-                    .count();
-            adherence.add(new MemberDaily(m, doneToday, home.getDailyTargetPerMember()));
-        }
-
-        long pending = all.stream().filter(c -> c.getStatus() == CompletionStatus.PENDING).count();
-        return new HomeStats(perMember, popularity, feedbackByChore, trend14, adherence, pending,
-                otherHelp);
-    }
-
-    private FeedbackSplit feedbackSplit(List<Completion> list) {
-        long hate = list.stream().filter(c -> c.getFeedback() == Feedback.HATE).count();
-        long ok = list.stream().filter(c -> c.getFeedback() == Feedback.OK).count();
-        long love = list.stream().filter(c -> c.getFeedback() == Feedback.LOVE).count();
-        return new FeedbackSplit(hate, ok, love);
+        return new HomeStats(perMember, popularity, feedbackByChore,
+                daySeries(perDay, today, 14), adherence, pending, otherHelp);
     }
 
     // ---- DTOs ---------------------------------------------------------------

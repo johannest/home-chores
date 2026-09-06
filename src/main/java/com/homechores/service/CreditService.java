@@ -7,6 +7,7 @@ import com.homechores.domain.CompletionStatus;
 import com.homechores.domain.CreditEntry;
 import com.homechores.domain.CreditEntryRepository;
 import com.homechores.domain.CreditType;
+import com.homechores.domain.InputLimits;
 import com.homechores.domain.SpreeTier;
 import com.homechores.domain.SpreeTierRepository;
 import java.time.LocalDate;
@@ -58,8 +59,9 @@ public class CreditService {
     @Transactional
     public Award onApprovedHelp(String homeCode, Long memberId, Long completionId, int credits,
                                String what) {
-        return award(homeCode, memberId, completionId, Math.max(0, credits),
-                what == null || what.isBlank() ? "Other help" : what.trim());
+        return award(homeCode, memberId, completionId, ChoreService.clampCredits(credits),
+                what == null || what.isBlank() ? "Other help"
+                        : InputLimits.clip(what, InputLimits.REASON));
     }
 
     private Award award(String homeCode, Long memberId, Long completionId, int value,
@@ -135,7 +137,8 @@ public class CreditService {
         if (amount <= 0 || amount > balance(memberId)) {
             return false;
         }
-        String reason = note == null || note.isBlank() ? "Redeemed" : note.trim();
+        String reason = note == null || note.isBlank() ? "Redeemed"
+                : InputLimits.clip(note, InputLimits.REASON);
         credits.save(new CreditEntry(homeCode, memberId, amount, CreditType.REDEEMED, reason, 0));
         homeState.bump(homeCode);
         return true;
@@ -176,7 +179,8 @@ public class CreditService {
         if (days <= 0 || credits <= 0) {
             return;
         }
-        tiers.save(new SpreeTier(homeCode, days, credits));
+        tiers.save(new SpreeTier(homeCode,
+                ChoreService.clampDays(days), ChoreService.clampCredits(credits)));
         homeState.bump(homeCode);
     }
 

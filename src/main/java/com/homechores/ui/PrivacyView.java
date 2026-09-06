@@ -50,25 +50,65 @@ public class PrivacyView extends VerticalLayout {
                 "The names you type for your home and its members (a nickname is fine — see the tip on the sign-in screen).",
                 "Which chores were done, by whom, and when, plus any optional feedback (😖 / 🙂 / 😍).",
                 "A short home code and a 4-digit admin PIN used to manage the home.",
+                "Only if you turn on the optional chore reminder: your chosen reminder time, "
+                        + "your device's timezone, and the push-notification address and keys your "
+                        + "browser issues for it. These are deleted when you turn the reminder off, "
+                        + "when the member is removed, or when the home is deleted — and they are "
+                        + "never included in backup exports.",
         }));
         card.add(section("What we do NOT store",
                 "No email addresses, phone numbers, passwords, home addresses, location, or payment "
                         + "details. No analytics or advertising cookies, and no third-party trackers."));
+
+        // Honesty about the layer below the app: FlashChores logs no client data itself
+        // (server.tomcat.accesslog.enabled=false, no request-level logging), but the
+        // hosting platform keeps the ordinary web-server records any site needs to stay
+        // up and secure. Saying so here keeps the "what we do NOT store" claim above true
+        // rather than absolute.
+        card.add(section("Server logs and hosting statistics",
+                "FlashChores itself stores no client information such as IP addresses, and it "
+                        + "keeps no request logs of its own. The hosting service the site runs on "
+                        + "does keep the normal web-server records that any website needs — access "
+                        + "logs and aggregate visitor statistics (AWStats-style: hit counts, "
+                        + "referrers, browsers, error rates) — which are used only to keep the site "
+                        + "working and to spot abuse or attacks. These records live with the "
+                        + "hosting infrastructure, are kept only for a short period, and are never "
+                        + "correlated with a member, a home, a home code or anything you do in the "
+                        + "app: we do not link them to the data described above."));
 
         card.add(section("Cookies",
                 "The app uses a single strictly-necessary session cookie (JSESSIONID) to keep you "
                         + "signed into your home. It is required for the service to work and is not used "
                         + "for tracking, so no cookie-consent banner is needed."));
 
-        // The retention sentence is generated from the actual configured window, so this
+        // The retention sentences are generated from the actual configured windows, so this
         // notice can't quietly drift out of step with what the server really does.
-        String retention = "Data is stored in a self-hosted database on flashchores.com. A home and "
-                + "its chore history are kept until an admin deletes them (see below) — we do not "
-                + "delete a family's history for being idle.";
-        if (cleanup.isEnabled()) {
-            retention += " The one exception: a home that was created but never actually used — no "
-                    + "chores ever logged and no one else invited — is removed automatically after "
-                    + cleanup.getAbandonedHomeDays() + " days, so abandoned sign-ups don't linger.";
+        String retention = "Data is stored in a self-hosted database on flashchores.com.";
+        if (cleanup.getEmptyHomeHours() > 0 || cleanup.getAbandonedHomeDays() > 0) {
+            retention += " A home that was created but never actually used — no chores ever "
+                    + "logged and no one else invited — is removed automatically";
+            if (cleanup.getEmptyHomeHours() > 0) {
+                retention += " after about " + Math.max(1, cleanup.getEmptyHomeHours() / 24)
+                        + " day(s)";
+                if (cleanup.getAbandonedHomeDays() > 0) {
+                    retention += " (and after " + cleanup.getAbandonedHomeDays()
+                            + " days at the latest)";
+                }
+            } else {
+                retention += " after " + cleanup.getAbandonedHomeDays() + " days";
+            }
+            retention += ", so abandoned sign-ups don't linger.";
+        }
+        if (cleanup.getInactiveHomeDays() > 0) {
+            retention += " A home that nobody has opened or used for "
+                    + cleanup.getInactiveHomeDays() + " days is deleted too, chore history "
+                    + "included. Right before that deletion the home is exported to an "
+                    + "operator-held backup, so a family returning from a long break can ask "
+                    + "for it to be restored (contact address below).";
+        } else {
+            retention += " Beyond that, a home and its chore history are kept until an admin "
+                    + "deletes them (see below) — we do not delete a family's history for "
+                    + "being idle.";
         }
         card.add(section("Where it's stored & how long", retention));
 
@@ -101,6 +141,10 @@ public class PrivacyView extends VerticalLayout {
         Paragraph updated = new Paragraph("Last updated: August 2026");
         updated.addClassName("feedback-hint");
         card.add(updated);
+
+        RouterLink terms = new RouterLink("User agreement", TermsView.class);
+        terms.getStyle().set("display", "inline-block");
+        card.add(terms);
 
         RouterLink back = new RouterLink("← Back to FlashChores", LandingView.class);
         back.getStyle().set("font-weight", "600").set("margin-top", "var(--lumo-space-m)")

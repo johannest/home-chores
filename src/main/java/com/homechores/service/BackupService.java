@@ -1,6 +1,7 @@
 package com.homechores.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -16,6 +17,7 @@ import com.homechores.domain.DivisionStyle;
 import com.homechores.domain.Feedback;
 import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
+import com.homechores.domain.InputLimits;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
 import com.homechores.domain.RejoinRequestRepository;
@@ -45,7 +47,12 @@ public class BackupService {
     private final HomeState homeState;
     private final ObjectMapper mapper = new ObjectMapper()
             .registerModule(new JavaTimeModule())
-            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+            // A file written by a newer build may carry settings this one has never heard
+            // of. Rejecting it outright would make a family's own backup unrestorable after
+            // a rollback; skipping the unknown key restores everything this version does
+            // understand. Malformed JSON still fails loudly (see restore).
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
     public BackupService(HomeRepository homes, MemberRepository members,
                         ChoreTaskRepository tasks, CompletionRepository completions,
@@ -70,9 +77,11 @@ public class BackupService {
         b.home = new HomeDto(home.getCode(), home.getName(), home.getAdminPin(),
                 home.isRequireApproval(), home.getDailyTargetPerMember(), home.getDivisionStyle(),
                 home.isRotationEnforced(), home.getBookingTimeoutHours(), home.isApproveRejoin(),
-                home.isConfirmCompletion(), home.isAllowOtherHelp(), home.getCreatedAt());
+                home.isApproveJoin(), home.isConfirmCompletion(), home.isAllowOtherHelp(),
+                home.getCreatedAt());
         for (Member m : members.findByHomeCodeOrderByJoinedAtAsc(homeCode)) {
-            b.members.add(new MemberDto(m.getId(), m.getName(), m.getColor(), m.isAdmin(), m.getJoinedAt()));
+            b.members.add(new MemberDto(m.getId(), m.getName(), m.getColor(), m.isAdmin(),
+                    m.getJoinedAt(), m.getAvatar()));
         }
         for (ChoreTask t : tasks.findByHomeCodeOrderByCreatedAtAsc(homeCode)) {
             b.tasks.add(new TaskDto(t.getId(), t.getName(), t.getEmoji(), t.getIntervalDays(),
@@ -109,6 +118,43 @@ public class BackupService {
      */
     @Transactional
     public RestoreResult restore(byte[] json, String ownHomeCode) {
+        Backup b = parse(json);
+        String code = b.home.code.trim().toUpperCase();
+        String own = ownHomeCode == null ? "" : ownHomeCode.trim().toUpperCase();
+        if (!code.equals(own)) {
+            throw new IllegalArgumentException("This backup is for a different home (" + code
+                    + "). You can only restore your own home's backup.");
+        }
+        return apply(b, code);
+    }
+
+    /**
+     * Restores whatever home the file names, without requiring an admin to be signed into
+     * it — the operator's undo, reachable only from the offline maintenance CLI.
+     *
+     * <p>The in-app path above deliberately refuses a file naming another home, because
+     * there the caller is one family's admin and restore is a full wipe-and-replace. That
+     * check cannot also serve the case it was never about: a home the retention sweep has
+     * already deleted has no admin left to sign in as, so the very backup written to be
+     * its undo would be unrestorable. §4.11.2 and the privacy notice both promise that
+     * undo, and this is what keeps the promise. Its safety comes from where it lives — a
+     * process the operator starts on the host, with the service stopped — not from a code
+     * comparison.
+     *
+     * @return the summary, plus whether an existing home was overwritten
+     */
+    @Transactional
+    public RestoreResult restoreAnyHome(byte[] json) {
+        Backup b = parse(json);
+        return apply(b, b.home.code.trim().toUpperCase());
+    }
+
+    /** Whether a home with the code this file names is currently in the database. */
+    public String homeCodeIn(byte[] json) {
+        return parse(json).home.code.trim().toUpperCase();
+    }
+
+    private Backup parse(byte[] json) {
         Backup b;
         try {
             b = mapper.readValue(json, Backup.class);
@@ -118,22 +164,24 @@ public class BackupService {
         if (b == null || b.home == null || b.home.code == null || b.home.code.isBlank()) {
             throw new IllegalArgumentException("Backup file is missing home data.");
         }
-        String code = b.home.code.trim().toUpperCase();
-        String own = ownHomeCode == null ? "" : ownHomeCode.trim().toUpperCase();
-        if (!code.equals(own)) {
-            throw new IllegalArgumentException("This backup is for a different home (" + code
-                    + "). You can only restore your own home's backup.");
-        }
+        return b;
+    }
 
-        // Upsert the home.
-        Home home = homes.findById(code).orElseGet(() -> new Home(code, b.home.name, b.home.adminPin));
-        home.setName(b.home.name);
-        home.setAdminPin(b.home.adminPin);
+    private RestoreResult apply(Backup b, String code) {
+        // Upsert the home. Every string in the file is user-supplied (a backup can be
+        // hand-edited before upload), so lengths and formats are re-asserted here just
+        // like at the interactive entry points.
+        Home home = homes.findById(code).orElseGet(() -> new Home(code, b.home.name, "0000"));
+        home.setName(InputLimits.clip(b.home.name, InputLimits.HOME_NAME));
+        if (b.home.adminPin != null && b.home.adminPin.matches("\\d{4}")) {
+            home.setAdminPin(b.home.adminPin);
+        } // else: keep the home's current PIN rather than storing arbitrary text
         home.setRequireApproval(b.home.requireApproval);
         home.setDailyTargetPerMember(clampTarget(b.home.dailyTargetPerMember));
         home.setDivisionStyle(b.home.divisionStyle == null ? DivisionStyle.DEFAULT : b.home.divisionStyle);
         home.setRotationEnforced(b.home.rotationEnforced);
         home.setApproveRejoin(b.home.approveRejoin == null || b.home.approveRejoin);
+        home.setApproveJoin(b.home.approveJoin == null || b.home.approveJoin);
         home.setConfirmCompletion(b.home.confirmCompletion == null || b.home.confirmCompletion);
         home.setAllowOtherHelp(b.home.allowOtherHelp == null || b.home.allowOtherHelp);
         if (b.home.bookingTimeoutHours > 0) {
@@ -142,6 +190,11 @@ public class BackupService {
         if (b.home.createdAt != null) {
             home.setCreatedAt(b.home.createdAt);
         }
+        // Restoring is someone using this home, right now. Without this the home would carry
+        // only the backup's (possibly months-old) createdAt as its activity, and a home
+        // brought back from the retention export would be swept away again the same night —
+        // the undo undone. See HomeCleanupService and Home.lastActiveOrCreated.
+        home.setLastActiveAt(Instant.now());
         homes.save(home);
 
         // Wipe current data for this home. Rejoin requests go too: their member ids are
@@ -155,8 +208,14 @@ public class BackupService {
 
         // Recreate members and tasks, remapping their (identity-generated) ids.
         Map<Long, Long> memberIdMap = new HashMap<>();
+        int memberIndex = 0;
         for (MemberDto m : b.members) {
-            Member entity = new Member(code, m.name, m.color, m.admin);
+            String name = InputLimits.clip(m.name, InputLimits.MEMBER_NAME);
+            Member entity = new Member(code,
+                    name == null || name.isBlank() ? "Member" : name,
+                    safeColor(m.color, memberIndex++), m.admin);
+            // Whitelist, same reasoning as safeColor: a backup is hand-editable.
+            entity.setAvatar(com.homechores.domain.Avatars.sanitize(m.avatar));
             if (m.joinedAt != null) {
                 entity.setJoinedAt(m.joinedAt);
             }
@@ -165,14 +224,17 @@ public class BackupService {
         }
         Map<Long, Long> taskIdMap = new HashMap<>();
         for (TaskDto t : b.tasks) {
-            ChoreTask entity = new ChoreTask(code, t.name, t.emoji);
-            entity.setIntervalDays(Math.max(0, t.intervalDays));
-            entity.setCreditValue(Math.max(0, t.creditValue));
-            entity.setAvailableWindows(t.availableWindows);
-            // Stored raw: a backup written before seasons existed has no key, which deserializes
-            // to null — and null already means "all year round". Garbage is neutralised on read
-            // by Seasons.isInSeason failing open.
-            entity.setSeasons(t.seasons);
+            ChoreTask entity = new ChoreTask(code,
+                    InputLimits.clip(t.name, InputLimits.TASK_NAME),
+                    InputLimits.clip(t.emoji, InputLimits.EMOJI));
+            entity.setIntervalDays(ChoreService.clampDays(t.intervalDays));
+            entity.setCreditValue(ChoreService.clampCredits(t.creditValue));
+            entity.setAvailableWindows(InputLimits.clip(
+                    ChoreService.clipWindows(t.availableWindows), InputLimits.TIME_WINDOWS));
+            // Content stored raw: a backup written before seasons existed has no key, which
+            // deserializes to null — and null already means "all year round". Garbage is
+            // neutralised on read by Seasons.isInSeason failing open; only the length is capped.
+            entity.setSeasons(InputLimits.clip(t.seasons, 64));
             if (t.createdAt != null) {
                 entity.setCreatedAt(t.createdAt);
             }
@@ -180,7 +242,10 @@ public class BackupService {
             taskIdMap.put(t.id, saved.getId());
         }
         for (SpreeTierDto st : b.spreeTiers) {
-            spreeTiers.save(new SpreeTier(code, st.days, st.credits));
+            if (st.days > 0 && st.credits > 0) {
+                spreeTiers.save(new SpreeTier(code,
+                        ChoreService.clampDays(st.days), ChoreService.clampCredits(st.credits)));
+            }
         }
         int restoredCompletions = 0;
         Map<Long, Long> completionIdMap = new HashMap<>();
@@ -198,7 +263,7 @@ public class BackupService {
                 entity.setDoneAt(c.doneAt);
             }
             entity.setFeedback(c.feedback);
-            entity.setNote(c.note);
+            entity.setNote(InputLimits.clip(c.note, ChoreService.MAX_HELP_LENGTH));
             entity.setReviewedByMemberId(memberIdMap.get(c.reviewedByMemberId));
             entity.setReviewedAt(c.reviewedAt);
             Completion savedCompletion = completions.save(entity);
@@ -210,8 +275,9 @@ public class BackupService {
             if (newMember == null) {
                 continue;
             }
-            CreditEntry entity = new CreditEntry(code, newMember, cr.amount,
-                    cr.type == null ? CreditType.EARNED : cr.type, cr.reason, cr.spreeTierDays,
+            CreditEntry entity = new CreditEntry(code, newMember, Math.max(0, cr.amount),
+                    cr.type == null ? CreditType.EARNED : cr.type,
+                    InputLimits.clip(cr.reason, InputLimits.REASON), cr.spreeTierDays,
                     completionIdMap.get(cr.completionId));
             if (cr.createdAt != null) {
                 entity.setCreatedAt(cr.createdAt);
@@ -226,10 +292,30 @@ public class BackupService {
         return Math.max(1, Math.min(3, t));
     }
 
+    /** Restored avatar colors must look like a CSS hex color, or the member gets a fresh
+     *  one from the palette — a backup is not a way to smuggle arbitrary CSS in. */
+    private static String safeColor(String color, int index) {
+        if (color != null && color.matches("#[0-9a-fA-F]{6}")) {
+            return color;
+        }
+        return FALLBACK_COLORS[index % FALLBACK_COLORS.length];
+    }
+
+    private static final String[] FALLBACK_COLORS = {
+        "#10b981", "#0ea5e9", "#f59e0b", "#ef4444", "#8b5cf6",
+        "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16"
+    };
+
     public record RestoreResult(String homeCode, int members, int tasks, int completions) {
     }
 
     // ---- JSON shapes (public, mutable for Jackson) --------------------------
+    //
+    // Deliberately excluded from export: Member.deviceSecretHash and termsAcceptedAt
+    // (server-side facts, not family data) and everything about push reminders
+    // (PushSubscription rows, Member.reminderTime/zoneId/reminderLocale) — subscriptions
+    // are device credentials that would dangle after restore anyway, since restore mints
+    // new member ids.
 
     public static class Backup {
         public int version = VERSION;
@@ -246,11 +332,13 @@ public class BackupService {
     public record HomeDto(String code, String name, String adminPin, boolean requireApproval,
                           int dailyTargetPerMember, DivisionStyle divisionStyle,
                           boolean rotationEnforced, int bookingTimeoutHours,
-                          Boolean approveRejoin, Boolean confirmCompletion,
+                          Boolean approveRejoin, Boolean approveJoin, Boolean confirmCompletion,
                           Boolean allowOtherHelp, Instant createdAt) {
     }
 
-    public record MemberDto(Long id, String name, String color, boolean admin, Instant joinedAt) {
+    /** {@code avatar} is absent in pre-avatar backups and deserializes to null — fine. */
+    public record MemberDto(Long id, String name, String color, boolean admin, Instant joinedAt,
+                            String avatar) {
     }
 
     public record TaskDto(Long id, String name, String emoji, int intervalDays, int creditValue,

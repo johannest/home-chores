@@ -1,17 +1,27 @@
+/*
+ * Theming note: the app ships color-scheme "light dark" (@ColorScheme(SYSTEM) on the app
+ * shell), optionally narrowed per device by the theme switcher. Lumo's own tokens flip
+ * automatically; every custom color that must differ between the schemes therefore uses
+ * the CSS light-dark() function — a [theme~="dark"] block would only fire in forced-dark
+ * mode, never in auto mode, so it is the wrong tool here.
+ */
 html {
-    --lumo-primary-color: hsl(155, 62%, 42%);
-    --lumo-primary-color-50pct: hsla(155, 62%, 42%, 0.5);
-    --lumo-primary-color-10pct: hsla(155, 62%, 42%, 0.1);
-    --lumo-primary-text-color: hsl(155, 62%, 34%);
+    --lumo-primary-color: light-dark(hsl(155, 62%, 42%), hsl(155, 60%, 46%));
+    --lumo-primary-color-50pct: light-dark(hsla(155, 62%, 42%, 0.5), hsla(155, 60%, 46%, 0.5));
+    --lumo-primary-color-10pct: light-dark(hsla(155, 62%, 42%, 0.1), hsla(155, 60%, 46%, 0.12));
+    --lumo-primary-text-color: light-dark(hsl(155, 62%, 34%), hsl(155, 65%, 62%));
     --lumo-border-radius-m: 12px;
     --lumo-border-radius-l: 18px;
+    /* The brand gradient stays saturated in both schemes — white text sits on it. */
     --app-gradient: linear-gradient(160deg, #10b981 0%, #0ea5e9 100%);
 }
 
 body {
     background:
-        radial-gradient(1200px 600px at 100% -10%, hsla(199, 89%, 60%, 0.12), transparent),
-        radial-gradient(1000px 500px at -10% 110%, hsla(155, 62%, 45%, 0.14), transparent);
+        radial-gradient(1200px 600px at 100% -10%,
+            light-dark(hsla(199, 89%, 60%, 0.12), hsla(199, 80%, 45%, 0.08)), transparent),
+        radial-gradient(1000px 500px at -10% 110%,
+            light-dark(hsla(155, 62%, 45%, 0.14), hsla(155, 55%, 40%, 0.09)), transparent);
 }
 
 /* A phone must never scroll or rubber-band sideways: the app is a single column, so any
@@ -48,7 +58,9 @@ vaadin-select::part(label) {
     align-items: center;
     justify-content: center;
     padding: var(--lumo-space-l);
-    /* index.html ships viewport-fit=cover, so keep clear of the notch and home indicator. */
+    /* index.html ships viewport-fit=cover, so keep clear of the camera island / notch
+       and the home indicator. */
+    padding-top: max(var(--lumo-space-l), env(safe-area-inset-top));
     padding-left: max(var(--lumo-space-l), env(safe-area-inset-left));
     padding-right: max(var(--lumo-space-l), env(safe-area-inset-right));
     padding-bottom: max(var(--lumo-space-l), env(safe-area-inset-bottom));
@@ -80,6 +92,9 @@ vaadin-select::part(label) {
     align-items: center;
     justify-content: center;
     gap: var(--lumo-space-m);
+    /* Fixed full-screen element: keep its content clear of the camera island. */
+    padding-top: env(safe-area-inset-top);
+    box-sizing: border-box;
 }
 
 .restore-overlay vaadin-progress-bar {
@@ -150,6 +165,37 @@ vaadin-select::part(label) {
     padding: 4px 12px;
     border-radius: 999px;
     color: #fff;
+}
+
+/* Last week's champion, under the home name — white on the gradient like its neighbors. */
+.chore-master {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.18);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+/* The collapsed invite menu (multi-member homes): a translucent pill like the header
+   buttons around it. The menu-bar button is a light-DOM child, so this just works. */
+.invite-menu vaadin-menu-bar-button {
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+    border-radius: 999px;
+}
+
+/* The join code inside the invite overlay. Not .code-chip: that one is white-on-gradient,
+   which would vanish on the overlay's plain background. */
+.code-menu-chip {
+    font-family: var(--lumo-font-family-monospace, monospace);
+    letter-spacing: 3px;
+    font-weight: 800;
+    background: var(--lumo-contrast-10pct);
+    color: var(--lumo-body-text-color);
+    padding: 2px 10px;
+    border-radius: 999px;
 }
 
 /* ---- Task cards ---- */
@@ -250,7 +296,7 @@ vaadin-checkbox-group::part(group-field) {
 
 .task-card.streak-hot .streak {
     background: hsla(25, 95%, 55%, 0.18);
-    color: hsl(20, 90%, 42%);
+    color: light-dark(hsl(20, 90%, 42%), hsl(25, 95%, 68%));
 }
 
 .task-card.locked {
@@ -295,7 +341,9 @@ vaadin-checkbox-group::part(group-field) {
     font-weight: 600;
 }
 
-.member-chip .dot {
+/* The one shared member circle (leaderboard chips AND the admin member list — the latter
+   used to render an unstyled div): member color behind either an animal avatar or initials. */
+.avatar-dot {
     width: 30px;
     height: 30px;
     border-radius: 50%;
@@ -305,6 +353,49 @@ vaadin-checkbox-group::part(group-field) {
     color: #fff;
     font-weight: 800;
     font-size: 0.85rem;
+    flex: 0 0 auto;
+    overflow: hidden;
+}
+
+.avatar-dot img {
+    width: 84%;
+    height: 84%;
+    object-fit: contain;
+}
+
+/* The avatar picker: a wrapping grid of tappable circles. */
+.avatar-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+}
+
+.avatar-cell {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--lumo-contrast-5pct);
+    border: 2px solid transparent;
+    cursor: pointer;
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-align: center;
+    color: var(--lumo-secondary-text-color);
+}
+
+.avatar-cell img {
+    width: 80%;
+    height: 80%;
+    object-fit: contain;
+}
+
+.avatar-cell.selected {
+    border-color: var(--lumo-primary-color);
+    box-shadow: 0 0 0 2px var(--lumo-primary-color-10pct);
 }
 
 .member-chip.me {
@@ -321,7 +412,7 @@ vaadin-checkbox-group::part(group-field) {
 
 .member-chip .credit-chip {
     background: hsla(45, 100%, 51%, 0.18);
-    color: hsl(38, 92%, 38%);
+    color: light-dark(hsl(38, 92%, 38%), hsl(45, 95%, 65%));
     border-radius: 999px;
     padding: 1px 9px;
     font-size: 0.8rem;
@@ -368,6 +459,8 @@ vaadin-checkbox-group::part(group-field) {
 
 .page-pad {
     padding: var(--lumo-space-m);
+    /* viewport-fit=cover: keep the header out from under the camera island. */
+    padding-top: max(var(--lumo-space-m), env(safe-area-inset-top));
     max-width: 760px;
     margin: 0 auto;
     width: 100%;
@@ -436,6 +529,16 @@ vaadin-checkbox-group::part(group-field) {
 
 /* A quiet "you just did X — undo" strip, shown only while the member's own undo window
    is open. Deliberately understated: it's an escape hatch, not a call to action. */
+/* Collapsible home-wide "Done today" list, sitting right under the daily strip. */
+.done-today {
+    margin: var(--lumo-space-xs) 0 var(--lumo-space-s);
+}
+.done-today vaadin-details-summary {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--lumo-secondary-text-color);
+}
+
 .undo-strip {
     display: flex;
     align-items: center;
@@ -656,7 +759,7 @@ vaadin-checkbox-group::part(group-field) {
     gap: 2px;
 }
 .task-card .admin-tools vaadin-button {
-    background: rgba(255,255,255,0.7);
+    background: light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.12));
 }
 
 /* Tap-to-complete area inside a card (leaves room for the Book button below) */
@@ -743,6 +846,7 @@ vaadin-checkbox-group::part(group-field) {
     }
     .centered-page {
         padding: var(--lumo-space-m);
+        padding-top: max(var(--lumo-space-m), env(safe-area-inset-top));
         padding-left: max(var(--lumo-space-m), env(safe-area-inset-left));
         padding-right: max(var(--lumo-space-m), env(safe-area-inset-right));
         padding-bottom: max(var(--lumo-space-m), env(safe-area-inset-bottom));
@@ -750,6 +854,7 @@ vaadin-checkbox-group::part(group-field) {
 
     .page-pad {
         padding: var(--lumo-space-s);
+        padding-top: max(var(--lumo-space-s), env(safe-area-inset-top));
         padding-left: max(var(--lumo-space-s), env(safe-area-inset-left));
         padding-right: max(var(--lumo-space-s), env(safe-area-inset-right));
         padding-bottom: max(var(--lumo-space-s), env(safe-area-inset-bottom));
@@ -788,6 +893,9 @@ vaadin-checkbox-group::part(group-field) {
     .code-chip {
         font-size: 1rem;
         letter-spacing: 2px;
+    }
+    .chore-master {
+        font-size: 0.75rem;
     }
 
     /* Two columns of chores stay reachable down to the narrowest phones. */

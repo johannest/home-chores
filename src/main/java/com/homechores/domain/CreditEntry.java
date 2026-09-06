@@ -1,5 +1,6 @@
 package com.homechores.domain;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -25,7 +26,9 @@ public class CreditEntry {
     @Enumerated(EnumType.STRING)
     private CreditType type;
 
-    /** Human-readable reason (chore name, "spree", or an admin's redemption note). */
+    /** Human-readable reason (chore name, "spree", or an admin's redemption note).
+     *  Length backstop for {@link InputLimits#REASON}; the service layer clips first. */
+    @Column(length = InputLimits.REASON)
     private String reason;
 
     /** For spree awards, the tier's day-count (used to avoid awarding it twice in one streak). */

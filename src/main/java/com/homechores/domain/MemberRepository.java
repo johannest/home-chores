@@ -12,6 +12,9 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 
     long countByHomeCode(String homeCode);
 
+    /** Members with a chore reminder configured (the reminder sweep's working set). */
+    List<Member> findByReminderTimeNotNull();
+
     @Transactional
     void deleteByHomeCode(String homeCode);
 }

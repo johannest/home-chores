@@ -298,6 +298,59 @@ def cmd_delete(args) -> int:
     return 1
 
 
+def cmd_restore(args) -> int:
+    """Put a home back from a JSON backup.
+
+    The counterpart to `export`, and the only way to act on the safety export the
+    inactive-home retention sweep writes just before it deletes a family's board. The
+    in-app restore cannot do this job: it requires an admin signed into the home, and a
+    home that retention has already deleted has no admin left to sign in as.
+    """
+    path = Path(args.file)
+    if not path.is_file():
+        raise Failure(f"No such backup file: {path}")
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        code = str(payload["home"]["code"]).strip().upper()
+        name = payload["home"].get("name", "?")
+        members = len(payload.get("members", []))
+        chores = len(payload.get("tasks", []))
+        completions = len(payload.get("completions", []))
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise Failure(f"{path} is not a FlashChores backup: {exc}") from exc
+
+    print(f"\nAbout to restore from {path}:")
+    print(f"  {name}  ({code})")
+    print(f"  {members} member(s), {chores} chore(s), {completions} completion(s)")
+
+    existing = run_maintenance(args, {"maintenance.command": "list"})["homes"]
+    clash = next((h for h in existing if h["code"] == code), None)
+    if clash:
+        print(f"\n  WARNING: {code} already exists here as \"{clash['name']}\" "
+              f"({clash['members']} member(s), history: "
+              f"{'yes' if clash['hasHistory'] else 'none'}).")
+        print("  Restoring REPLACES everything it currently holds.")
+        if not args.overwrite:
+            raise Failure(
+                f"{code} still exists. Export it first, then pass --overwrite if you "
+                f"really mean to replace it.")
+
+    if not args.yes:
+        confirm_code(code, f"restore of {name}")
+
+    result = run_maintenance(args, {
+        "maintenance.command": "restore",
+        "maintenance.in": str(path.resolve()),
+        "maintenance.force": "true" if args.overwrite else "false",
+    })
+    verb = "Replaced" if result["overwroteExistingHome"] else "Restored"
+    print(f"\n{verb} {result['code']}: {result['members']} member(s), "
+          f"{result['chores']} chore(s), {result['completions']} completion(s).")
+    print("The family can sign back in with their home code and admin PIN.")
+    return 0
+
+
 def cmd_purge(args) -> int:
     params = {
         "maintenance.command": "purge",
@@ -362,6 +415,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_delete.add_argument("--yes", action="store_true",
                           help="skip the typed-code confirmation (for scripts)")
     p_delete.set_defaults(func=cmd_delete)
+
+    p_restore = sub.add_parser(
+        "restore",
+        help="put a home back from a JSON backup (the undo for a retention deletion)")
+    p_restore.add_argument("file", help="the backup JSON to restore from")
+    p_restore.add_argument("--overwrite", action="store_true",
+                           help="allow replacing a home with this code that still exists")
+    p_restore.add_argument("--yes", action="store_true",
+                           help="skip the typed-code confirmation (for scripts)")
+    p_restore.set_defaults(func=cmd_restore)
 
     p_purge = sub.add_parser("purge", help="delete homes abandoned before anyone used them")
     p_purge.add_argument("--days", type=int, required=True,

@@ -51,6 +51,15 @@ final class Celebrations {
             fireConfetti("medium");
             showDialog(service, o, onUndo, "🌟", T.tr("celebrate.newChore.title"),
                     T.tr("celebrate.newChore.text", chore, o.member().getName()));
+        } else if (o.doneTodayAfter() >= 3) {
+            // Third-or-more chore of the day: the praise (and the confetti) escalates.
+            fireConfetti("fire");
+            showDialog(service, o, onUndo, "🔥", T.tr("celebrate.third.title"),
+                    T.tr("celebrate.third.text", chore, o.member().getName(), o.doneTodayAfter()));
+        } else if (o.doneTodayAfter() == 2) {
+            fireConfetti("medium");
+            showDialog(service, o, onUndo, "💪", T.tr("celebrate.second.title"),
+                    T.tr("celebrate.second.text", chore, o.member().getName()));
         } else {
             fireConfetti("small");
             showDialog(service, o, onUndo, o.task().getEmoji(), T.tr("celebrate.nice.title"),

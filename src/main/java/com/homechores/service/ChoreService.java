@@ -1,6 +1,8 @@
 package com.homechores.service;
 
 import com.homechores.domain.ChoreTask;
+import com.homechores.domain.ChoreGroup;
+import com.homechores.domain.ChoreGroupRepository;
 import com.homechores.domain.ChoreTaskRepository;
 import com.homechores.domain.Completion;
 import com.homechores.domain.CompletionRepository;
@@ -9,8 +11,10 @@ import com.homechores.domain.DivisionStyle;
 import com.homechores.domain.Feedback;
 import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
+import com.homechores.domain.InputLimits;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
+import com.homechores.domain.PushSubscriptionRepository;
 import com.homechores.domain.RejoinRequest;
 import com.homechores.domain.RejoinRequestRepository;
 import com.homechores.domain.RejoinStatus;
@@ -24,9 +28,11 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -65,6 +71,8 @@ public class ChoreService {
     private final ChoreTaskRepository tasks;
     private final CompletionRepository completions;
     private final RejoinRequestRepository rejoins;
+    private final PushSubscriptionRepository pushSubscriptions;
+    private final ChoreGroupRepository groups;
     private final HomeState homeState;
     private final CreditService creditService;
     private final Translations translations;
@@ -83,7 +91,9 @@ public class ChoreService {
 
     public ChoreService(HomeRepository homes, MemberRepository members,
                         ChoreTaskRepository tasks, CompletionRepository completions,
-                        RejoinRequestRepository rejoins, HomeState homeState,
+                        RejoinRequestRepository rejoins,
+                        PushSubscriptionRepository pushSubscriptions,
+                        ChoreGroupRepository groups, HomeState homeState,
                         CreditService creditService, Translations translations,
                         @org.springframework.beans.factory.annotation.Value(
                                 "${homechores.identity.legacy-migration:true}")
@@ -96,6 +106,8 @@ public class ChoreService {
         this.tasks = tasks;
         this.completions = completions;
         this.rejoins = rejoins;
+        this.pushSubscriptions = pushSubscriptions;
+        this.groups = groups;
         this.homeState = homeState;
         this.creditService = creditService;
         this.translations = translations;
@@ -122,7 +134,7 @@ public class ChoreService {
             code = generateCode();
         } while (homes.existsById(code));
 
-        Home home = new Home(code, homeName.trim(), generatePin());
+        Home home = new Home(code, InputLimits.clip(homeName, InputLimits.HOME_NAME), generatePin());
         home.setLastActiveAt(Instant.now());
         homes.save(home);
         seedDefaultTasks(code, locale);
@@ -161,6 +173,12 @@ public class ChoreService {
 
     @Transactional
     public void saveHome(Home home) {
+        // Central chokepoint for admin edits: the UI caps field lengths, but those caps
+        // live in the browser — re-assert them (and the PIN's shape) before persisting.
+        home.setName(InputLimits.clip(home.getName(), InputLimits.HOME_NAME));
+        if (home.getAdminPin() == null || !home.getAdminPin().matches("\\d{4}")) {
+            throw new IllegalArgumentException("admin PIN must be exactly 4 digits");
+        }
         homes.save(home);
         homeState.bump(home.getCode());
     }
@@ -208,7 +226,8 @@ public class ChoreService {
                     addMember(norm, memberName, false));
         }
         String token = generateToken();
-        rejoins.save(RejoinRequest.joinRequest(norm, memberName.trim(), token));
+        rejoins.save(RejoinRequest.joinRequest(norm,
+                InputLimits.clip(memberName, InputLimits.MEMBER_NAME), token));
         homeState.bump(norm);
         return new JoinOutcome(RejoinResult.PENDING, token, null);
     }
@@ -231,7 +250,12 @@ public class ChoreService {
     private Member addMember(String homeCode, String name, boolean admin) {
         int existing = members.findByHomeCodeOrderByJoinedAtAsc(homeCode).size();
         String color = COLORS[existing % COLORS.length];
-        Member m = members.save(new Member(homeCode, name.trim(), color, admin));
+        Member member = new Member(homeCode,
+                InputLimits.clip(name, InputLimits.MEMBER_NAME), color, admin);
+        // Every UI path that creates a member is gated on the user-agreement checkbox,
+        // so creation time is consent time.
+        member.setTermsAcceptedAt(Instant.now());
+        Member m = members.save(member);
         homeState.bump(homeCode);
         return m;
     }
@@ -367,8 +391,8 @@ public class ChoreService {
     }
 
     /**
-     * Deletes a home and everything belonging to it — members, chores, completions,
-     * credits, spree tiers and rejoin requests. Irreversible; the caller is responsible
+     * Deletes a home and everything belonging to it — members, chores, chore groups,
+     * completions, credits, spree tiers and rejoin requests. Irreversible; the caller is responsible
      * for confirming intent (see {@code AdminPanel}'s danger zone).
      *
      * <p>The revision is bumped last so every other device still on this home re-renders,
@@ -383,9 +407,11 @@ public class ChoreService {
             return false;
         }
         rejoins.deleteByHomeCode(norm);
+        pushSubscriptions.deleteByHomeCode(norm);
         completions.deleteByHomeCode(norm);
         creditService.deleteForHome(norm);
         tasks.deleteByHomeCode(norm);
+        groups.deleteByHomeCode(norm);
         members.deleteByHomeCode(norm);
         homes.deleteById(norm);
         homeState.bump(norm);
@@ -629,7 +655,16 @@ public class ChoreService {
     @Transactional
     public void renameMember(Long memberId, String name) {
         Member member = members.findById(memberId).orElseThrow();
-        member.setName(name.trim());
+        member.setName(InputLimits.clip(name, InputLimits.MEMBER_NAME));
+        members.save(member);
+        homeState.bump(member.getHomeCode());
+    }
+
+    /** Sets (or with null/garbage clears) a member's avatar from the fixed catalog. */
+    @Transactional
+    public void setAvatar(Long memberId, String avatarId) {
+        Member member = members.findById(memberId).orElseThrow();
+        member.setAvatar(com.homechores.domain.Avatars.sanitize(avatarId));
         members.save(member);
         homeState.bump(member.getHomeCode());
     }
@@ -646,6 +681,7 @@ public class ChoreService {
         completions.deleteByMemberId(memberId);
         creditService.deleteForMember(memberId);
         rejoins.deleteByMemberId(memberId);
+        pushSubscriptions.deleteByMemberId(memberId);
         members.delete(member);
         homeState.bump(homeCode);
         return true;
@@ -708,11 +744,26 @@ public class ChoreService {
     @Transactional
     public ChoreTask addTask(String homeCode, String name, String emoji, int intervalDays,
                              int creditValue, String availableWindows, String seasons) {
-        ChoreTask t = new ChoreTask(homeCode, name.trim(), cleanEmoji(emoji));
-        t.setIntervalDays(Math.max(0, intervalDays));
-        t.setCreditValue(Math.max(0, creditValue));
-        t.setAvailableWindows(availableWindows);
+        return addTask(homeCode, name, emoji, intervalDays, creditValue, availableWindows,
+                seasons, null);
+    }
+
+    /** The full form. {@code groupId} null puts the chore in the ungrouped section, which is
+     *  where every chore added from the board's ＋ card lands. */
+    @Transactional
+    public ChoreTask addTask(String homeCode, String name, String emoji, int intervalDays,
+                             int creditValue, String availableWindows, String seasons,
+                             Long groupId) {
+        ChoreTask t = new ChoreTask(homeCode,
+                InputLimits.clip(name, InputLimits.TASK_NAME), cleanEmoji(emoji));
+        t.setIntervalDays(clampDays(intervalDays));
+        t.setCreditValue(clampCredits(creditValue));
+        t.setAvailableWindows(clipWindows(availableWindows));
         t.setSeasons(seasons);
+        // Appends rather than renumbering: on a legacy home where every chore still sits at 0 this
+        // writes a larger number than its neighbours, and the chore still renders last because
+        // createdAt is the tiebreaker. Correct by construction, no forced migration.
+        applyGroup(t, groupId);
         t = tasks.save(t);
         homeState.bump(homeCode);
         return t;
@@ -725,13 +776,26 @@ public class ChoreService {
     @Transactional
     public void updateTask(Long taskId, String name, String emoji, int intervalDays,
                            int creditValue, String availableWindows, String seasons) {
+        ChoreTask existing = tasks.findById(taskId).orElseThrow();
+        updateTask(taskId, name, emoji, intervalDays, creditValue, availableWindows, seasons,
+                existing.getGroupId());
+    }
+
+    /** The full form, group included — once the editor has a group picker, group membership is
+     *  an editable field like any other. Changing it appends the chore to the target group, so
+     *  one dialog save stays one write and one redraw on every connected phone. */
+    @Transactional
+    public void updateTask(Long taskId, String name, String emoji, int intervalDays,
+                           int creditValue, String availableWindows, String seasons,
+                           Long groupId) {
         ChoreTask t = tasks.findById(taskId).orElseThrow();
-        t.setName(name.trim());
+        t.setName(InputLimits.clip(name, InputLimits.TASK_NAME));
         t.setEmoji(cleanEmoji(emoji));
-        t.setIntervalDays(Math.max(0, intervalDays));
-        t.setCreditValue(Math.max(0, creditValue));
-        t.setAvailableWindows(availableWindows);
+        t.setIntervalDays(clampDays(intervalDays));
+        t.setCreditValue(clampCredits(creditValue));
+        t.setAvailableWindows(clipWindows(availableWindows));
         t.setSeasons(seasons);
+        applyGroup(t, groupId);
         tasks.save(t);
         homeState.bump(t.getHomeCode());
     }
@@ -745,7 +809,251 @@ public class ChoreService {
         homeState.bump(homeCode);
     }
 
+    /**
+     * The home's chores in BOARD order: group by group in the admin's group order, and within
+     * each group by position, then creation time. Ungrouped chores come last — which is also
+     * where a chore lands when its group is deleted, or when it is added from the board's ＋ card.
+     *
+     * <p><strong>Cosmetic order only.</strong> Nothing may derive meaning from a chore's position
+     * in this list; an admin changes it with two taps. In particular the daily rotation must never
+     * index it — that is what {@link #tasksInRotationOrder} exists for.
+     *
+     * <p>Buckets in Java rather than in a derived query, for two reasons: a null groupId cannot be
+     * matched by a generated {@code = null} predicate, and a groupId pointing at a group that no
+     * longer exists has to fall back to "ungrouped" rather than dropping the chore off the board.
+     * The extra statement is one constant group query per call, not one per chore.
+     */
     public List<ChoreTask> tasksOf(String homeCode) {
+        List<ChoreTask> ordered = tasks.findByHomeCodeOrderBySortOrderAscCreatedAtAscIdAsc(homeCode);
+        List<ChoreGroup> groupList = groupsOf(homeCode);
+        if (groupList.isEmpty()) {
+            return ordered; // the overwhelmingly common case: no grouping, nothing to interleave
+        }
+        Map<Long, List<ChoreTask>> buckets = new LinkedHashMap<>();
+        groupList.forEach(g -> buckets.put(g.getId(), new ArrayList<>()));
+        List<ChoreTask> ungrouped = new ArrayList<>();
+        for (ChoreTask t : ordered) {
+            List<ChoreTask> bucket = t.getGroupId() == null ? null : buckets.get(t.getGroupId());
+            (bucket != null ? bucket : ungrouped).add(t);
+        }
+        List<ChoreTask> result = new ArrayList<>(ordered.size());
+        buckets.values().forEach(result::addAll);
+        result.addAll(ungrouped);
+        return result;
+    }
+
+    // ---- Chore groups and board order ---------------------------------------
+
+    /** The home's chore groups, in the order the admin arranged them. */
+    public List<ChoreGroup> groupsOf(String homeCode) {
+        return groups.findByHomeCodeOrderBySortOrderAscIdAsc(homeCode);
+    }
+
+    public Optional<ChoreGroup> findGroup(Long groupId) {
+        return groups.findById(groupId);
+    }
+
+    @Transactional
+    public ChoreGroup addGroup(String homeCode, String name, String emoji) {
+        ChoreGroup g = new ChoreGroup(homeCode,
+                InputLimits.clip(name, InputLimits.GROUP_NAME), cleanEmoji(emoji));
+        g.setSortOrder(groupsOf(homeCode).size()); // append
+        ChoreGroup saved = groups.save(g);
+        homeState.bump(homeCode);
+        return saved;
+    }
+
+    @Transactional
+    public void updateGroup(Long groupId, String name, String emoji) {
+        ChoreGroup g = groups.findById(groupId).orElseThrow();
+        g.setName(InputLimits.clip(name, InputLimits.GROUP_NAME));
+        g.setEmoji(cleanEmoji(emoji));
+        groups.save(g);
+        homeState.bump(g.getHomeCode());
+    }
+
+    /**
+     * Removes a group and keeps every chore that was in it.
+     *
+     * <p>A group is a label, not a container. Deleting a label must never take a family's chores
+     * — and their whole completion history — with it; that is what {@link #deleteTask} is for, and
+     * it asks first. The chores become ungrouped and drop to the bottom of the board in their
+     * existing relative order.
+     */
+    @Transactional
+    public void deleteGroup(Long groupId) {
+        ChoreGroup g = groups.findById(groupId).orElseThrow();
+        String homeCode = g.getHomeCode();
+        for (ChoreTask t : tasks.findByHomeCodeOrderByCreatedAtAsc(homeCode)) {
+            if (groupId.equals(t.getGroupId())) {
+                t.setGroupId(null);
+                tasks.save(t);
+            }
+        }
+        groups.delete(g);
+        renumberGroups(homeCode);
+        homeState.bump(homeCode);
+    }
+
+    /** Moves a group one place up (-1) or down (+1). False when it is already at that end. */
+    @Transactional
+    public boolean moveGroup(Long groupId, int direction) {
+        ChoreGroup g = groups.findById(groupId).orElseThrow();
+        String homeCode = g.getHomeCode();
+        renumberGroups(homeCode);
+        List<ChoreGroup> all = groupsOf(homeCode);
+        int i = indexOfGroup(all, groupId);
+        int j = i + Integer.signum(direction);
+        if (i < 0 || j < 0 || j >= all.size()) {
+            return false;
+        }
+        swapOrder(all.get(i), all.get(j));
+        groups.saveAll(List.of(all.get(i), all.get(j)));
+        homeState.bump(homeCode);
+        return true;
+    }
+
+    /**
+     * Moves a chore one place up (-1) or down (+1) <em>within its own group</em>. False when it is
+     * already at that end — which is what lets the Admin tab disable the button rather than offer
+     * a tap that does nothing.
+     */
+    @Transactional
+    public boolean moveChore(Long taskId, int direction) {
+        ChoreTask t = tasks.findById(taskId).orElseThrow();
+        String homeCode = t.getHomeCode();
+        renumberChores(homeCode, t.getGroupId());
+        List<ChoreTask> bucket = bucketOf(homeCode, t.getGroupId());
+        int i = indexOfTaskIn(bucket, taskId);
+        int j = i + Integer.signum(direction);
+        if (i < 0 || j < 0 || j >= bucket.size()) {
+            return false;
+        }
+        ChoreTask a = bucket.get(i);
+        ChoreTask b = bucket.get(j);
+        int tmp = a.getSortOrder();
+        a.setSortOrder(b.getSortOrder());
+        b.setSortOrder(tmp);
+        tasks.saveAll(List.of(a, b));
+        homeState.bump(homeCode);
+        return true;
+    }
+
+    /** Moves a chore into another group (null = ungrouped), appending it to that group's end. */
+    @Transactional
+    public void setChoreGroup(Long taskId, Long groupId) {
+        ChoreTask t = tasks.findById(taskId).orElseThrow();
+        applyGroup(t, groupId);
+        tasks.save(t);
+        homeState.bump(t.getHomeCode());
+    }
+
+    /**
+     * Puts a chore in a group and appends it to that group's end, without saving or bumping —
+     * the shared half of {@link #setChoreGroup} and the group field of {@code updateTask}, so a
+     * dialog save stays one write and one board redraw for every connected phone.
+     *
+     * <p>A groupId belonging to another home is ignored rather than stored: the picker can only
+     * offer this home's groups, so it means a tampered request, and silently ungrouping is a
+     * smaller surprise than throwing at the family's admin.
+     */
+    private void applyGroup(ChoreTask t, Long groupId) {
+        Long target = null;
+        if (groupId != null) {
+            target = groups.findById(groupId)
+                    .filter(g -> g.getHomeCode().equals(t.getHomeCode()))
+                    .map(ChoreGroup::getId).orElse(null);
+        }
+        if (java.util.Objects.equals(target, t.getGroupId())) {
+            return; // unchanged — leave the position alone
+        }
+        t.setGroupId(target);
+        t.setSortOrder(bucketOf(t.getHomeCode(), target).size()); // append to the new bucket
+    }
+
+    /** The chores in one bucket, in board order. A null groupId means the ungrouped bucket, and
+     *  a groupId whose group is gone falls in there too — see {@link #tasksOf}. */
+    private List<ChoreTask> bucketOf(String homeCode, Long groupId) {
+        Set<Long> live = new java.util.HashSet<>();
+        groupsOf(homeCode).forEach(g -> live.add(g.getId()));
+        List<ChoreTask> out = new ArrayList<>();
+        for (ChoreTask t : tasks.findByHomeCodeOrderBySortOrderAscCreatedAtAscIdAsc(homeCode)) {
+            Long effective = (t.getGroupId() != null && live.contains(t.getGroupId()))
+                    ? t.getGroupId() : null;
+            if (java.util.Objects.equals(effective, groupId)) {
+                out.add(t);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Rewrites one bucket's positions to a dense 0..n-1 in its current display order.
+     *
+     * <p>Dense rather than gapped-by-tens. Gaps buy nothing at family scale — a dozen chores means
+     * rewriting a bucket is a handful of updates — while a gap scheme needs a "ran out of room,
+     * compact everything" path that in a home this size would never run, and therefore never be
+     * right. Dense also makes a move a plain swap, makes the invariant assertable (0,1,2,…), and
+     * quietly normalizes the legacy rows: every chore predating the column sits at 0, and the
+     * first move in a bucket converges it on the order {@code createdAt} was already showing.
+     *
+     * <p>Deliberately <em>not</em> called from {@code deleteTask}, {@code addTask} or the vacated
+     * side of a group move. A gap changes no visible order, and the next move renumbers anyway.
+     */
+    private void renumberChores(String homeCode, Long groupId) {
+        List<ChoreTask> bucket = bucketOf(homeCode, groupId);
+        for (int i = 0; i < bucket.size(); i++) {
+            if (bucket.get(i).getSortOrder() != i) {
+                bucket.get(i).setSortOrder(i);
+                tasks.save(bucket.get(i));
+            }
+        }
+    }
+
+    private void renumberGroups(String homeCode) {
+        List<ChoreGroup> all = groupsOf(homeCode);
+        for (int i = 0; i < all.size(); i++) {
+            if (all.get(i).getSortOrder() != i) {
+                all.get(i).setSortOrder(i);
+                groups.save(all.get(i));
+            }
+        }
+    }
+
+    private static void swapOrder(ChoreGroup a, ChoreGroup b) {
+        int tmp = a.getSortOrder();
+        a.setSortOrder(b.getSortOrder());
+        b.setSortOrder(tmp);
+    }
+
+    private static int indexOfGroup(List<ChoreGroup> list, Long groupId) {
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i).getId().equals(groupId)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int indexOfTaskIn(List<ChoreTask> list, Long taskId) {
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i).getId().equals(taskId)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * The home's chores in creation order — the rotation's index space, and nothing else.
+     *
+     * <p>Deliberately immune to every reordering gesture in the Admin tab. §4.5 assigns member
+     * <em>m</em> the chore at index {@code (m + epochDay) mod n}; if that index space followed the
+     * board, an admin nudging a card up would reassign the whole family's day, and under enforced
+     * rotation would lock someone out of the chore they were about to do with no message that
+     * explains why. Arranging the board is a layout preference and must not have a fairness effect.
+     */
+    public List<ChoreTask> tasksInRotationOrder(String homeCode) {
         return tasks.findByHomeCodeOrderByCreatedAtAsc(homeCode);
     }
 
@@ -766,7 +1074,11 @@ public class ChoreService {
         LocalDate today = LocalDate.now();
         LocalTime localNow = LocalTime.now(zone);
         boolean rotating = home.getDivisionStyle() == DivisionStyle.ROTATING;
-        Long myAssignedChore = rotating ? rotationAssignedChoreId(home, memberId, today) : null;
+        // A second, differently ordered view of the same chores, on purpose: indexing the board
+        // order here would make an admin's ↑/↓ reshuffle who is assigned what today.
+        List<ChoreTask> rotationOrder = rotating ? tasksInRotationOrder(homeCode) : List.of();
+        Long myAssignedChore = rotating
+                ? assignedChoreId(rotationOrder, memberList, memberId, today) : null;
 
         List<TaskView> result = new ArrayList<>();
         for (ChoreTask task : chores) {
@@ -797,7 +1109,7 @@ public class ChoreService {
             boolean inSeason = Seasons.isInSeason(task.getSeasons(), today);
 
             Long assignedMemberId = rotating
-                    ? rotationAssignedMemberId(home, task, memberList, chores, today) : null;
+                    ? assignedMemberId(rotationOrder, memberList, task.getId(), today) : null;
             String assignedName = assignedMemberId == null ? null : memberName(assignedMemberId);
 
             LockReason reason = computeLock(home, task, memberId, streak, holderId,
@@ -989,30 +1301,47 @@ public class ChoreService {
 
     // ---- Rotation division --------------------------------------------------
 
-    /** The chore assigned to this member today under rotating division, or null. */
+    /**
+     * The chore assigned to this member today under rotating division, or null.
+     *
+     * <p>Loads the rotation order itself, for callers that do not already hold it. Anything that
+     * has the lists in hand should call {@link #assignedChoreId} directly rather than paying for
+     * two more queries — see {@code taskViews}.
+     */
     public Long rotationAssignedChoreId(Home home, Long memberId, LocalDate date) {
-        List<ChoreTask> chores = tasksOf(home.getCode());
-        List<Member> memberList = membersOf(home.getCode());
-        if (chores.isEmpty()) {
+        return assignedChoreId(tasksInRotationOrder(home.getCode()),
+                membersOf(home.getCode()), memberId, date);
+    }
+
+    /**
+     * The rotation itself, over lists the caller already holds. Both entry points funnel through
+     * here so the board's "⭐ Your turn" badge and the enforcement gate in {@code complete} cannot
+     * drift apart — they were two separate index computations before, over two separate reads.
+     *
+     * <p>{@code rotationOrder} must be {@link #tasksInRotationOrder}, never {@link #tasksOf}.
+     */
+    private static Long assignedChoreId(List<ChoreTask> rotationOrder, List<Member> memberList,
+                                        Long memberId, LocalDate date) {
+        if (rotationOrder.isEmpty()) {
             return null;
         }
         int mi = indexOf(memberList, memberId);
         if (mi < 0) {
             return null;
         }
-        int c = chores.size();
+        int c = rotationOrder.size();
         int ci = (int) (((mi + date.toEpochDay()) % c + c) % c);
-        return chores.get(ci).getId();
+        return rotationOrder.get(ci).getId();
     }
 
     /** The member assigned to this chore today (inverse of the rotation), or null. */
-    private Long rotationAssignedMemberId(Home home, ChoreTask task, List<Member> memberList,
-                                          List<ChoreTask> chores, LocalDate date) {
-        if (chores.isEmpty() || memberList.isEmpty()) {
+    private static Long assignedMemberId(List<ChoreTask> rotationOrder, List<Member> memberList,
+                                         Long taskId, LocalDate date) {
+        if (rotationOrder.isEmpty() || memberList.isEmpty()) {
             return null;
         }
-        int c = chores.size();
-        int ci = indexOfTask(chores, task.getId());
+        int c = rotationOrder.size();
+        int ci = rotationIndexOf(rotationOrder, taskId);
         int mi = (int) (((ci - date.toEpochDay()) % c + (long) c) % c);
         return mi < memberList.size() ? memberList.get(mi).getId() : null;
     }
@@ -1026,7 +1355,9 @@ public class ChoreService {
         return -1;
     }
 
-    private static int indexOfTask(List<ChoreTask> list, Long taskId) {
+    /** A chore's position in the rotation order. The only place a chore becomes an integer —
+     *  named for the list it means, so nobody hands it the board order by accident. */
+    private static int rotationIndexOf(List<ChoreTask> list, Long taskId) {
         for (int i = 0; i < list.size(); i++) {
             if (list.get(i).getId().equals(taskId)) {
                 return i;
@@ -1110,7 +1441,7 @@ public class ChoreService {
         boolean approval = home.isRequireApproval();
         CompletionStatus status = approval ? CompletionStatus.PENDING : CompletionStatus.APPROVED;
 
-        boolean firstApprovedBefore = completions.existsByMemberIdAndTaskIdAndStatus(
+        boolean alreadyDoneThisChore = completions.existsByMemberIdAndTaskIdAndStatus(
                 memberId, taskId, CompletionStatus.APPROVED);
 
         Completion saved = completions.save(new Completion(task.getHomeCode(), taskId, memberId, status));
@@ -1123,8 +1454,9 @@ public class ChoreService {
         CreditService.Award award = creditService.onApprovedCompletion(
                 task, memberId, task.getHomeCode(), saved.getId());
         long memberTotal = completions.countByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
-        return CompleteOutcome.done(task, member, memberTotal, !firstApprovedBefore,
-                milestoneFor(memberTotal), rotating ? 0 : streak + 1, saved.getId(), award);
+        return CompleteOutcome.done(task, member, memberTotal, !alreadyDoneThisChore,
+                milestoneFor(memberTotal), rotating ? 0 : streak + 1, saved.getId(), award,
+                doneTodayCount(memberId));
     }
 
     /**
@@ -1159,7 +1491,7 @@ public class ChoreService {
             tasks.save(task);
         }
 
-        boolean firstApprovedBefore = completions.existsByMemberIdAndTaskIdAndStatus(
+        boolean alreadyDoneThisChore = completions.existsByMemberIdAndTaskIdAndStatus(
                 memberId, taskId, CompletionStatus.APPROVED);
 
         Completion entry = new Completion(task.getHomeCode(), taskId, memberId,
@@ -1173,8 +1505,9 @@ public class ChoreService {
         CreditService.Award award = creditService.onApprovedCompletion(
                 task, memberId, task.getHomeCode(), saved.getId());
         long memberTotal = completions.countByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
-        return CompleteOutcome.done(task, member, memberTotal, !firstApprovedBefore,
-                milestoneFor(memberTotal), 0, saved.getId(), award);
+        return CompleteOutcome.done(task, member, memberTotal, !alreadyDoneThisChore,
+                milestoneFor(memberTotal), 0, saved.getId(), award,
+                doneTodayCount(memberId));
     }
 
     // ---- "Other help" (something the chore list doesn't cover) --------------
@@ -1264,7 +1597,7 @@ public class ChoreService {
         ChoreTask task = c.isOtherHelp() ? null : tasks.findById(c.getTaskId()).orElseThrow();
         Member member = members.findById(c.getMemberId()).orElseThrow();
 
-        boolean firstApprovedBefore = task != null && completions.existsByMemberIdAndTaskIdAndStatus(
+        boolean alreadyDoneThisChore = task != null && completions.existsByMemberIdAndTaskIdAndStatus(
                 c.getMemberId(), c.getTaskId(), CompletionStatus.APPROVED);
 
         c.setStatus(CompletionStatus.APPROVED);
@@ -1279,8 +1612,9 @@ public class ChoreService {
                 : creditService.onApprovedHelp(c.getHomeCode(), c.getMemberId(), c.getId(),
                         credits, c.getNote());
         long memberTotal = completions.countByMemberIdAndStatus(c.getMemberId(), CompletionStatus.APPROVED);
-        return CompleteOutcome.done(task, member, memberTotal, task != null && !firstApprovedBefore,
-                milestoneFor(memberTotal), 0, c.getId(), award);
+        return CompleteOutcome.done(task, member, memberTotal, task != null && !alreadyDoneThisChore,
+                milestoneFor(memberTotal), 0, c.getId(), award,
+                doneTodayCount(c.getMemberId()));
     }
 
     @Transactional
@@ -1340,29 +1674,84 @@ public class ChoreService {
                 .stream().findFirst();
     }
 
-    /** Recent completions in a home, newest first — the admin's correction list. */
+    /**
+     * Recent completions in a home, newest first — the admin's correction list.
+     *
+     * <p>The limit goes to the database rather than to a stream over the result: this list
+     * shows fifteen rows, and reading a family's entire chore history to throw all but
+     * fifteen of it away is a cost that grows for as long as they use the app.
+     */
     public List<Completion> recentCompletions(String homeCode, int limit) {
-        return completions.findByHomeCodeOrderByDoneAtDesc(homeCode).stream()
-                .limit(limit).toList();
+        return completions.findByHomeCodeOrderByDoneAtDesc(homeCode,
+                org.springframework.data.domain.PageRequest.of(0, Math.max(1, limit)));
+    }
+
+    /** One row of the board's "Done today" list, prefetched so rendering is O(1) per row. */
+    public record DoneToday(Completion completion, String memberName, String text) {
+    }
+
+    /**
+     * Today's completions in a home (server date, same "today" as the daily ring), newest
+     * first. APPROVED and PENDING are both listed — in a require-approval home the list
+     * would otherwise stay empty all day; the UI marks pending rows ⏳. REJECTED excluded.
+     */
+    public List<DoneToday> doneTodayList(String homeCode) {
+        String norm = normalizeCode(homeCode);
+        ZoneId zone = ZoneId.systemDefault();
+        Instant from = LocalDate.now().atStartOfDay(zone).toInstant();
+        Instant to = LocalDate.now().plusDays(1).atStartOfDay(zone).toInstant();
+        List<Completion> rows = completions
+                .findByHomeCodeAndStatusInAndDoneAtGreaterThanEqualAndDoneAtLessThanOrderByDoneAtDesc(
+                        norm, List.of(CompletionStatus.APPROVED, CompletionStatus.PENDING),
+                        from, to);
+        var taskById = new java.util.HashMap<Long, ChoreTask>();
+        tasksOf(norm).forEach(t -> taskById.put(t.getId(), t));
+        var nameById = new java.util.HashMap<Long, String>();
+        membersOf(norm).forEach(m -> nameById.put(m.getId(), m.getName()));
+        return rows.stream()
+                .map(c -> new DoneToday(c,
+                        nameById.getOrDefault(c.getMemberId(), "?"),
+                        describe(c, c.getTaskId() == null ? null : taskById.get(c.getTaskId()))))
+                .toList();
     }
 
     // ---- Counts & daily target ---------------------------------------------
+
+    /** How many members the home has — one count query, cheap enough for every render. */
+    public long memberCount(String homeCode) {
+        return members.countByHomeCode(normalizeCode(homeCode));
+    }
 
     /** Number of APPROVED completions by this member (leaderboard count). */
     public long completionCount(Long memberId) {
         return completions.countByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
     }
 
-    /** APPROVED completions by this member with doneAt on the given local date. */
+    /**
+     * APPROVED completions by this member with doneAt on the given local date.
+     *
+     * <p>Asked once per board render for the daily ring, so it asks the database for that
+     * one day rather than loading every chore the member has ever done and filtering by
+     * date in memory — the same shape {@link #doneTodayCount} already used on the
+     * completion hot path.
+     */
     public long doneOn(Long memberId, LocalDate date) {
         ZoneId zone = ZoneId.systemDefault();
-        return completions.findByMemberIdAndStatus(memberId, CompletionStatus.APPROVED).stream()
-                .filter(c -> c.getDoneAt().atZone(zone).toLocalDate().equals(date))
-                .count();
+        Instant from = date.atStartOfDay(zone).toInstant();
+        Instant to = date.plusDays(1).atStartOfDay(zone).toInstant();
+        return completions.findByMemberIdAndStatusAndDoneAtGreaterThanEqualAndDoneAtLessThan(
+                memberId, CompletionStatus.APPROVED, from, to).size();
     }
 
     public long doneToday(Long memberId) {
         return doneOn(memberId, LocalDate.now());
+    }
+
+    /** Same count via one indexed query — for the completion hot path (celebration tiers). */
+    private long doneTodayCount(Long memberId) {
+        Instant midnight = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant();
+        return completions.countByMemberIdAndStatusAndDoneAtGreaterThanEqual(
+                memberId, CompletionStatus.APPROVED, midnight);
     }
 
     // ---- Helpers ------------------------------------------------------------
@@ -1376,8 +1765,47 @@ public class ChoreService {
         return null;
     }
 
+    /** How a completion reads in a list: the chore's emoji+name, or the helper's own words. */
+    public static String describe(Completion c, ChoreTask task) {
+        if (c.isOtherHelp()) {
+            return "🙋 " + c.getNote();
+        }
+        return task == null ? "?" : task.getEmoji() + " " + task.getName();
+    }
+
     private static String cleanEmoji(String emoji) {
-        return (emoji == null || emoji.isBlank()) ? "✅" : emoji.trim();
+        if (emoji == null || emoji.isBlank()) {
+            return "✅";
+        }
+        // The UI caps the field at 4 UTF-16 units, but that cap lives in the browser; 16
+        // still fits any single emoji grapheme while shutting out smuggled free text.
+        return InputLimits.clip(emoji, InputLimits.EMOJI);
+    }
+
+    /** Interval / tier day counts: never negative, never past a year. */
+    static int clampDays(int days) {
+        return Math.clamp(days, 0, InputLimits.MAX_DAYS);
+    }
+
+    /** Credit values: never negative, never absurd. */
+    static int clampCredits(int credits) {
+        return Math.clamp(credits, 0, InputLimits.MAX_CREDITS);
+    }
+
+    /**
+     * Bounds a canonical availability string: at most {@link InputLimits#TIME_WINDOW_COUNT}
+     * windows survive (enough windows would otherwise normalize past the column width).
+     */
+    static String clipWindows(String availableWindows) {
+        if (availableWindows == null || availableWindows.isBlank()) {
+            return availableWindows;
+        }
+        String[] parts = availableWindows.split(",");
+        if (parts.length <= InputLimits.TIME_WINDOW_COUNT) {
+            return availableWindows;
+        }
+        return String.join(",",
+                java.util.Arrays.copyOf(parts, InputLimits.TIME_WINDOW_COUNT));
     }
 
     private static String generateCode() {
@@ -1455,24 +1883,27 @@ public class ChoreService {
             Long completionId,
             int creditsAwarded,
             Integer spreeDays,
-            int spreeCredits) {
+            int spreeCredits,
+            /** The member's APPROVED completions today (server date) including this one;
+             *  0 = not applicable (blocked, or pending — not counted until approved). */
+            long doneTodayAfter) {
 
         static CompleteOutcome blocked(LockReason reason, ChoreTask task, Member member) {
             return new CompleteOutcome(false, false, reason, task, member, 0, false, null, 0, null,
-                    0, null, 0);
+                    0, null, 0, 0);
         }
 
         static CompleteOutcome pending(ChoreTask task, Member member, Long completionId) {
             return new CompleteOutcome(true, true, LockReason.NONE, task, member, 0, false, null, 0,
-                    completionId, 0, null, 0);
+                    completionId, 0, null, 0, 0);
         }
 
         static CompleteOutcome done(ChoreTask task, Member member, long total, boolean newChore,
                                     Integer milestone, int newStreak, Long completionId,
-                                    CreditService.Award award) {
+                                    CreditService.Award award, long doneTodayAfter) {
             return new CompleteOutcome(true, false, LockReason.NONE, task, member, total, newChore,
                     milestone, newStreak, completionId,
-                    award.choreCredits(), award.spreeDays(), award.spreeCredits());
+                    award.choreCredits(), award.spreeDays(), award.spreeCredits(), doneTodayAfter);
         }
     }
 }

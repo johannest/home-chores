@@ -212,10 +212,19 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
 - **US-39 Abandoned-home retention (operator).** As the operator of a public instance, I
   can have homes that were created and then abandoned *before anyone used them* removed
   automatically, so stray sign-ups don't accumulate. A home qualifies only when it has no
-  chore history at all and at most one member. A home a family actually used is never
-  auto-deleted however long it sits idle: the app has no email or push channel, so nobody
-  could be warned first, and silently destroying a child's chore history is not a trade
-  worth making for disk space. Off by default.
+  chore history at all and at most one member. Two windows feed the same rule —
+  `empty-home-hours` (fast anti-spam tier, 72h in prod config) and `abandoned-home-days`
+  (the long upper bound). Off by default in code.
+- **US-40 Inactive-home retention (operator).** As the operator, I can additionally have
+  *any* home that nobody has opened or used for `inactive-home-days` days (30 in prod
+  config) deleted entirely — members, chores and history included — so the database only
+  holds families that actually use the app, as the user agreement states. Because a false
+  positive here destroys irreplaceable history (a long trip, a lost phone), a home with
+  any chore history is exported as a full JSON backup to `retention.export-dir` right
+  before deletion — the operator's undo, restorable via the maintenance tool — and a home
+  whose export cannot be written is kept, not deleted. Activity means opening the board,
+  joining, or logging/reviewing a chore; background push traffic and opt-in reminders
+  never count. Off by default in code.
 
 ### Phase 5
 
@@ -247,8 +256,8 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   who does what *next* and this is a statement about what already happened. If I get it wrong,
   the unmark list takes it back like any other completion.
 - **US-48 Sessions that don't outlive the moment.** As a family, our phones hold no server
-  session while nobody is using them: a member's session lasts 3 minutes of inactivity and an
-  admin's 15, and expiry is invisible — the page returns itself to the board using the
+  session while nobody is using them: a member's session lasts 5 minutes of inactivity and an
+  admin's 20, and expiry is invisible — the page returns itself to the board using the
   identity in local storage. As an admin I get the longer one because settings forms are read
   and filled in slowly.
 - **US-49 No machine translation on top of ours.** As a user whose browser offers to
@@ -324,8 +333,11 @@ Common to both:
 Sessions are short because nothing is lost when one ends: the identity is in local storage,
 and the next interaction signs the phone straight back in.
 
-- **3 minutes for a member, 15 for an admin** (`SessionContext.MEMBER_TIMEOUT_SECONDS` /
-  `ADMIN_TIMEOUT_SECONDS`, applied per session with `WrappedSession.setMaxInactiveInterval`).
+- **5 minutes for a member, 20 for an admin** (`SessionContext.MEMBER_TIMEOUT_SECONDS` =
+  300s / `ADMIN_TIMEOUT_SECONDS` = 1200s, applied per session with
+  `WrappedSession.setMaxInactiveInterval`). These two constants are the single source of
+  truth; this paragraph and the note in `application.properties` quote them, so a change
+  there is a change here.
   Members tap and pocket the phone; admins read and fill in forms — settings, PINs, reward
   tiers — which produce no requests while being read, and where being bounced mid-edit costs
   real work. The lifetime is re-applied on every board render, so a promotion or demotion
@@ -419,22 +431,36 @@ message and shows a matching badge on the card (`LockReason`):
   Unparseable data fails open, as windows do.
 
 ### 4.4c Board filters
-- A single-select chip row above the card grid: All · Due now · the non-empty cadence
+- A single-select chip row above the card grid: All · Today · the non-empty cadence
   buckets · Off-season. Chips are lenses, not a partition — an off-season chore appears
   under both `Off-season` and its own cadence chip — so they carry no counts.
+- **`Today` is the default lens**: the board opens on "what is on today's list" — anytime
+  chores plus interval chores whose interval has elapsed (a weekly chore done three days
+  ago is absent), in season, ignoring time of day (an out-of-hours dog walk is still
+  today's chore, shown locked), booking and streak state. The predicate is
+  `lockReason ∉ {NOT_DUE, OUT_OF_SEASON}`, which is deliberately clock-independent.
 - Empty buckets get no chip; a lone cadence bucket is dropped (it would just be `All` renamed);
-  `Due now` is dropped when it would select everything; and the row hides entirely unless it
-  offers at least one real alternative to `All`. A home of eleven anytime chores looks exactly as
-  it did before the feature.
+  `Today` is dropped when it would select everything — the default then falls back to `All`,
+  which renders the identical board; and the row hides entirely unless it offers at least
+  one real alternative to `All`. A fresh home therefore still looks exactly as before.
 - The selection lives in a field on `ChoresPanel`, so it survives every `HomeState` rebuild but
-  resets on navigation. Clicking a chip re-renders that board only — it never bumps
-  `HomeState`, because one member's view preference is not the family's business.
+  resets on navigation (back to `Today`). Clicking a chip re-renders that board only — it never
+  bumps `HomeState`, because one member's view preference is not the family's business.
 - **The board never renders empty because of a filter.** If the chosen bucket disappears or its
   result is empty, the lens resets to `All`. Under rotating division the member's own assigned
   card is always included, whatever the lens, so the board cannot become a dead end.
 - Filtering happens in `ChoresPanel` only. `rotationAssignedChoreId` indexes the chore list by
   position, so a filtered service-side list would silently reassign everyone's daily chore.
-- "Other help" and "Add chore" are not chores, so they show only under `All`.
+- "Other help" and "Add chore" are not chores, so they show only under `All` and the
+  default `Today` — the opening board must not hide them.
+
+### 4.4d Done today
+- A collapsible home-wide list ("Done today (n)") directly under the daily strip: who did
+  what, how long ago, feedback emoji. Same server-date "today" as the daily ring.
+- `APPROVED` and `PENDING` rows both show (pending marked ⏳ — in a require-approval home
+  the list would otherwise stay empty all day); `REJECTED` excluded. Newest first.
+- Collapsed by default; the open state is a `ChoresPanel` field (survives rebuilds via the
+  `isFromClient` listener trick, resets per navigation). Absent entirely on a blank day.
 
 ### 4.5 Rotating division
 - `Home.divisionStyle` ∈ {`DEFAULT`, `ROTATING`}; `Home.rotationEnforced`
@@ -452,6 +478,20 @@ message and shows a matching badge on the card (`LockReason`):
 - **new-chore** achievement = first `APPROVED` completion of that chore by that member.
 - Leaderboard shows each member with their approved count and 💎 credit balance
   (when > 0); admins are badged 👑.
+- **Avatars**: each member may pick an animal avatar from a fixed CC0 set (Kenney
+  "Animal Pack Redux", 30 round faces under `META-INF/resources/avatars/`, id whitelisted
+  in `Avatars`). Rendered by the shared `MemberAvatar` dot (color ring + image, or
+  initials when unset) on the leaderboard and admin member list. Picker opens from your
+  own leaderboard chip, or from the admin rename dialog (for device-less kids). The id
+  round-trips backups, whitelisted on restore like colors.
+- **Chore master of last week**: the member with the most `APPROVED` completions in the
+  previous ISO week (Mon–Sun, server zone) is badged 🥇 in the board header (👑 = admin,
+  so a different glyph). Ties go to the earliest-joined member; hidden for solo homes and
+  blank weeks.
+- **Escalating daily celebrations**: the member's 2nd approved chore of the day gets a 💪
+  dialog, the 3rd+ a 🔥 one with double-burst side-cannon confetti; precedence stays
+  pending > milestone > new-chore > daily tier. Pending completions keep the neutral ⏳
+  dialog — praise waits until the chore actually counts.
 
 ### 4.7 Credits & rewards
 - **Earning**: when a completion becomes `APPROVED`:
@@ -500,7 +540,11 @@ message and shows a matching badge on the card (`LockReason`):
   restore over their own home, never another family's. IDs are remapped internally;
   orphaned records are skipped — an other-help entry has no task to remap and is not an
   orphan. Invalid files (including a mismatched home code) are rejected with a message.
-  The restoring admin is signed out and rejoins.
+  A file carrying keys this build does not know (a backup written by a newer version) is
+  restored for everything it does understand rather than refused outright. Restoring
+  stamps the home as active. The restoring admin is signed out and rejoins.
+  Restoring a home that no longer exists is deliberately *not* reachable here — there is
+  no admin to be signed in as — and is the operator's `restore` in §4.11.3.
 
 ### 4.11.1 Deleting the home (admin)
 - A **Danger zone** section at the bottom of the Admin tab, visually separated because it
@@ -539,6 +583,17 @@ message and shows a matching badge on the card (`LockReason`):
   native share sheet with a localized text that includes the home name, code **and
   the join link** (some share targets drop the separate URL field), falling back to
   the clipboard.
+- **Chore reminders (Web Push, opt-in)**: when VAPID keys are configured
+  (`homechores.push.*`), a bell in the board header lets each member pick a daily
+  reminder time (their own browser timezone, persisted on `Member.zoneId`). A
+  once-a-minute sweep (`PushReminderService`) sends a push to the member's subscribed
+  devices when that time passes with no completion (any status) logged that member-local
+  day; `Member.lastRemindedOn` makes it once per day and restart-safe. Sending uses
+  Vaadin's `flow-webpush`; Vaadin's generated service worker already handles the `push`
+  and `notificationclick` events. Subscriptions (`PushSubscription`) are per device,
+  pruned when the push service reports 404/410, deleted with their member/home, and
+  excluded from backups. On iOS this requires the PWA installed to the Home Screen
+  (16.4+); the dialog says so.
 
 ### 4.14 Live sync
 - `HomeState` keeps a per-home revision **Vaadin Signal**; every mutation bumps it.
@@ -618,12 +673,18 @@ everyone in the home except the admin doing the logging.
 - Governed by `homechores.retention.abandoned-home-days` (**0 = disabled, the default**)
   and `homechores.retention.cron` (nightly at 03:30 by default). `findAbandoned(cutoff)`
   is a dry run for inspecting candidates without deleting.
-- Deletion reuses `ChoreService.deleteHome`, so the cascade across all seven tables stays
-  in one place, and each sweep logs the codes it removed.
-- **Not implemented, deliberately**: time-based deletion of homes that *were* used. With no
-  email or push channel there is no way to warn a family first, and a false positive
-  destroys irreplaceable history while a false negative costs kilobytes. If it is ever
-  added it should export a backup before deleting, and use a window of months, not days.
+- Deletion reuses `ChoreService.deleteHome`, so the cascade across all eight tables
+  — rejoin requests, push subscriptions, completions, credits, spree tiers, chores,
+  members, the home row — stays in one place; sweeps log counts only, since a home
+  code is the home's access credential.
+- Time-based deletion of homes that *were* used exists as its own opt-in tier
+  (`inactive-home-days`, US-40) and follows the safeguard this section always demanded:
+  a full backup is exported before deleting, the home is kept if that export fails, and
+  the export is restorable with the maintenance CLI's `restore` (§4.11.3) — a restore
+  stamps `lastActiveAt`, so a revived home is not swept away again the same night.
+  There is still no way to warn a whole family first, so the window is a deliberate
+  operator decision and both `/terms` and `/privacy` state it (generated from config,
+  with a "contact us to restore" note).
 - `PrivacyView` renders the retention sentence from the configured value, so the published
   notice cannot drift out of step with what the server actually does.
 
@@ -638,14 +699,27 @@ retention candidates before enabling the sweep.
   (`--maintenance.command=…`), which prints a JSON result between fence markers and shuts
   itself down. Vaadin's Spring integration requires a web context, so the launcher gives it
   an ephemeral **loopback** port for the couple of seconds the command runs.
-- **No hand-written SQL.** Deletion calls `ChoreService.deleteHome`, so the seven-table
-  cascade lives in one tested place; SQL by hand would risk orphaned rows.
+- **No hand-written SQL.** Deletion calls `ChoreService.deleteHome`, so the eight-table
+  cascade (§4.11.2) lives in one tested place; SQL by hand would risk orphaned rows.
+  Restore likewise goes through `BackupService`, which remaps ids rather than trusting
+  the ones in the file.
 - **Requires the service stopped**, because H2 holds an exclusive file lock. The script
   probes the port and refuses with an instruction rather than failing part-way.
-- Commands: `list`, `show`, `export`, `delete`, `purge --days N [--dry-run]`. `delete`
-  exports a backup to `data/erasure-exports/` first (unless `--no-backup`) and requires the
-  home code to be typed, mirroring the in-app Danger zone. `--db-url` targets another
-  database, e.g. a restored copy. Exit codes: 0 success, 2 handled failure.
+- Commands: `list`, `show`, `export`, `delete`, `restore FILE [--overwrite]`,
+  `purge --days N [--dry-run]`. `delete` exports a backup to `data/erasure-exports/` first
+  (unless `--no-backup`) and requires the home code to be typed, mirroring the in-app
+  Danger zone. `--db-url` targets another database, e.g. a restored copy. Exit codes:
+  0 success, 2 handled failure.
+- **`restore` is the other half of retention.** The in-app restore (§4.11) requires an
+  admin signed into the home, which a home the sweep has already deleted no longer has —
+  so without an operator-side restore the safety export written in §4.11.2 would be a file
+  nothing could read back, while `/terms` and `/privacy` tell families they can ask for it.
+  It reads the home code out of the file, prints what will be created, and requires the
+  code to be typed like `delete` does. A home with that code that still exists is refused
+  unless `--overwrite` is given, because restore is a wipe-and-replace and the normal case
+  here is putting back something that is gone. `BackupService.restoreAnyHome` is the entry
+  point; its safety comes from being reachable only from a process the operator starts on
+  the host with the service stopped, not from a code comparison.
 
 ### 4.15.1 Mobile layout
 The app is used mostly on phones, so the layout is designed for a ~360–400px column and
@@ -661,14 +735,21 @@ scales up, not the other way round.
   with `width: 100%` plus padding silently overflows. This was the sign-in card bug: 40px
   of padding made a 327px card 407px wide on a 375px phone.
 - **Safe areas.** `index.html` ships `viewport-fit=cover`, so page padding uses
-  `max(<pad>, env(safe-area-inset-*))` to clear the notch and home indicator, and heights
-  use `100dvh` (with a `100vh` fallback) to track iOS Safari's collapsing URL bar.
+  `max(<pad>, env(safe-area-inset-*))` on all four sides — top included, or the header
+  slides under the iPhone camera island / Dynamic Island — to clear the notch and home
+  indicator, and heights use `100dvh` (with a `100vh` fallback) to track iOS Safari's
+  collapsing URL bar. The fixed `.restore-overlay` pads its own top the same way.
 - **Header (≤640px).** The identity block and the action cluster each take a full row
   rather than pushing each other off-screen; the home name is one ellipsised line. Copy
   and Share collapse to icons — their glyphs are self-explanatory and they sit beside the
   code chip — while "Admin?" and "Leave" keep their text, since a bare key or exit icon is
   ambiguous. The room comes from narrowing the language select instead. Collapsed labels
   stay in `aria-label`.
+- **Invite menu (multi-member homes).** Once a second member has joined, the inline code
+  chip + Copy + Share retire into a single share-glyph `MenuBar` at the right end of the
+  action cluster: the code (tap to copy it bare), Copy link, Share. A solo home keeps the
+  inline row — inviting is the one thing that board still has to make happen. The menu's
+  code chip uses lumo tokens (`.code-menu-chip`), not the white-on-gradient `.code-chip`.
 - **Touch.** Hover effects are behind `@media (hover: hover)` — on a touch screen `:hover`
   sticks after a tap and leaves a chore card looking permanently pressed. Small icon
   buttons get a 40px minimum hit area under `@media (pointer: coarse)`, and tapped cards
@@ -682,12 +763,35 @@ scales up, not the other way round.
   code/PIN), what is not (no emails, no trackers, single strictly-necessary session
   cookie), data location/retention, user rights (correct/erase/export via admin),
   children's-data guidance (nicknames), and operator contact details.
+- **Server logs and hosting statistics.** The app records no client data of its own —
+  Tomcat access logging is off (`server.tomcat.accesslog.enabled=false`) and nothing logs
+  at request level, so no IP addresses are stored by FlashChores. The hosting platform
+  underneath still keeps the ordinary web-server records every site needs (access logs and
+  AWStats-style aggregate statistics) for availability and abuse/attack detection. The
+  notice says so plainly, and says that those records are infrastructure-level, short-lived
+  and never correlated with a member, a home or a home code — otherwise the "what we do NOT
+  store" claim reads as more absolute than the deployment can honour.
 - **Erasure requests.** Self-service is the primary route and is already complete: an admin
   can erase one member (Admin → Members) or the whole home (Admin → Danger zone), and
   export first via Backup & restore. For operator-assisted requests the notice asks for the
   **home code plus admin PIN** — with no stored email or account there is nothing else to
   authenticate a request against, and the code alone would let anyone have a family's board
   deleted. The retention paragraph is generated from the live configuration (§4.11.2).
+
+### 4.16 SEO & discoverability
+- Vaadin Flow has no crawler prerendering, so crawlability is built into the shell:
+  `index.html` carries static meta description + Open Graph/Twitter tags and a short
+  honest `#seo-content` block inside the outlet (hidden by CSS the instant the app
+  mounts — same HTML for every client, no cloaking), with plain links to `/privacy` and
+  `/terms`.
+- `SeoIndexHtmlListener` injects the per-route bits: canonical + description + og:title/
+  og:url for the three public routes, JSON-LD (`WebApplication`) on `/` only, and
+  `noindex` for `/home` and everything else. All emitted only when `homechores.base-url`
+  is set, so a staging deployment never declares itself canonical.
+- Static `robots.txt` (disallow `/home`, sitemap pointer) and `sitemap.xml` (the three
+  public URLs). No hreflang: all three languages share one URL (cookie/header locale),
+  which hreflang cannot express — SEO content stays English, while Vaadin still stamps
+  `<html lang>` from the resolved locale.
 
 ## 5. Non-functional / technical
 - Vaadin 25.2 Flow + Spring Boot 4.1 (Java 21), H2 file DB (`data/`), server push
@@ -749,5 +853,5 @@ scales up, not the other way round.
   member's until the PIN is entered, and the admin's from then on.
 
 ## 7. Out of scope (possible future work)
-- Real authentication/accounts; weekly/monthly leaderboards; push notifications;
-  undo of a single tap; per-member chore preferences; native mobile apps.
+- Real authentication/accounts; weekly/monthly leaderboards;
+  per-member chore preferences; native mobile apps.

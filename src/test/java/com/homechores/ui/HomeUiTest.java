@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.homechores.domain.ChoreTask;
+import com.homechores.domain.Completion;
+import com.homechores.domain.CompletionRepository;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
 import com.homechores.domain.Season;
@@ -16,9 +18,12 @@ import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.ComponentUtil;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
+import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.html.Div;
+import com.vaadin.flow.component.html.Image;
 import com.vaadin.flow.component.html.Span;
+import com.vaadin.flow.component.menubar.MenuBar;
 import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.tabs.Tabs;
 import com.vaadin.flow.component.textfield.TextArea;
@@ -38,6 +43,9 @@ class HomeUiTest extends SpringUIUnitTest {
 
     @Autowired
     ChoreService service;
+
+    @Autowired
+    CompletionRepository completions;
 
     /** Pin the UI language to English so the text-based lookups below are stable. */
     @BeforeEach
@@ -78,6 +86,15 @@ class HomeUiTest extends SpringUIUnitTest {
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("No usable button: " + text));
         ComponentUtil.fireEvent(b, new ClickEvent<>(b));
+    }
+
+    /** Ticks the user-agreement checkbox on whichever landing form is visible. */
+    private void acceptTerms() {
+        Checkbox cb = $(Checkbox.class).all().stream()
+                .filter(this::usable)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No usable terms checkbox"));
+        cb.setValue(true);
     }
 
     private void setField(String label, String value) {
@@ -212,6 +229,7 @@ class HomeUiTest extends SpringUIUnitTest {
         navigate(LandingView.class);
         setField("Home name", "Test Home");
         setField("Your name", "Alex");
+        acceptTerms();
         clickButton("Create home 🚀");
         clickButton("Let's go 🚀"); // dismiss the "home created / here's your PIN" dialog
 
@@ -231,6 +249,7 @@ class HomeUiTest extends SpringUIUnitTest {
         $(Tabs.class).first().setSelectedIndex(1); // switch to the "Join a home" tab
         setField("Home code", admin.getHomeCode());
         setField("Your name", "Sam");
+        acceptTerms();
         clickButton("Join home 🙌");
 
         assertInstanceOf(HomeView.class, getCurrentView());
@@ -247,6 +266,7 @@ class HomeUiTest extends SpringUIUnitTest {
         $(Tabs.class).first().setSelectedIndex(1);
         setField("Home code", admin.getHomeCode());
         setField("Your name", "Sam");
+        acceptTerms();
         clickButton("Join home 🙌");
 
         assertInstanceOf(LandingView.class, getCurrentView(), "still waiting, not signed in");
@@ -572,41 +592,55 @@ class HomeUiTest extends SpringUIUnitTest {
     void freshHome_offersOnlyTheCadencesItActuallyHas() {
         Member alex = service.createHome("Shared", "Alex");
         String code = alex.getHomeCode();
-        // Drop the seeded dog walk: it is the one chore with availability hours, so outside
-        // 08-10 / 18-22 it becomes the thing that makes "Due now" a real distinction — which
-        // would make this assertion depend on what time the suite happens to run.
-        service.tasksOf(code).stream()
-                .filter(t -> t.getAvailableWindows() != null)
-                .forEach(t -> service.deleteTask(t.getId()));
         SessionContext.signIn(alex.getId(), code);
         navigate(HomeView.class);
 
-        // Nine seeded chores are "anytime", water plants is weekly. Nothing else exists, so no
-        // other bucket earns a chip — and "Due now" would select all ten, so it is suppressed.
+        // Everything on a fresh board is on today's list (the Today lens ignores time of
+        // day, so the dog walk's hours don't matter) — a Today chip that selects all is
+        // suppressed and the default falls back to All, which renders the same board.
         assertEquals(List.of("All", "Anytime", "Weekly"), chipLabels());
         assertEquals("All", selectedChip());
     }
 
-    /** The mirror of the above: a chore outside its hours is exactly what "Due now" is for. */
+    /** A parked interval chore is exactly what makes "Today" a real lens — and the default. */
     @Test
-    void dueNowChip_appearsWhenSomethingIsNotTappableRightNow() {
+    void todayChip_isTheDefault_andHidesAChoreDoneWithinItsInterval() {
         Member alex = service.createHome("Shared", "Alex");
         String code = alex.getHomeCode();
-        // A window that cannot contain "now", whatever the hour, so this does not drift with
-        // the clock: complete one interval chore instead, which parks it until tomorrow.
+        // Complete the weekly chore: it leaves today's list until its interval elapses.
         ChoreTask weekly = service.tasksOf(code).stream()
                 .filter(t -> t.getIntervalDays() > 0).findFirst().orElseThrow();
         service.completeFor(weekly.getId(), alex.getId(), alex.getId());
         SessionContext.signIn(alex.getId(), code);
         navigate(HomeView.class);
 
-        assertTrue(chipLabels().contains("Due now"),
-                "something is parked, so filtering to what is actionable means something");
-        clickFilterChip("Due now");
+        assertTrue(chipLabels().contains("Today"),
+                "something is parked, so narrowing to today's list means something");
+        assertEquals("Today", selectedChip(), "the board opens on today's chores");
         assertFalse($(Div.class).all().stream()
                 .filter(d -> d.getClassNames().contains("task-card") && usable(d))
                 .anyMatch(d -> d.getElement().getTextRecursively().contains("Water plants")),
-                "the chore we just did is not due now");
+                "the chore we just did is not on today's list");
+    }
+
+    /** The default lens must not hide the two non-chore tiles. */
+    @Test
+    void otherHelpAndAddChore_showUnderTheDefaultTodayLens() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        ChoreTask weekly = service.tasksOf(code).stream()
+                .filter(t -> t.getIntervalDays() > 0).findFirst().orElseThrow();
+        service.completeFor(weekly.getId(), alex.getId(), alex.getId());
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+
+        assertEquals("Today", selectedChip());
+        assertTrue($(Div.class).all().stream()
+                .anyMatch(d -> d.getClassNames().contains("help-card") && usable(d)),
+                "Other help stays reachable under the default lens");
+        assertTrue($(Div.class).all().stream()
+                .anyMatch(d -> d.getClassNames().contains("add-card") && usable(d)),
+                "so does the admin's Add chore tile");
     }
 
     @Test
@@ -650,8 +684,8 @@ class HomeUiTest extends SpringUIUnitTest {
         Home home = service.findHome(code).orElseThrow();
         home.setConfirmCompletion(false);
         service.saveHome(home);
-        // "Due now" can only run out if every chore has an interval, so replace the seeded set
-        // with three weekly ones and pre-do one — that third card is what makes "Due now" a real
+        // "Today" can only run out if every chore has an interval, so replace the seeded set
+        // with three weekly ones and pre-do one — that third card is what makes "Today" a real
         // choice rather than a synonym for "All".
         for (ChoreTask t : service.tasksOf(code)) {
             service.deleteTask(t.getId());
@@ -663,14 +697,14 @@ class HomeUiTest extends SpringUIUnitTest {
 
         SessionContext.signIn(alex.getId(), code);
         navigate(HomeView.class);
-        clickFilterChip("Due now");
+        clickFilterChip("Today");
         assertEquals(2, visibleChoreCards(), "two of the three are still due");
 
         clickChoreCard(0);
         clickChoreCard(0); // the board re-rendered, so the survivor is index 0 again
 
         assertEquals(3, service.completionCount(alex.getId()), "all three really were done");
-        // Nothing is due any more, so "Due now" is gone and with it the last real choice — the row
+        // Nothing is due any more, so "Today" is gone and with it the last real choice — the row
         // retires itself. What matters is that the member is looking at their chores, not a blank.
         assertEquals(3, visibleChoreCards(), "board must not be left empty by a filter");
         assertTrue(filterChips().isEmpty(), "no alternatives left, so no row");
@@ -705,6 +739,134 @@ class HomeUiTest extends SpringUIUnitTest {
         navigate(HomeView.class);
 
         assertFalse(chipLabels().contains("Off-season"));
+    }
+
+    // ---- Header: invite menu, chore master ------------------------------------
+
+    @Test
+    void soloHome_keepsTheInvitePlumbingInline() {
+        Member alex = service.createHome("Solo", "Alex");
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+
+        assertTrue($(Span.class).all().stream()
+                .anyMatch(s -> s.getClassNames().contains("code-chip") && usable(s)),
+                "a lone creator still needs the code front and center");
+        assertTrue($(MenuBar.class).all().stream().noneMatch(this::usable),
+                "no overflow menu while there is nobody to overflow for");
+    }
+
+    @Test
+    void multiMemberHome_collapsesCodeCopyShareIntoTheInviteMenu() {
+        Member alex = service.createHome("Family", "Alex");
+        String code = alex.getHomeCode();
+        service.joinHome(code, "Sam");
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+
+        assertTrue($(Span.class).all().stream()
+                .noneMatch(s -> s.getClassNames().contains("code-chip") && usable(s)),
+                "the inline code row retires once the family has company");
+        MenuBar invite = $(MenuBar.class).all().stream().filter(this::usable)
+                .findFirst().orElseThrow(() -> new AssertionError("No invite menu"));
+        var items = invite.getItems().get(0).getSubMenu().getItems();
+        assertEquals(3, items.size(), "code, copy link, share");
+        assertTrue(items.get(0).getElement().getTextRecursively().contains(code),
+                "the code itself is the first item");
+    }
+
+    @Test
+    void lastWeeksChoreMaster_isBadgedInTheHeader() {
+        Member alex = service.createHome("Champs", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        var done = service.complete(service.tasksOf(code).get(0).getId(), sam.getId());
+        Completion c = completions.findById(done.completionId()).orElseThrow();
+        c.setDoneAt(java.time.LocalDate.now()
+                .with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+                .minusWeeks(1).plusDays(2).atTime(12, 0)
+                .atZone(java.time.ZoneId.systemDefault()).toInstant());
+        completions.save(c);
+
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+
+        assertTrue($(Span.class).all().stream()
+                .anyMatch(s -> s.getClassNames().contains("chore-master")
+                        && s.getText().contains("Sam") && usable(s)),
+                "last week's top member wears the 🥇 badge");
+    }
+
+    // ---- Done today list -------------------------------------------------------
+
+    @Test
+    void doneTodayList_appearsCollapsed_andNamesTheDoer() {
+        Member alex = service.createHome("Feed", "Alex");
+        String code = alex.getHomeCode();
+        Home home = service.findHome(code).orElseThrow();
+        home.setConfirmCompletion(false);
+        service.saveHome(home);
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        assertTrue($(Details.class).all().stream()
+                .noneMatch(d -> d.getClassNames().contains("done-today") && usable(d)),
+                "an empty day earns no section");
+
+        clickChoreCard(0);
+
+        Details section = $(Details.class).all().stream()
+                .filter(d -> d.getClassNames().contains("done-today") && usable(d))
+                .findFirst().orElseThrow(() -> new AssertionError("No Done today section"));
+        assertEquals("Done today (1)", section.getSummaryText());
+        assertFalse(section.isOpened(), "collapsed by default");
+        assertTrue(section.getElement().getTextRecursively().contains("Alex — "),
+                "the row names who did what");
+    }
+
+    // ---- Escalating celebrations ------------------------------------------------
+
+    @Test
+    void thirdChoreOfTheDay_earnsTheOnFireDialog() {
+        Member alex = service.createHome("Streaky", "Alex");
+        String code = alex.getHomeCode();
+        Home home = service.findHome(code).orElseThrow();
+        home.setConfirmCompletion(false);
+        service.saveHome(home);
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+
+        // The same chore each time: a first-ever completion celebrates "New chore
+        // unlocked!" (that branch deliberately outranks the daily tiers), so the tiers
+        // show on repeat completions — allowed up to MAX_IN_A_ROW of the same chore.
+        clickChoreCard(0);
+        assertTrue(celebrateTitles().contains("New chore unlocked!"), "first time this chore");
+        clickButton("Done 🎉");
+        clickChoreCard(0);
+        assertTrue(celebrateTitles().contains("Two down! 💪"), "second chore steps it up");
+        clickButton("Done 🎉");
+        clickChoreCard(0);
+        assertTrue(celebrateTitles().contains("On fire! 🔥"), "third chore: on fire");
+    }
+
+    private List<String> celebrateTitles() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("celebrate-title"))
+                .map(d -> d.getElement().getTextRecursively())
+                .toList();
+    }
+
+    // ---- Avatars -----------------------------------------------------------------
+
+    @Test
+    void chosenAvatar_rendersOnTheLeaderboardChip() {
+        Member alex = service.createHome("Faces", "Alex");
+        service.setAvatar(alex.getId(), "panda");
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+
+        assertTrue($(Image.class).all().stream()
+                .anyMatch(i -> i.getSrc().contains("avatars/panda.png") && usable(i)),
+                "the picked animal shows in the member's dot");
     }
 
     // ---- Frequency presets --------------------------------------------------

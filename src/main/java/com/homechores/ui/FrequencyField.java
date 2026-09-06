@@ -56,6 +56,7 @@ class FrequencyField extends VerticalLayout {
         custom.setLabel(T.tr("admin.chore.interval"));
         custom.setHelperText(T.tr("admin.chore.interval.helper"));
         custom.setMin(1);
+        custom.setMax(com.homechores.domain.InputLimits.MAX_DAYS);
         custom.setStepButtonsVisible(true);
         custom.setWidthFull();
         custom.setVisible(false);

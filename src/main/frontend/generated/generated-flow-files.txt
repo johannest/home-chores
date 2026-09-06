@@ -3,8 +3,6 @@ app-shell-imports.js
 css.generated.d.ts
 flow/Flow.tsx
 flow/ReactAdapter.tsx
-flow/chunks/chunk-2d841c7abca686246cdf3fc71e866169ee4f9ad76a4c4eb2bbf0669424a4f712.js
-flow/chunks/chunk-f6e6ef5be658e62786552aa73729c6c2f475ba3b83ae1cbf3ec9719b6d8ba51e.js
 flow/generated-flow-imports.d.ts
 flow/generated-flow-imports.js
 flow/generated-flow-webcomponent-imports.js
@@ -25,6 +23,7 @@ jar-resources/FlowBootstrap.d.ts
 jar-resources/FlowBootstrap.js
 jar-resources/FlowClient.d.ts
 jar-resources/FlowClient.js
+jar-resources/FlowWebPush.js
 jar-resources/Fullscreen.d.ts
 jar-resources/Fullscreen.js
 jar-resources/Fullscreen.js.map
@@ -132,3 +131,4 @@ routes.tsx
 vaadin-featureflags.js
 vaadin-react.tsx
 vaadin.ts
+vite-devmode.ts

@@ -1,6 +1,7 @@
 package com.homechores.ui;
 
 import com.homechores.domain.Home;
+import com.homechores.domain.InputLimits;
 import com.homechores.domain.Member;
 import com.homechores.domain.RejoinRequest;
 import com.homechores.domain.RejoinStatus;
@@ -11,6 +12,7 @@ import com.vaadin.flow.component.AttachEvent;
 import com.vaadin.flow.component.Key;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
+import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.Div;
@@ -48,6 +50,19 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
      *  creates one home and joins a handful of times; these only bite scripted abuse. */
     private static final int MAX_CREATES_PER_HOUR = 10;
     private static final int MAX_JOINS_PER_HOUR = 20;
+
+    /**
+     * Nickname guesses allowed per hour on the sign-back-in dialog.
+     *
+     * <p>§4.1.1 promises that a home code alone never reveals the family's names, and the
+     * dialog is the one place that promise can be tested from outside: it answers "is
+     * anyone here called this?" one guess at a time. Where the home has the rejoin gate
+     * off, a correct guess is not just an answer but a sign-in. Unbounded, that is a name
+     * oracle and a login by brute force; at this budget a family can fumble their own
+     * spelling all evening and an attacker gets nowhere.
+     */
+    private static final int MAX_REJOIN_LOOKUPS_PER_HOUR = 20;
+
     private static final java.time.Duration RATE_WINDOW = java.time.Duration.ofHours(1);
 
     /** Join-form code, kept as a field so a ?join= link can prefill it in beforeEnter. */
@@ -73,8 +88,9 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
 
         card.addClassName("auth-card");
 
-        Div langRow = new Div(new LanguageSwitcher());
-        langRow.getStyle().set("display", "flex").set("justify-content", "flex-end");
+        Div langRow = new Div(new ThemeSwitcher(), new LanguageSwitcher());
+        langRow.getStyle().set("display", "flex").set("justify-content", "flex-end")
+                .set("gap", "var(--lumo-space-s)");
 
         H1 title = new H1("⚡ FlashChores");
         title.addClassName("brand-title");
@@ -109,7 +125,9 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
                 .set("text-align", "center").set("font-size", "0.85rem");
         RouterLink privacy = new RouterLink(T.tr("landing.footer.privacy"), PrivacyView.class);
         privacy.getStyle().set("color", "var(--lumo-secondary-text-color)");
-        footer.add(privacy,
+        RouterLink terms = new RouterLink(T.tr("landing.footer.terms"), TermsView.class);
+        terms.getStyle().set("color", "var(--lumo-secondary-text-color)");
+        footer.add(privacy, terms,
                 footerLink("https://vaadin.com", VaadinIcon.VAADIN_H,
                         T.tr("landing.footer.vaadin")),
                 footerLink("https://github.com/johannest/home-chores", VaadinIcon.CODE,
@@ -132,29 +150,34 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
     private Div buildCreateForm() {
         ValueSignal<String> homeName = new ValueSignal<>("");
         ValueSignal<String> yourName = new ValueSignal<>("");
+        ValueSignal<Boolean> agreed = new ValueSignal<>(false);
 
         Paragraph adultNote = new Paragraph(T.tr("landing.adultNote"));
         adultNote.addClassName("feedback-hint");
 
         TextField homeNameField = new TextField(T.tr("landing.homeName"));
         homeNameField.setPlaceholder(T.tr("landing.homeName.placeholder"));
+        homeNameField.setMaxLength(InputLimits.HOME_NAME);
         homeNameField.setWidthFull();
         homeNameField.bindValue(homeName, homeName::set);
 
         TextField yourNameField = new TextField(T.tr("landing.yourName"));
         yourNameField.setPlaceholder(T.tr("landing.yourName.placeholder"));
+        yourNameField.setMaxLength(InputLimits.MEMBER_NAME);
         yourNameField.setWidthFull();
         yourNameField.setHelperText(T.tr("landing.nicknameTip"));
         yourNameField.bindValue(yourName, yourName::set);
+
+        Checkbox agree = termsCheckbox(agreed);
 
         Button create = new Button(T.tr("landing.create"));
         create.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_LARGE);
         create.setWidthFull();
         create.bindEnabled(Signal.computed(() ->
-                !homeName.get().isBlank() && !yourName.get().isBlank()));
+                !homeName.get().isBlank() && !yourName.get().isBlank() && agreed.get()));
 
         Runnable submit = () -> {
-            if (homeName.peek().isBlank() || yourName.peek().isBlank()) {
+            if (homeName.peek().isBlank() || yourName.peek().isBlank() || !agreed.peek()) {
                 return;
             }
             if (!rateLimiter.allow("create:" + clientKey(), MAX_CREATES_PER_HOUR, RATE_WINDOW)) {
@@ -169,7 +192,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         create.addClickListener(e -> submit.run());
         yourNameField.addKeyPressListener(Key.ENTER, e -> submit.run());
 
-        Div form = new Div(adultNote, homeNameField, yourNameField, create);
+        Div form = new Div(adultNote, homeNameField, yourNameField, agree, create);
         form.getStyle().set("display", "flex").set("flex-direction", "column")
                 .set("gap", "var(--lumo-space-m)").set("margin-top", "var(--lumo-space-m)");
         return form;
@@ -178,26 +201,31 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
     private Div buildJoinForm() {
         ValueSignal<String> code = joinCode;
         ValueSignal<String> yourName = new ValueSignal<>("");
+        ValueSignal<Boolean> agreed = new ValueSignal<>(false);
 
         TextField codeField = new TextField(T.tr("landing.homeCode"));
         codeField.setPlaceholder(T.tr("landing.homeCode.placeholder"));
+        codeField.setMaxLength(10);
         codeField.setWidthFull();
         codeField.bindValue(code, code::set);
 
         TextField yourNameField = new TextField(T.tr("landing.yourName"));
         yourNameField.setPlaceholder(T.tr("landing.joinName.placeholder"));
+        yourNameField.setMaxLength(InputLimits.MEMBER_NAME);
         yourNameField.setWidthFull();
         yourNameField.setHelperText(T.tr("landing.joinNicknameTip"));
         yourNameField.bindValue(yourName, yourName::set);
+
+        Checkbox agree = termsCheckbox(agreed);
 
         Button join = new Button(T.tr("landing.join"));
         join.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_LARGE);
         join.setWidthFull();
         join.bindEnabled(Signal.computed(() ->
-                !code.get().isBlank() && !yourName.get().isBlank()));
+                !code.get().isBlank() && !yourName.get().isBlank() && agreed.get()));
 
         Runnable submit = () -> {
-            if (code.peek().isBlank() || yourName.peek().isBlank()) {
+            if (code.peek().isBlank() || yourName.peek().isBlank() || !agreed.peek()) {
                 return;
             }
             if (!rateLimiter.allow("join:" + clientKey(), MAX_JOINS_PER_HOUR, RATE_WINDOW)) {
@@ -230,7 +258,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         Paragraph rejoinHint = new Paragraph(T.tr("landing.rejoin.hint"));
         rejoinHint.addClassName("feedback-hint");
 
-        Div form = new Div(codeField, yourNameField, join, rejoinHint, rejoin);
+        Div form = new Div(codeField, yourNameField, agree, join, rejoinHint, rejoin);
         form.getStyle().set("display", "flex").set("flex-direction", "column")
                 .set("gap", "var(--lumo-space-m)").set("margin-top", "var(--lumo-space-m)");
         return form;
@@ -247,6 +275,9 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
     private void openRejoinDialog(String rawCode) {
         if (rawCode == null || rawCode.isBlank()) {
             warn(T.tr("landing.rejoin.needCode"));
+            return;
+        }
+        if (!rejoinLookupAllowed()) {
             return;
         }
         Optional<Home> home = service.findHome(rawCode);
@@ -266,6 +297,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         intro.addClassName("sub");
 
         TextField name = new TextField(T.tr("landing.rejoin.name"));
+        name.setMaxLength(InputLimits.MEMBER_NAME);
         name.setWidthFull();
         name.setHelperText(T.tr("landing.rejoin.name.helper"));
 
@@ -277,6 +309,9 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         pin.setVisible(h.isApproveRejoin());
 
         Button me = new Button(T.tr("landing.rejoin.thisIsMe"), e -> {
+            if (!rejoinLookupAllowed()) {
+                return;
+            }
             Optional<Member> m = service.findMemberByName(h.getCode(), name.getValue());
             if (m.isEmpty()) {
                 name.setInvalid(true);
@@ -489,6 +524,20 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         DeviceIdentity.remember(memberId, homeCode, secret);
     }
 
+    /**
+     * The consent gate for creating or joining a home: unchecked by default, with the
+     * user agreement itself one tap away. The checked state feeds the given signal, which
+     * the submit button's enabled-state is computed from.
+     */
+    private Checkbox termsCheckbox(ValueSignal<Boolean> agreed) {
+        Checkbox agree = new Checkbox();
+        Span label = new Span(new Span(T.tr("landing.agree.prefix") + " "),
+                new RouterLink(T.tr("landing.agree.link"), TermsView.class));
+        agree.setLabelComponent(label);
+        agree.addValueChangeListener(e -> agreed.set(Boolean.TRUE.equals(e.getValue())));
+        return agree;
+    }
+
     /** A small footer row: icon + text linking to an external site (new tab). */
     private Anchor footerLink(String href, VaadinIcon icon, String text) {
         Icon i = icon.create();
@@ -506,11 +555,30 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
      * The rate-limit bucket for this visitor: the client IP. With
      * {@code forward-headers-strategy=native} behind the reverse proxy, {@code getRemoteAddr}
      * is the real client address; falls back to a shared bucket if it can't be read.
+     *
+     * <p>Behind Cloudflare this only stays true if the reverse proxy restores the real IP
+     * from {@code CF-Connecting-IP} (nginx {@code real_ip} with Cloudflare's ranges in
+     * {@code set_real_ip_from} — see README, "Behind Cloudflare"). Without that, every
+     * visitor shares a handful of CF edge addresses and this limiter throttles them all
+     * as one client.
      */
     private static String clientKey() {
         var request = com.vaadin.flow.server.VaadinService.getCurrentRequest();
         String ip = request == null ? null : request.getRemoteAddr();
         return ip == null || ip.isBlank() ? "unknown" : ip;
+    }
+
+    /**
+     * Spends one from this visitor's sign-back-in budget, warning them when it is gone.
+     * Both the code probe and each nickname guess draw on it: they are the same question
+     * asked about the same home, and the answer to either is what must not be enumerable.
+     */
+    private boolean rejoinLookupAllowed() {
+        if (rateLimiter.allow("rejoin:" + clientKey(), MAX_REJOIN_LOOKUPS_PER_HOUR, RATE_WINDOW)) {
+            return true;
+        }
+        warn(T.tr("landing.rateLimited"));
+        return false;
     }
 
     private void warn(String message) {

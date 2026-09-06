@@ -6,7 +6,9 @@ import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
 import com.homechores.service.HomeState;
+import com.homechores.service.PushReminderService;
 import com.homechores.service.StatsService;
+import com.homechores.service.WebPushSender;
 import com.vaadin.flow.component.AttachEvent;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.UI;
@@ -14,10 +16,14 @@ import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.dependency.JsModule;
 import com.vaadin.flow.component.dialog.Dialog;
+import com.vaadin.flow.component.contextmenu.MenuItem;
+import com.vaadin.flow.component.contextmenu.SubMenu;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H1;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
+import com.vaadin.flow.component.menubar.MenuBar;
+import com.vaadin.flow.component.menubar.MenuBarVariant;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.FlexComponent;
@@ -46,6 +52,8 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     private final BackupService backupService;
     private final CreditService creditService;
     private final HomeState homeState;
+    private final PushReminderService reminderService;
+    private final WebPushSender pushSender;
 
     private String homeCode;
     private Long memberId;
@@ -58,12 +66,15 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     private PanelTab selected = PanelTab.CHORES;
 
     public HomeView(ChoreService service, StatsService statsService, BackupService backupService,
-                    CreditService creditService, HomeState homeState) {
+                    CreditService creditService, HomeState homeState,
+                    PushReminderService reminderService, WebPushSender pushSender) {
         this.service = service;
         this.statsService = statsService;
         this.backupService = backupService;
         this.creditService = creditService;
         this.homeState = homeState;
+        this.reminderService = reminderService;
+        this.pushSender = pushSender;
         setPadding(false);
         setSpacing(false);
         setSizeFull();
@@ -163,24 +174,44 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         name.addClassName("home-title");
         name.setTitle(home.getName()); // the full name is still reachable when truncated
 
-        Span code = new Span(home.getCode());
-        code.addClassName("code-chip");
-        Button copyLink = headerButton(T.tr("home.copyLink"), VaadinIcon.LINK,
-                ButtonVariant.LUMO_CONTRAST);
-        copyLink.addClickListener(e -> copyJoinLink(home));
-        Button share = headerButton(T.tr("home.share"), VaadinIcon.SHARE,
-                ButtonVariant.LUMO_CONTRAST);
-        share.addClickListener(e -> shareJoinLink(home));
-        HorizontalLayout codeRow = new HorizontalLayout(code, copyLink, share);
-        codeRow.addClassName("header-code");
-        codeRow.setAlignItems(FlexComponent.Alignment.CENTER);
-        Div left = new Div(name, codeRow);
+        // Once the family is actually a family, the invite plumbing (code, copy, share)
+        // retires into a compact menu in the right corner. A solo home keeps it front and
+        // center — inviting is the one thing that board still needs to make happen.
+        boolean solo = service.memberCount(homeCode) <= 1;
+
+        Div left = new Div(name);
         left.addClassName("header-id");
+        if (solo) {
+            Span code = new Span(home.getCode());
+            code.addClassName("code-chip");
+            Button copyLink = headerButton(T.tr("home.copyLink"), VaadinIcon.LINK,
+                    ButtonVariant.LUMO_CONTRAST);
+            copyLink.addClickListener(e -> copyJoinLink(home));
+            Button share = headerButton(T.tr("home.share"), VaadinIcon.SHARE,
+                    ButtonVariant.LUMO_CONTRAST);
+            share.addClickListener(e -> shareJoinLink(home));
+            HorizontalLayout codeRow = new HorizontalLayout(code, copyLink, share);
+            codeRow.addClassName("header-code");
+            codeRow.setAlignItems(FlexComponent.Alignment.CENTER);
+            left.add(codeRow);
+        }
+        statsService.lastWeekChoreMaster(homeCode).ifPresent(cm -> {
+            Span master = new Span(T.tr("home.choreMaster", cm.member().getName()));
+            master.addClassName("chore-master");
+            left.add(master);
+        });
 
         HorizontalLayout right = new HorizontalLayout();
         right.addClassName("header-actions");
         right.setAlignItems(FlexComponent.Alignment.CENTER);
-        right.add(new LanguageSwitcher());
+        right.add(new ThemeSwitcher(), new LanguageSwitcher());
+        if (pushSender.isEnabled()) {
+            Button remind = headerButton(T.tr("reminder.button"), VaadinIcon.BELL,
+                    ButtonVariant.LUMO_CONTRAST);
+            remind.addClickListener(e ->
+                    new ReminderDialog(reminderService, pushSender, memberId, homeCode).open());
+            right.add(remind);
+        }
         if (admin) {
             Span badge = new Span(T.tr("home.adminBadge"));
             badge.addClassName("admin-badge");
@@ -201,6 +232,9 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
             getUI().ifPresent(ui -> ui.navigate(LandingView.class));
         });
         right.add(leave);
+        if (!solo) {
+            right.add(inviteMenu(home));
+        }
 
         HorizontalLayout header = new HorizontalLayout(left, right);
         header.addClassName("home-header");
@@ -298,6 +332,33 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     }
 
     /** Copies a ready-to-open join link (origin + ?join=CODE) to the clipboard. */
+    /**
+     * The collapsed invite plumbing for a home that already has company: the join code
+     * (tap to copy it bare), Copy link, and Share, behind one share-glyph button. A share
+     * icon rather than a generic ⋮ — everything inside is about inviting.
+     */
+    private MenuBar inviteMenu(Home home) {
+        MenuBar invite = new MenuBar();
+        invite.addThemeVariants(MenuBarVariant.LUMO_SMALL);
+        invite.addClassName("invite-menu");
+        MenuItem root = invite.addItem(VaadinIcon.SHARE.create());
+        root.setAriaLabel(T.tr("home.invite"));
+        SubMenu sub = root.getSubMenu();
+        Span codeChip = new Span(home.getCode());
+        codeChip.addClassName("code-menu-chip");
+        sub.addItem(codeChip, e -> copyCode(home));
+        sub.addItem(T.tr("home.copyLink"), e -> copyJoinLink(home));
+        sub.addItem(T.tr("home.share"), e -> shareJoinLink(home));
+        return invite;
+    }
+
+    /** Copies the bare home code — what you dictate to a family member across the room. */
+    private void copyCode(Home home) {
+        UI.getCurrent().getPage().executeJs(
+                "if(navigator.clipboard){navigator.clipboard.writeText($0);}", home.getCode());
+        Notification.show(T.tr("home.code.copied"), 2500, Notification.Position.TOP_CENTER);
+    }
+
     private void copyJoinLink(Home home) {
         UI.getCurrent().getPage().executeJs(
                 "const url=location.origin+'/?join='+$0;"
@@ -341,6 +402,9 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
             if (tz != null && !tz.isBlank()) {
                 try {
                     SessionContext.setTimeZone(java.time.ZoneId.of(tz));
+                    // Persist it too: the reminder sweep runs with no session to ask,
+                    // and "remind me at 19:00" means 19:00 on this member's own clock.
+                    reminderService.updateZone(memberId, tz);
                     buildChrome();
                 } catch (Exception ignored) {
                     // unknown zone id — keep the server default

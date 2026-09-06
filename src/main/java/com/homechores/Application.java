@@ -2,6 +2,7 @@ package com.homechores;
 
 import com.vaadin.flow.component.dependency.StyleSheet;
 import com.vaadin.flow.component.page.AppShellConfigurator;
+import com.vaadin.flow.component.page.ColorScheme;
 import com.vaadin.flow.component.page.Push;
 import com.vaadin.flow.server.PWA;
 import com.vaadin.flow.shared.ui.Transport;
@@ -19,10 +20,16 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * <p>Vaadin 25 uses CSS-based theming: the Lumo theme and our custom stylesheet are
  * loaded explicitly with {@link StyleSheet} (the old {@code @Theme}/{@code theme.json}
  * mechanism is deprecated).
+ *
+ * <p>{@code @ColorScheme(SYSTEM)} bakes {@code color-scheme: light dark} into the served
+ * page, so the app follows the OS theme with no flash and no JS. Custom colors in
+ * styles.css use the CSS {@code light-dark()} function; a per-device override
+ * (light/dark/auto) is applied by the inline script in index.html and the ThemeSwitcher.
  */
 @SpringBootApplication
 @EnableScheduling // for the retention sweep in HomeCleanupService (off unless configured)
 @Push(transport = Transport.LONG_POLLING)
+@ColorScheme(ColorScheme.Value.SYSTEM)
 @StyleSheet(Lumo.STYLESHEET)
 @StyleSheet("styles.css")
 @PWA(name = "FlashChores", shortName = "FlashChores",
