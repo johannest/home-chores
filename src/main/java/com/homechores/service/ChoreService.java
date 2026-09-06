@@ -1533,30 +1533,83 @@ public class ChoreService {
      * Logs help that no chore covers: the member writes what they did and an admin accepts
      * or declines it (see {@link #approve(Long, Long, int)} / {@link #reject}).
      *
-     * <p>Always PENDING, even in a home that doesn't require approval for chores. The text
-     * is freeform and there is no chore behind it, so somebody has to read it before it
-     * counts towards anyone's totals.
+     * <p>Always PENDING for a member, even in a home that doesn't require approval for
+     * chores: the text is freeform and there is no chore behind it, so somebody has to read
+     * it before it counts towards anyone's totals. An admin's own help is the exception —
+     * see {@link #logOtherHelpAsAdmin}.
      *
      * @return empty if the home has the feature switched off or the description is blank
      */
     @Transactional
     public Optional<Completion> logOtherHelp(String homeCode, Long memberId, String description) {
         Home home = homes.findById(normalizeCode(homeCode)).orElseThrow();
-        if (!home.isAllowOtherHelp()) {
-            return Optional.empty();
-        }
-        String text = description == null ? "" : description.trim();
+        Optional<String> text = helpText(home, description);
         if (text.isEmpty()) {
             return Optional.empty();
         }
-        if (text.length() > MAX_HELP_LENGTH) {
-            text = text.substring(0, MAX_HELP_LENGTH);
-        }
         Completion saved = completions.save(
-                Completion.otherHelp(home.getCode(), memberId, text));
+                Completion.otherHelp(home.getCode(), memberId, text.get()));
         touch(home);
         homeState.bump(home.getCode());
         return Optional.of(saved);
+    }
+
+    /**
+     * An admin logging help they did themselves.
+     *
+     * <p>Other help waits because somebody has to read the free text before it counts
+     * (§4.3.2). When the admin is the one writing it, they have — so it is recorded
+     * {@code APPROVED} on the spot with the admin as reviewer, exactly as {@link #completeFor}
+     * treats an admin logging a chore: their word is the approval, and the history keeps their
+     * name. The reward is named up front, since accepting is where a member's help would
+     * otherwise get one. Written once and bumped once, rather than saved PENDING and then
+     * approved: {@link HomeState#bump} does not coalesce, so that would redraw every open
+     * board twice for one tap.
+     *
+     * <p>Refused (empty) unless {@code adminId} really is an admin of that home. The board
+     * only offers this to admins, but the service holds the line — a member must not be able
+     * to skip the queue by reaching the method.
+     *
+     * @return the celebration outcome, or empty if refused, switched off, or blank
+     */
+    @Transactional
+    public Optional<CompleteOutcome> logOtherHelpAsAdmin(String homeCode, Long adminId,
+                                                          String description, int credits) {
+        Home home = homes.findById(normalizeCode(homeCode)).orElseThrow();
+        Member admin = members.findById(adminId).orElseThrow();
+        if (!admin.isAdmin() || !admin.getHomeCode().equals(home.getCode())) {
+            return Optional.empty();
+        }
+        Optional<String> text = helpText(home, description);
+        if (text.isEmpty()) {
+            return Optional.empty();
+        }
+        Completion entry = Completion.otherHelp(home.getCode(), adminId, text.get());
+        entry.setStatus(CompletionStatus.APPROVED);
+        entry.setReviewedByMemberId(adminId);
+        entry.setReviewedAt(Instant.now());
+        Completion saved = completions.save(entry);
+        touch(home);
+        homeState.bump(home.getCode());
+
+        CreditService.Award award = creditService.onApprovedHelp(
+                home.getCode(), adminId, saved.getId(), credits, saved.getNote());
+        long total = completions.countByMemberIdAndStatus(adminId, CompletionStatus.APPROVED);
+        return Optional.of(CompleteOutcome.done(null, admin, total, false, milestoneFor(total), 0,
+                saved.getId(), award, doneTodayCount(adminId)));
+    }
+
+    /**
+     * The description as it will be stored, or empty when the home has help switched off or
+     * there is nothing to store — the one rule both ways of logging help share. Clipped with
+     * {@link InputLimits#clip} so a cap landing mid-emoji drops the emoji, not half of it.
+     */
+    private Optional<String> helpText(Home home, String description) {
+        if (!home.isAllowOtherHelp()) {
+            return Optional.empty();
+        }
+        String text = InputLimits.clip(description, MAX_HELP_LENGTH);
+        return text == null || text.isEmpty() ? Optional.empty() : Optional.of(text);
     }
 
     /** Other-help entries waiting for a decision, newest first (the admin's list). */

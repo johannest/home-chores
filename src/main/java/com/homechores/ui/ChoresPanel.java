@@ -29,6 +29,7 @@ import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.FlexComponent;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
+import com.vaadin.flow.component.textfield.IntegerField;
 import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.data.value.ValueChangeMode;
@@ -304,7 +305,7 @@ class ChoresPanel extends VerticalLayout {
         List<Component> extras = new ArrayList<>();
         if (filter == Filter.ALL || filter == Filter.TODAY) {
             if (home == null || home.isAllowOtherHelp()) {
-                extras.add(otherHelpCard());
+                extras.add(otherHelpCard(admin));
             }
             if (admin) {
                 extras.add(addCard());
@@ -558,7 +559,7 @@ class ChoresPanel extends VerticalLayout {
      * It sits with the chores rather than in a menu: a child who just carried the shopping
      * in won't go looking for a form.
      */
-    private Div otherHelpCard() {
+    private Div otherHelpCard(boolean admin) {
         Div card = new Div();
         card.addClassNames("task-card", "help-card");
         Div emoji = new Div();
@@ -575,17 +576,22 @@ class ChoresPanel extends VerticalLayout {
             badge.addClassName("streak");
             card.add(badge);
         }
-        card.addClickListener(e -> openOtherHelpDialog());
+        card.addClickListener(e -> openOtherHelpDialog(admin));
         return card;
     }
 
-    /** Describe-what-you-did, then it goes to an admin to accept or decline. */
-    private void openOtherHelpDialog() {
+    /**
+     * Describe-what-you-did. For a member it goes to an admin to accept or decline. An admin's
+     * own entry counts at once — their reading it is the approval
+     * ({@code ChoreService.logOtherHelpAsAdmin}) — so they name the reward here, in the same
+     * field they would otherwise see when accepting somebody else's.
+     */
+    private void openOtherHelpDialog(boolean admin) {
         Dialog dialog = new Dialog();
         dialog.setHeaderTitle(T.tr("board.otherHelp.title"));
         dialog.setWidth("min(90vw, 24em)");
 
-        Span intro = new Span(T.tr("board.otherHelp.intro"));
+        Span intro = new Span(T.tr(admin ? "board.otherHelp.introAdmin" : "board.otherHelp.intro"));
         intro.addClassName("sub");
 
         TextArea what = new TextArea(T.tr("board.otherHelp.what"));
@@ -593,13 +599,34 @@ class ChoresPanel extends VerticalLayout {
         what.setWidthFull();
         what.setMaxLength(ChoreService.MAX_HELP_LENGTH);
         what.setValueChangeMode(ValueChangeMode.EAGER);
-        what.setHelperText(T.tr("board.otherHelp.helper"));
+        what.setHelperText(T.tr(admin ? "board.otherHelp.helperAdmin" : "board.otherHelp.helper"));
         what.focus();
 
-        Button send = new Button(T.tr("board.otherHelp.send"), e -> {
+        IntegerField credits = new IntegerField(T.tr("admin.help.accept.credits"));
+        credits.setMin(0);
+        credits.setMax(InputLimits.MAX_CREDITS);
+        credits.setValue(0);
+        credits.setStepButtonsVisible(true);
+        credits.setWidthFull();
+        credits.setHelperText(T.tr("admin.help.accept.credits.helper"));
+        credits.setVisible(admin);
+
+        Button send = new Button(T.tr(admin ? "board.otherHelp.log" : "board.otherHelp.send"), e -> {
             if (what.getValue() == null || what.getValue().isBlank()) {
                 what.setInvalid(true);
                 what.setErrorMessage(T.tr("board.otherHelp.required"));
+                return;
+            }
+            if (admin) {
+                int amount = credits.getValue() == null ? 0 : Math.max(0, credits.getValue());
+                var outcome = service.logOtherHelpAsAdmin(homeCode, memberId, what.getValue(), amount);
+                dialog.close();
+                outcome.ifPresentOrElse(
+                        o -> Celebrations.afterComplete(service, o, this::undoLast),
+                        () -> Notification.show(T.tr("board.otherHelp.off"),
+                                4000, Notification.Position.TOP_CENTER)
+                                .addThemeVariants(NotificationVariant.LUMO_CONTRAST));
+                refresh();
                 return;
             }
             boolean logged = service.logOtherHelp(homeCode, memberId, what.getValue()).isPresent();
@@ -613,7 +640,7 @@ class ChoresPanel extends VerticalLayout {
         });
         send.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
 
-        VerticalLayout body = new VerticalLayout(intro, what);
+        VerticalLayout body = new VerticalLayout(intro, what, credits);
         body.setPadding(false);
         body.setSpacing(false);
         dialog.add(body);

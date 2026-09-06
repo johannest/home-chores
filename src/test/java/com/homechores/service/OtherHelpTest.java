@@ -2,6 +2,7 @@ package com.homechores.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -203,5 +204,83 @@ class OtherHelpTest {
         assertEquals("Painted the shed", waiting.get(0).getNote());
         assertEquals(3, credits.balance(restored.getId()), "its credits came back too");
         assertEquals(pending.getHomeCode(), code);
+    }
+
+    // ---- US-55: an admin's own help ---------------------------------------------
+
+    /**
+     * Other help waits so that somebody reads the free text before it counts. When the admin
+     * wrote it, they have — the reasoning that already records {@code completeFor} APPROVED.
+     */
+    @Test
+    void anAdminsOwnHelpCountsAtOnce_withThemAsReviewer_andTheNamedReward() {
+        Member alex = service.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+
+        var outcome = service.logOtherHelpAsAdmin(code, alex.getId(), "Fixed the leaking tap", 4)
+                .orElseThrow();
+
+        assertTrue(outcome.allowed());
+        assertFalse(outcome.pending(), "no queue for the admin's own words");
+        assertNull(outcome.task(), "still other help, not a chore");
+        assertEquals(4, outcome.creditsAwarded());
+        assertEquals(1, outcome.doneTodayAfter());
+
+        Completion saved = service.recentCompletions(code, 1).get(0);
+        assertEquals(CompletionStatus.APPROVED, saved.getStatus());
+        assertEquals(alex.getId(), saved.getReviewedByMemberId(),
+                "the history keeps the admin's name, as it does for completeFor");
+        assertNotNull(saved.getReviewedAt());
+        assertEquals("Fixed the leaking tap", saved.getNote());
+        assertEquals(1, service.completionCount(alex.getId()));
+        assertEquals(1, service.doneToday(alex.getId()), "counts towards the daily target");
+        assertEquals(4, credits.balance(alex.getId()));
+        assertTrue(service.pendingOtherHelp(code).isEmpty(), "nothing for anyone to accept");
+        assertEquals(0, service.pendingCount(code));
+    }
+
+    /** The board only offers the admin dialog to admins; the service must not rely on that. */
+    @Test
+    void theAdminPathIsRefusedForAMember() {
+        Member alex = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(alex.getHomeCode(), "Sam").orElseThrow();
+
+        assertTrue(service.logOtherHelpAsAdmin(alex.getHomeCode(), sam.getId(),
+                "Skipped the queue", 3).isEmpty());
+
+        assertEquals(0, service.completionCount(sam.getId()));
+        assertEquals(0, credits.balance(sam.getId()));
+        assertTrue(service.recentCompletions(alex.getHomeCode(), 5).isEmpty(),
+                "nothing recorded at all — not even as pending");
+    }
+
+    /** An admin of one home is nobody in another. */
+    @Test
+    void theAdminPathIsRefusedForAnotherHomesCode() {
+        Member alex = service.createHome("Nest", "Alex");
+        Member robin = service.createHome("Elsewhere", "Robin");
+
+        assertTrue(service.logOtherHelpAsAdmin(robin.getHomeCode(), alex.getId(),
+                "Wrong house", 0).isEmpty());
+
+        assertTrue(service.recentCompletions(robin.getHomeCode(), 5).isEmpty());
+        assertEquals(0, service.completionCount(alex.getId()));
+    }
+
+    /** The home switch and the blank-text rule bind the admin exactly as they bind a member. */
+    @Test
+    void theAdminPathRespectsTheHomeSwitchAndBlankText() {
+        Member alex = service.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+
+        assertTrue(service.logOtherHelpAsAdmin(code, alex.getId(), "   ", 2).isEmpty());
+
+        Home home = service.findHome(code).orElseThrow();
+        home.setAllowOtherHelp(false);
+        service.saveHome(home);
+        assertTrue(service.logOtherHelpAsAdmin(code, alex.getId(), "Real help", 2).isEmpty());
+
+        assertEquals(0, service.completionCount(alex.getId()));
+        assertEquals(0, credits.balance(alex.getId()));
     }
 }

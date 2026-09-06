@@ -1096,4 +1096,21 @@ class HomeUiTest extends SpringUIUnitTest {
         assertFalse(adminSection("Pending approvals").isOpened(),
                 "folding a card away is also a choice worth remembering");
     }
+
+    /** US-55: an admin's own help needs nobody's acceptance — it counts and celebrates at once. */
+    @Test
+    void admin_logsOtherHelp_andItCountsAtOnce() {
+        Member admin = service.createHome("Helpful", "Alex");
+        String code = admin.getHomeCode();
+        SessionContext.signIn(admin.getId(), code);
+        navigate(HomeView.class);
+
+        clickHelpCard();
+        setTextArea("What did you do?", "Fixed the leaking tap");
+        clickButton("Log it");
+
+        assertEquals(1, service.completionCount(admin.getId()), "counted without a review step");
+        assertTrue(service.pendingOtherHelp(code).isEmpty(), "nothing waits in the admin queue");
+        assertFalse(celebrateTitles().isEmpty(), "and it is celebrated like a chore");
+    }
 }

@@ -49,6 +49,7 @@ Terms in **bold** map to concepts in the code.
 | Snooze a chore ("remind me later" — a one-shot push about that chore) | ✅ | ✅ |
 | Choose colour scheme and palette (per device) | ✅ | ✅ |
 | Log **other help** the board has no card for | ✅ | ✅ |
+| Log own other help so it counts at once, naming its reward | — | ✅ |
 | Accept / decline other help, and set its reward | — | ✅ |
 | Turn accepted other help into a new chore | — | ✅ |
 | Copy/share the home code and join link | ✅ | ✅ |
@@ -280,6 +281,11 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
 - **US-46 Switch other help off (admin).** As an admin who doesn't want free-text entries, I
   can turn the feature off for my home (`Home.allowOtherHelp`, default **on**); the card
   disappears from the board.
+- **US-55 My own other help counts at once (admin).** As an admin who did something the board
+  has no card for, I write it down like anyone else — but it counts immediately, with me as the
+  reviewer, and I name its 💎 reward in the same dialog. Other help waits so that somebody reads
+  the free text before it counts; when I wrote it, I have. This is US-47's reasoning applied to
+  US-43: my logging it *is* the approval. A member's entry still waits exactly as before.
 
 - **US-47 Log a chore for someone (admin).** As an admin, I can record a chore on another
   member's behalf — the child who has no phone of their own, or the one who did it and forgot
@@ -789,9 +795,17 @@ choose between tapping something they didn't do and getting nothing for it.
   recent list, undo, backup — instead of needing a parallel notion of "credit for something".
   Nullable `taskId` is why the aggregations compare `task.getId().equals(c.getTaskId())` and
   never the other way round.
-- **Always `PENDING`**, even when `requireApproval` is off: the text is freeform and there is
-  no chore behind it, so it counts for nobody until an admin has read it. `logOtherHelp`
-  returns empty when the home has the feature off or the text is blank.
+- **Always `PENDING` when a member logs it**, even when `requireApproval` is off: the text is
+  freeform and there is no chore behind it, so it counts for nobody until an admin has read
+  it. `logOtherHelp` returns empty when the home has the feature off or the text is blank.
+- **An admin's own help counts at once** (`logOtherHelpAsAdmin`, US-55). Recorded `APPROVED`
+  with the admin as `reviewedByMemberId` — the same shape as §4.3.3 — and the reward named in
+  the dialog, since acceptance is where a member's entry would get one. Written once and
+  bumped once rather than saved `PENDING` and then approved, because `HomeState.bump` does
+  not coalesce and two bumps redraw every open board twice. The service refuses a caller who
+  is not an admin of that home; the board only shows the admin variant of the dialog to
+  admins, but the rule lives in the service. The celebration dialog handles the task-less
+  outcome ("🙋 Other help") — until this, nothing ever celebrated one.
 - **Member's view**: a 🙋 card at the end of the board (dashed, so it doesn't read as a chore),
   a one-field dialog, and a "⏳ n waiting" badge for their own undecided entries. Their own
   entry is undoable from the board strip for `UNDO_WINDOW` like any completion.
@@ -997,7 +1011,9 @@ scales up, not the other way round.
   without promotion, wrong PIN, member from another home, approve/reject, token
   consumption, newest-device-wins, cancel, cleanup when a member is removed), and home
   deletion (every table wiped, other homes untouched, idempotent, code normalization,
-  freed code reusable), and other help (pending regardless of the approval setting, accept
+  freed code reusable), and other help (pending regardless of the approval setting when a member logs it; counted at
+  once with the admin as reviewer and the named credits awarded when an admin logs their own,
+  and that path refused for a non-admin, for another home's code, and when help is off; accept
   counts it and awards the named credits, decline leaves it uncounted, separate queues but one
   badge count, blank/switched-off records nothing, over-long text trimmed, member's own undo,
   stats counted apart from chores, backup round-trip keeping the note and the setting), and

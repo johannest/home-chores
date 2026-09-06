@@ -37,7 +37,10 @@ final class Celebrations {
      *               moment a mis-tap is noticed
      */
     static void afterComplete(ChoreService service, CompleteOutcome o, Runnable onUndo) {
-        String chore = o.task().getName();
+        // Other help has no chore behind it (task == null). Until now nothing celebrated such
+        // an outcome — accepting a member's help just toasts — but an admin logging their own
+        // help counts at once and deserves the same moment a chore gets.
+        String chore = o.task() != null ? o.task().getName() : T.tr("board.otherHelp");
         if (o.pending()) {
             showDialog(service, o, onUndo, "⏳", T.tr("celebrate.pending.title"),
                     T.tr("celebrate.pending.text", chore));
@@ -62,7 +65,8 @@ final class Celebrations {
                     T.tr("celebrate.second.text", chore, o.member().getName()));
         } else {
             fireConfetti("small");
-            showDialog(service, o, onUndo, o.task().getEmoji(), T.tr("celebrate.nice.title"),
+            showDialog(service, o, onUndo, o.task() != null ? o.task().getEmoji() : "🙋",
+                    T.tr("celebrate.nice.title"),
                     T.tr("celebrate.nice.text", chore, o.member().getName()));
         }
 
