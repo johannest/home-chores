@@ -183,6 +183,14 @@ public class ChoreReminderService {
     @Transactional
     public Instant schedule(Long memberId, Long taskId, Duration offset, Locale locale) {
         ChoreTask task = tasks.findById(taskId).orElseThrow();
+        Member member = members.findById(memberId).orElseThrow();
+        // A chore and a member from different homes never meet — the rule the group code
+        // already enforces (ChoreService.applyGroup) and completeFor states the same way.
+        // The UI only ever offers a member their own board, so this is the service holding
+        // the line rather than trusting that every future caller will.
+        if (!task.getHomeCode().equals(member.getHomeCode())) {
+            throw new IllegalArgumentException("Chore and member belong to different homes");
+        }
         Duration clamped = offset.compareTo(MIN_OFFSET) < 0 ? MIN_OFFSET
                 : offset.compareTo(MAX_OFFSET) > 0 ? MAX_OFFSET : offset;
         Instant dueAt = Instant.now().plus(clamped);
@@ -193,10 +201,8 @@ public class ChoreReminderService {
         reminders.save(r);
 
         if (locale != null) {
-            members.findById(memberId).ifPresent(m -> {
-                m.setReminderLocale(locale.getLanguage());
-                members.save(m);
-            });
+            member.setReminderLocale(locale.getLanguage());
+            members.save(member);
         }
         log.debug("Chore reminder for member {} on task {} at {}", memberId, taskId, dueAt);
         return dueAt;

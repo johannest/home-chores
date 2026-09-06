@@ -46,6 +46,8 @@ Terms in **bold** map to concepts in the code.
 |---|:--:|:--:|
 | Join a home, complete chores, give feedback | ✅ | ✅ |
 | Book a chore ("I'll do it") / cancel own booking | ✅ | ✅ |
+| Snooze a chore ("remind me later" — a one-shot push about that chore) | ✅ | ✅ |
+| Choose colour scheme and palette (per device) | ✅ | ✅ |
 | Log **other help** the board has no card for | ✅ | ✅ |
 | Accept / decline other help, and set its reward | — | ✅ |
 | Turn accepted other help into a new chore | — | ✅ |
@@ -54,6 +56,7 @@ Terms in **bold** map to concepts in the code.
 | See own statistics | ✅ | ✅ |
 | See home-wide statistics | — | ✅ |
 | Add / edit / delete chores (incl. interval, hours, credits) | — | ✅ |
+| Create / rename / delete chore groups; reorder chores and groups | — | ✅ |
 | Approve / reject pending completions | — | ✅ |
 | Delete / correct any completion | — | ✅ |
 | Rename / remove members, promote / demote admins | — | ✅ |
@@ -927,6 +930,11 @@ scales up, not the other way round.
   notice says so plainly, and says that those records are infrastructure-level, short-lived
   and never correlated with a member, a home or a home code — otherwise the "what we do NOT
   store" claim reads as more absolute than the deployment can honour.
+- **Both reminder kinds are described.** The daily "nothing logged yet" reminder stores a
+  time, a timezone and a push subscription; a per-chore snooze (§4.13b) stores which chore and
+  when, until it fires. Each has its own bullet under "What data we store", each says when the
+  data goes away, and both say they never enter a backup. The notice has to grow when the
+  stored data does, or "what we store" quietly becomes a lower bound rather than a list.
 - **Erasure requests.** Self-service is the primary route and is already complete: an admin
   can erase one member (Admin → Members) or the whole home (Admin → Danger zone), and
   export first via Backup & restore. For operator-assisted requests the notice asks for the

@@ -55,6 +55,11 @@ public class PrivacyView extends VerticalLayout {
                         + "browser issues for it. These are deleted when you turn the reminder off, "
                         + "when the member is removed, or when the home is deleted — and they are "
                         + "never included in backup exports.",
+                "Only if you ask to be reminded about one particular chore later (\"remind me in "
+                        + "two hours\"): which chore, and when. That note is deleted the moment the "
+                        + "reminder is sent, and also if the chore, the member or the home is "
+                        + "deleted or you turn notifications off. It is never included in backup "
+                        + "exports either.",
         }));
         card.add(section("What we do NOT store",
                 "No email addresses, phone numbers, passwords, home addresses, location, or payment "

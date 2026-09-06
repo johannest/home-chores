@@ -9,7 +9,7 @@
 --   CHORE_TASK    : seasons, group_id, sort_order
 --   COMPLETION    : note
 --   CREDIT_ENTRY  : completion_id
---   (whole tables): REJOIN_REQUEST, PUSH_SUBSCRIPTION, CHORE_GROUP
+--   (whole tables): REJOIN_REQUEST, PUSH_SUBSCRIPTION, CHORE_GROUP, CHORE_REMINDER
 --
 -- Column widths are the old, wider ones (VARCHAR(255) names) on purpose: ddl-auto=update
 -- never narrows an existing column, so a real upgraded database keeps them and the service

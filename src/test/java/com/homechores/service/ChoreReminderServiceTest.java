@@ -2,6 +2,7 @@ package com.homechores.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -285,5 +286,25 @@ class ChoreReminderServiceTest {
 
         assertTrue(snoozes.forMember(alex.getId()).isEmpty());
         verify(sender, never()).send(any(), anyString(), anyString());
+    }
+
+    /**
+     * The rule the group code already enforces ({@code aGroupFromAnotherHome_isRefused} in
+     * {@code ChoreGroupTest}): a chore and a member from different homes never meet. The UI
+     * only offers a member their own board, so this is the service holding the line rather than
+     * every future caller having to remember to.
+     */
+    @Test
+    void aChoreFromAnotherHome_isRefused() {
+        Member alex = subscribedMember("Home A", "Alex");
+        Member robin = subscribedMember("Home B", "Robin");
+        ChoreTask alexsChore = anytimeChore(alex.getHomeCode());
+
+        assertThrows(IllegalArgumentException.class, () -> snoozes.schedule(
+                robin.getId(), alexsChore.getId(), Duration.ofHours(2), Locale.ENGLISH));
+
+        assertTrue(reminders.findByMemberIdAndTaskId(robin.getId(), alexsChore.getId()).isEmpty(),
+                "nothing was armed");
+        assertTrue(snoozes.forMember(robin.getId()).isEmpty());
     }
 }
