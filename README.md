@@ -33,18 +33,20 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Credits & rewards** | Chores can award **💎 credits** (great for challenging tasks), and admins can define **spree bonuses** (X days in a row → Y credits). Admins **redeem** credits for real-world rewards (e.g. movie night). Balances show on the leaderboard. |
 | **Daily target** | The admin sets **1–3 chores expected per member per day** (default 1); each person sees a *done/target* progress ring. |
 | **Admin role (PIN)** | The creator is admin. Enter the admin PIN via **Admin?** in the header to (re)claim admin on any device. Admins can promote others. |
-| **Admin CRUD** | Under the **Admin** tab: add/edit/delete chores (name, emoji, interval, credits, hours), rename/remove members, promote/demote admins, rename the home, change the PIN. |
+| **Chore groups & order** | Admins can create groups (🍳 Kitchen, 🧺 Laundry) that become headings on the board, and move chores up/down within them (arrows, not dragging — the board lives on phones). Ungrouped chores sit under *Other chores*. Deleting a group keeps its chores. Rearranging is purely cosmetic: it never changes who the daily rotation assigns what to. |
+| **Admin CRUD** | Under the **Admin** tab: add/edit/delete chores (name, emoji, group, interval, credits, hours), rename/remove members, promote/demote admins, rename the home, change the PIN. |
 | **Optional approval** | Admins can require approval. Completions then wait as **pending** until an admin **approves** (counts) or **rejects** (discarded). A badge shows the pending count. |
-| **Statistics & charts** | The **Stats** tab shows personal charts (chores by type, feedback split, 7-day trend). Admins also get **Home stats**: per-member totals, chore popularity, feedback per chore, 14-day activity, daily-goal adherence. Charts are dependency-free (no licensed add-on). |
+| **Statistics & charts** | The **Stats** tab opens on four counts side by side — **today, this week, this month, all time** — and a chip row narrows the charts to any of them. Personal charts (chores by type, feedback split, 7-day trend) plus **12-week and 12-month trends** for the longer view. Admins also get **Home stats**: per-member totals, chore popularity, feedback per chore, 14-day activity, daily-goal adherence. Charts are dependency-free (no licensed add-on). |
 | **Delete the home** | A **Danger zone** at the bottom of the Admin tab wipes the whole family — members, chores, completions, credits, settings. Confirmed by typing the home code, and it prompts for a backup first. Everyone still on the board is signed out live. |
 | **Retention (opt-in)** | Tracks when each home was last *used* (a chore, a review, opening the board — not background traffic). Three windows: `empty-home-hours` (72h in prod config) and `abandoned-home-days` purge homes that were never used (**no chore history and at most one member**); `inactive-home-days` (30 in prod config) additionally deletes **any** home nobody has used that long — after writing a full JSON safety export to `retention.export-dir` (the operator's undo; export failure keeps the home). `/terms` and `/privacy` state the windows automatically. Off when all are 0. |
-| **Backup / restore** | Admins can download a JSON backup of the whole family (settings, members, chores, completions, credits, spree tiers) and restore from one (replaces current data after a confirmation). |
+| **Backup / restore** | Admins can download a JSON backup of the whole family (settings, members, chores, groups and their order, completions, credits, spree tiers) and restore from one (replaces current data after a confirmation). |
 | **Live sync** | Vaadin **Signals**: each home has a revision signal (`HomeState`) that every open UI observes via `Signal.effect`, delivered over server push (long-polling). Completions, approvals, leaderboard, badges and pending counts update on everyone's screen instantly. |
 | **Languages** | English (default), Finnish, Swedish. The browser language picks the initial locale; the header switcher stores the choice in a `lang` cookie. Default chores are seeded in the creator's language. |
 | **Built for phones** | Laid out for a ~360px column first: no horizontal scrolling anywhere, safe-area padding for the notch and home indicator, `100dvh` against iOS Safari's collapsing URL bar, 40px touch targets, and no sticky `:hover` states after a tap. The board header collapses Copy/Share to icons and stacks onto two rows so chores are visible without scrolling. See SPEC §4.15.1. |
 | **PWA install** | Installable on Android (install prompt) and iPhone (Share → *Add to Home Screen*): branded icon, standalone display, themed splash screens, offline fallback page. |
 | **Privacy page** | A plain-language privacy notice at `/privacy` and a brief user agreement at `/terms` (consented via a checkbox on the create/join forms), both linked from the landing page. |
-| **Dark mode** | Follows the OS theme automatically (`@ColorScheme(SYSTEM)` + CSS `light-dark()`), with a per-device auto/light/dark selector in the header (stored in localStorage). |
+| **Themes & colours** | Follows the OS theme automatically (`@ColorScheme(SYSTEM)` + CSS `light-dark()`), and one palette-glyph menu in the header holds both axes: auto/light/dark **and** a brand colour — **green, pink, blue or grey**. Both are per device (localStorage), applied before Vaadin loads so there's no flash. A palette is three CSS custom properties, so it composes with light/dark instead of duplicating it. |
+| **Remind me later (per chore)** | Tap ⏰ on a chore card and pick *in 1h / 2h / 4h / 8h / a day / a week* — one push notification naming that chore when the time comes. One per chore per person, replaced if you change your mind, and it cancels itself the moment you do the chore (or somebody else does). Needs the same VAPID keys as the daily reminder. |
 | **Chore reminders (opt-in)** | Real Web Push: each member can pick a wall-clock time (their own timezone) and get a notification on subscribed devices if they haven't logged any chores that day. Requires VAPID keys (see below); on iPhone/iPad it works once the PWA is added to the Home Screen (iOS 16.4+). |
 
 ## Running it
@@ -196,7 +198,8 @@ long-poll would otherwise sit open forever). Everything else is dashboard/proxy 
 src/main/java/com/homechores/
 ├── Application.java              # Spring Boot entry: @Push, @PWA, Lumo + styles.css
 ├── domain/                       # JPA entities + repositories
-│   ├── Home / Member / ChoreTask / Completion
+│   ├── Home / Member / ChoreTask / ChoreGroup / Completion
+│   ├── ChoreReminder.java        # one-shot "remind me about this chore later"
 │   ├── CreditEntry / SpreeTier   # credit rewards
 │   ├── RejoinRequest.java        # a device asking to sign back in as an existing member
 │   ├── TimeWindows.java          # availability-hours parsing & evaluation
@@ -205,7 +208,8 @@ src/main/java/com/homechores/
 │   ├── ChoreService.java         # create/join, admin/PIN, complete, fairness, booking,
 │   │                             #   rotation, intervals, availability, approvals, milestones
 │   ├── CreditService.java        # chore credits, spree bonuses, balances, redemption
-│   ├── StatsService.java         # chart aggregations (my stats + home stats)
+│   ├── StatsService.java         # chart aggregations, period lenses, week/month trends
+│   ├── ChoreReminderService.java # the one-shot snooze sweep (sibling of PushReminderService)
 │   ├── BackupService.java        # per-home JSON export / restore
 │   └── HomeState.java            # per-home revision Signal (live sync)
 ├── i18n/
@@ -221,6 +225,8 @@ src/main/java/com/homechores/
     ├── AdminPanel.java           # approvals, settings, members, chores, rewards, backup,
     │                             #   danger zone (delete the whole home)
     ├── Charts.java               # dependency-free bar / segment / trend charts
+    ├── AppearanceMenu.java       # colour scheme + brand palette, per device
+    ├── SnoozeDialog.java         # "remind me about this chore in 2h"
     ├── Celebrations.java         # confetti + congratulation + feedback dialogs
     ├── PrivacyView.java          # /privacy notice
     ├── LanguageSwitcher.java     # en/fi/sv select, persisted in a cookie

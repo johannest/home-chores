@@ -24,7 +24,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * <p>{@code @ColorScheme(SYSTEM)} bakes {@code color-scheme: light dark} into the served
  * page, so the app follows the OS theme with no flash and no JS. Custom colors in
  * styles.css use the CSS {@code light-dark()} function; a per-device override
- * (light/dark/auto) is applied by the inline script in index.html and the ThemeSwitcher.
+ * (light/dark/auto) and the brand palette are applied by the inline script in
+ * index.html and picked in the AppearanceMenu.
  */
 @SpringBootApplication
 @EnableScheduling // for the retention sweep in HomeCleanupService (off unless configured)

@@ -36,6 +36,7 @@ class DeleteHomeTest {
         service.complete(tasks.get(0).getId(), alex.getId());
         service.complete(tasks.get(1).getId(), sam.getId());
         credits.addTier(code, 3, 10);
+        service.addGroup(code, "Kitchen", "🍳");
         service.requestRejoin(code, sam.getId(), null);
 
         assertTrue(credits.balance(alex.getId()) > 0, "precondition: credits were earned");
@@ -47,6 +48,7 @@ class DeleteHomeTest {
         assertTrue(service.membersOf(code).isEmpty());
         assertTrue(service.tasksOf(code).isEmpty());
         assertTrue(service.pendingRejoins(code).isEmpty());
+        assertTrue(service.groupsOf(code).isEmpty(), "chore groups go with the home");
         assertTrue(credits.tiersOf(code).isEmpty());
         assertTrue(credits.ledger(code).isEmpty());
         assertEquals(0, credits.balance(alex.getId()));

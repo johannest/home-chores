@@ -205,6 +205,29 @@ class SchemaEvolutionTest {
     void tablesAddedSinceAreCreatedEmpty() {
         assertEquals(0, service.pendingRejoinCount(CODE));
         assertTrue(service.pendingOtherHelp(CODE).isEmpty());
+        assertTrue(service.groupsOf(CODE).isEmpty());
+    }
+
+    /**
+     * The upgrade must be invisible. {@code sort_order} arrives on a table that already has rows,
+     * so every existing chore adopts the column default 0 — which is exactly why the board query
+     * tie-breaks on {@code createdAt}. A family that never reorders anything keeps the order they
+     * had, and the first move is what converges the bucket on real positions.
+     */
+    @Test
+    void choresFromBeforeGroupsExisted_areUngroupedAndKeepTheirOrder() {
+        List<ChoreTask> board = service.tasksOf(CODE);
+        assertEquals(service.tasksInRotationOrder(CODE).stream().map(ChoreTask::getName).toList(),
+                board.stream().map(ChoreTask::getName).toList());
+        assertTrue(board.stream().allMatch(t -> t.getGroupId() == null));
+        assertTrue(board.stream().allMatch(t -> t.getSortOrder() == 0));
+
+        assertTrue(service.moveChore(board.get(board.size() - 1).getId(), -1));
+        List<ChoreTask> after = service.tasksOf(CODE);
+        assertEquals(board.get(board.size() - 1).getId(), after.get(after.size() - 2).getId());
+        for (int i = 0; i < after.size(); i++) {
+            assertEquals(i, after.get(i).getSortOrder(), "and the bucket is dense afterwards");
+        }
     }
 
     /** The old, wider name columns are kept by ddl-auto=update — the service layer clips. */

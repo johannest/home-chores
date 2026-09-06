@@ -5,23 +5,81 @@
  * the CSS light-dark() function — a [theme~="dark"] block would only fire in forced-dark
  * mode, never in auto mode, so it is the wrong tool here.
  */
-html {
-    --lumo-primary-color: light-dark(hsl(155, 62%, 42%), hsl(155, 60%, 46%));
-    --lumo-primary-color-50pct: light-dark(hsla(155, 62%, 42%, 0.5), hsla(155, 60%, 46%, 0.5));
-    --lumo-primary-color-10pct: light-dark(hsla(155, 62%, 42%, 0.1), hsla(155, 60%, 46%, 0.12));
-    --lumo-primary-text-color: light-dark(hsl(155, 62%, 34%), hsl(155, 65%, 62%));
+/*
+ * Palette — a second per-device axis beside the light/dark switcher (both live in localStorage;
+ * neither is a home setting). Everything brand-coloured in this file is written in terms of three
+ * knobs: a primary hue, a second hue for the gradient's far end, and a saturation multiplier.
+ * A palette is then three declarations rather than a second copy of every token — which matters
+ * because each token is a light-dark() pair, and four copies of that pair is four chances for
+ * one scheme to drift unnoticed.
+ *
+ * The multiplier exists for "grey", which is not a hue but the absence of one. Scaling preserves
+ * the relative punch the four tokens already carry (the dark scheme's text token is deliberately
+ * the most saturated) instead of flattening them to one number.
+ *
+ * The palette rides on its own data-palette attribute, NOT on `theme`: Vaadin owns that attribute
+ * on <html> and rewrites it wholesale on every colour-scheme change, which would carry a palette
+ * parked there away with it.
+ */
+/*
+ * `html, html[theme]` rather than a bare `html`, and this is load-bearing. Lumo ships its own
+ * `[theme~="dark"] { --lumo-primary-color: #0c6ce9 }`, whose specificity (0,1,0) beats a plain
+ * `html` (0,0,1) — so in FORCED dark mode (the theme switcher writing theme="dark") every one of
+ * these tokens silently lost to Lumo's blue, and the app stopped being green. Auto mode was
+ * unaffected, which is why it went unnoticed: nothing is wrong until someone picks Dark.
+ * The `html[theme]` arm is (0,1,1) and wins. The palette blocks below are already (0,1,1).
+ */
+html, html[theme] {
+    --brand-h: 155;   /* primary hue: buttons, rings, links, the gradient's near end */
+    --brand-h2: 199;  /* secondary hue: the gradient's far end and the top-right glow */
+    --brand-sat: 1;   /* saturation multiplier; below 1 is the same idea, greyer */
+
+    --lumo-primary-color: light-dark(
+        hsl(var(--brand-h), calc(62% * var(--brand-sat)), 42%),
+        hsl(var(--brand-h), calc(60% * var(--brand-sat)), 46%));
+    --lumo-primary-color-50pct: light-dark(
+        hsla(var(--brand-h), calc(62% * var(--brand-sat)), 42%, 0.5),
+        hsla(var(--brand-h), calc(60% * var(--brand-sat)), 46%, 0.5));
+    --lumo-primary-color-10pct: light-dark(
+        hsla(var(--brand-h), calc(62% * var(--brand-sat)), 42%, 0.1),
+        hsla(var(--brand-h), calc(60% * var(--brand-sat)), 46%, 0.12));
+    --lumo-primary-text-color: light-dark(
+        hsl(var(--brand-h), calc(62% * var(--brand-sat)), 34%),
+        hsl(var(--brand-h), calc(65% * var(--brand-sat)), 62%));
+
     --lumo-border-radius-m: 12px;
     --lumo-border-radius-l: 18px;
-    /* The brand gradient stays saturated in both schemes — white text sits on it. */
-    --app-gradient: linear-gradient(160deg, #10b981 0%, #0ea5e9 100%);
+
+    /* The brand gradient stays saturated in both schemes — white text sits on it. Its lightness
+       stops are fixed rather than derived, so the grey palette stays dark enough to carry that
+       white text instead of washing out with the saturation. */
+    --app-gradient: linear-gradient(160deg,
+        hsl(var(--brand-h), calc(84% * var(--brand-sat)), 39%) 0%,
+        hsl(var(--brand-h2), calc(89% * var(--brand-sat)), 48%) 100%);
+    /* The one shadow in this file that is brand rather than depth. */
+    --app-header-shadow: 0 10px 30px hsla(var(--brand-h), calc(62% * var(--brand-sat)), 40%, 0.35);
+}
+
+html[data-palette="pink"] { --brand-h: 335; --brand-h2: 285; }
+html[data-palette="blue"] { --brand-h: 212; --brand-h2: 190; }
+/* Grey is the palette the hue knob alone cannot express. At this saturation the text token loses
+   the contrast its colour was carrying, so grey buys it back with lightness — the one per-palette
+   token override in the file, and a consequence of desaturation rather than a fourth knob. */
+html[data-palette="gray"] {
+    --brand-h: 215;
+    --brand-h2: 215;
+    --brand-sat: 0.16;
+    --lumo-primary-text-color: light-dark(hsl(215, 12%, 28%), hsl(215, 14%, 72%));
 }
 
 body {
     background:
         radial-gradient(1200px 600px at 100% -10%,
-            light-dark(hsla(199, 89%, 60%, 0.12), hsla(199, 80%, 45%, 0.08)), transparent),
+            light-dark(hsla(var(--brand-h2), calc(89% * var(--brand-sat)), 60%, 0.12),
+                       hsla(var(--brand-h2), calc(80% * var(--brand-sat)), 45%, 0.08)), transparent),
         radial-gradient(1000px 500px at -10% 110%,
-            light-dark(hsla(155, 62%, 45%, 0.14), hsla(155, 55%, 40%, 0.09)), transparent);
+            light-dark(hsla(var(--brand-h), calc(62% * var(--brand-sat)), 45%, 0.14),
+                       hsla(var(--brand-h), calc(55% * var(--brand-sat)), 40%, 0.09)), transparent);
 }
 
 /* A phone must never scroll or rubber-band sideways: the app is a single column, so any
@@ -123,7 +181,7 @@ vaadin-select::part(label) {
     color: #fff;
     border-radius: var(--lumo-border-radius-l);
     padding: var(--lumo-space-m) var(--lumo-space-l);
-    box-shadow: 0 10px 30px hsla(155, 62%, 40%, 0.35);
+    box-shadow: var(--app-header-shadow);
     /* The identity block and the action cluster sit side by side while they fit and drop
        onto separate rows when they don't, instead of pushing each other off-screen. */
     flex-wrap: wrap;
@@ -237,6 +295,31 @@ vaadin-checkbox-group::part(group-field) {
     flex-wrap: wrap;
 }
 
+/* ---- Board group sections ----
+   Groups render as headings over their own card grid. gap: 0 is load-bearing: a home with no
+   groups renders a single unheaded grid in here, and it must have exactly the spacing it had
+   before groups existed. All the vertical rhythm comes from .group-heading's own margins. */
+.board-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    width: 100%;
+}
+
+/* A sub-heading inside the chore area, deliberately quieter than .section-label
+   ("LEADERBOARD"), which sits a level above it. */
+.group-heading {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--lumo-body-text-color);
+    margin: var(--lumo-space-m) 0 var(--lumo-space-xs) 4px;
+}
+
+/* The filter row above already carries a bottom margin. */
+.group-heading:first-child {
+    margin-top: 0;
+}
+
 .task-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -297,6 +380,48 @@ vaadin-checkbox-group::part(group-field) {
 .task-card.streak-hot .streak {
     background: hsla(25, 95%, 55%, 0.18);
     color: light-dark(hsl(20, 90%, 42%), hsl(25, 95%, 68%));
+}
+
+/* The snooze affordance, and — when one is armed — the reminder itself. Top-left, because the
+   status badge owns top-right and a card is only 136px wide on a phone: the two must be able to
+   sit side by side without meeting in the middle, which is what the max-widths below guarantee. */
+.snooze-chip {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    max-width: 45%;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 999px;
+    opacity: 0.35; /* a dormant corner glyph, not a second call to action */
+    cursor: pointer;
+}
+.snooze-chip.armed {
+    opacity: 1;
+    background: var(--lumo-primary-color-10pct);
+    color: var(--lumo-primary-text-color);
+}
+.task-card .streak {
+    max-width: 52%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* Tapping the corner chip must not play the card's own press animation — that animation is the
+   board's feedback for "chore logged", and borrowing it here would say the wrong thing. */
+.task-card:has(.snooze-chip:active) {
+    transform: none;
+}
+
+@media (pointer: coarse) {
+    /* A 40px target without a 40px pill: the padding grows, the text does not. */
+    .snooze-chip {
+        padding: 10px 8px;
+        top: 2px;
+        left: 2px;
+    }
 }
 
 .task-card.locked {
@@ -361,6 +486,42 @@ vaadin-checkbox-group::part(group-field) {
     width: 84%;
     height: 84%;
     object-fit: contain;
+}
+
+/* Section headings inside the appearance menu ("Theme", "Colour"). Not menu items — they are
+   plain spans added between them, so they need their own quiet styling to read as labels rather
+   than as choices somebody failed to make clickable. */
+.menu-section-label {
+    display: block;
+    padding: 6px 12px 2px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--lumo-secondary-text-color);
+}
+
+/* The colour chip beside a palette's name in the appearance menu. All four hue pairs live here,
+   next to the palette blocks they mirror, so the Java side only ever writes a name. */
+.palette-dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    margin-right: 8px;
+    border: 1px solid var(--lumo-contrast-20pct);
+}
+.palette-dot[data-palette="green"] { background: linear-gradient(160deg, hsl(155,84%,39%), hsl(199,89%,48%)); }
+.palette-dot[data-palette="pink"]  { background: linear-gradient(160deg, hsl(335,84%,39%), hsl(285,89%,48%)); }
+.palette-dot[data-palette="blue"]  { background: linear-gradient(160deg, hsl(212,84%,39%), hsl(190,89%,48%)); }
+.palette-dot[data-palette="gray"]  { background: linear-gradient(160deg, hsl(215,13%,39%), hsl(215,14%,48%)); }
+
+/* The appearance menu shows up white-on-gradient in the board header and on a plain background on
+   the landing card, so the header treatment is scoped rather than shared. */
+.home-header .appearance-menu vaadin-menu-bar-button {
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+    border-radius: 999px;
 }
 
 /* The avatar picker: a wrapping grid of tappable circles. */
@@ -525,6 +686,10 @@ vaadin-checkbox-group::part(group-field) {
 
 .daily-ring.done {
     color: #fff;
+    /* The filled state is a flat brand fill and belongs here, with the class. It used to be an
+       inline style in ChoresPanel carrying a literal #10b981 — the one brand colour outside this
+       file, and the first element on the board, so a pink board kept a green ring. */
+    background: var(--lumo-primary-color);
 }
 
 /* A quiet "you just did X — undo" strip, shown only while the member's own undo window
@@ -655,6 +820,43 @@ vaadin-checkbox-group::part(group-field) {
 .seg-love { background: #10b981; }
 
 /* day trend columns */
+/* The four headline periods, side by side above the lens chips. A grid rather than flex: the
+   four tiles must stay equal width whatever the numbers in them, or "1" and "148" would size
+   their own columns and the row would shift every time someone taps a chore. */
+.stat-tiles {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--lumo-space-xs);
+    margin: 0 0 var(--lumo-space-s);
+}
+.stat-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 4px;
+    border-radius: var(--lumo-border-radius-m);
+    background: var(--lumo-contrast-5pct);
+    border: 1px solid transparent;
+    text-align: center;
+    min-width: 0;
+}
+.stat-tile.selected {
+    border-color: var(--lumo-primary-color);
+    background: var(--lumo-primary-color-10pct);
+}
+.stat-value {
+    font-size: 1.35rem;
+    font-weight: 800;
+    line-height: 1;
+}
+.stat-label {
+    font-size: 0.62rem;
+    color: var(--lumo-secondary-text-color);
+    /* "This month" must not push the tile wider than its quarter of the row. */
+    overflow-wrap: anywhere;
+}
+
 .trend {
     display: flex;
     align-items: flex-end;
@@ -677,6 +879,20 @@ vaadin-checkbox-group::part(group-field) {
     border-radius: 4px 4px 0 0;
     background: var(--app-gradient);
 }
+/* A twelve-column trend (weeks, months) in the same height. The gap tightens because twelve
+   columns plus 4px gaps overflow a ~360px phone column, and the page must never scroll
+   sideways — the columns give up spacing, not the viewport. */
+.trend-wide {
+    gap: 2px;
+}
+.trend-wide .trend-bar {
+    width: 82%;
+}
+.trend-wide .trend-day {
+    font-size: 0.55rem;
+    white-space: nowrap;
+}
+
 .trend-day {
     font-size: 0.6rem;
     color: var(--lumo-secondary-text-color);
@@ -685,7 +901,7 @@ vaadin-checkbox-group::part(group-field) {
 /* ---- Admin cards ----
    Each admin tool is a <vaadin-details>: the card is the host, the title is the summary row,
    and the body collapses. Which ones start open is decided in AdminPanel.section(). At rest the
-   whole page is about one phone screen instead of seven. */
+   whole page is about one phone screen instead of twelve. */
 .admin-section {
     background: var(--lumo-base-color);
     border: 1px solid var(--lumo-contrast-10pct);
@@ -739,6 +955,16 @@ vaadin-checkbox-group::part(group-field) {
 }
 .list-row:first-of-type { border-top: none; }
 .list-row .grow { flex: 1; min-width: 0; }
+
+/* A chore row carries four controls now (↑ ↓ ✎ 🗑). Grouping them means that on a 360px phone,
+   where .list-row wraps, the cluster drops under the name as a block — loose buttons would split
+   three-and-one across the wrap, which reads as broken rather than as wrapped. */
+.list-row .row-tools {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+}
 .list-row .sub {
     font-size: 0.78rem;
     color: var(--lumo-secondary-text-color);
@@ -816,6 +1042,12 @@ vaadin-checkbox-group::part(group-field) {
        press animation. */
     .task-card, .feedback-btn, .member-chip, .filter-chip {
         -webkit-tap-highlight-color: transparent;
+    }
+    /* The min-height rules below only match vaadin-button, so a menu-bar button — the invite
+       menu, and now the appearance menu — needs its own or it stays a ~32px target. */
+    .header-actions vaadin-menu-bar-button {
+        min-height: 40px;
+        min-width: 40px;
     }
     /* The min-height rules below only match vaadin-button, so a plain Div chip needs its own. */
     .filter-chip {
@@ -928,6 +1160,17 @@ vaadin-checkbox-group::part(group-field) {
     }
     .list-row .grow {
         flex: 1 1 60%;
+    }
+    /* ...except where the controls are a .row-tools cluster. That cluster is four 40px touch
+       targets, and claiming 60% of the row for the name pushes it onto a second line — which on
+       the chores card is eleven rows at triple height, on the phone this app is designed for.
+       The name gives up its basis and wraps inside its own box instead. */
+    .list-row:has(.row-tools) .grow {
+        /* Basis 0, not auto: with flex-wrap on, the browser breaks lines using each item's
+           hypothetical size, and `auto` means "as wide as the text" — so the cluster wrapped
+           before the name ever got the chance to shrink. */
+        flex: 1 1 0;
+        min-width: 0;
     }
     /* Field-plus-button rows (spree tier, rename home) are wider than a phone column, and
        with the page unable to scroll sideways the trailing button would be half

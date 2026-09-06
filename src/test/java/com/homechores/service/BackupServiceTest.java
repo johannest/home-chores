@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.homechores.domain.ChoreGroup;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
@@ -103,6 +104,68 @@ class BackupServiceTest {
         // The victim home is completely untouched.
         assertEquals("Victim", chores.findHome(victimCode).orElseThrow().getName());
         assertEquals(1, chores.membersOf(victimCode).size());
+    }
+
+    @Test
+    void groupsAndBoardOrder_roundTrip() {
+        Member alex = chores.createHome("Grouped", "Alex");
+        String code = alex.getHomeCode();
+        ChoreGroup kitchen = chores.addGroup(code, "Kitchen", "🍳");
+        chores.addGroup(code, "Laundry", "🧺");
+        List<ChoreTask> t = chores.tasksOf(code);
+        String firstName = t.get(2).getName();
+        chores.setChoreGroup(t.get(2).getId(), kitchen.getId());
+        chores.setChoreGroup(t.get(0).getId(), kitchen.getId());
+
+        String json = backup.export(code);
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+
+        assertEquals(List.of("Kitchen", "Laundry"),
+                chores.groupsOf(code).stream().map(ChoreGroup::getName).toList());
+        // Ids are remapped, so the assertion has to go through the RESTORED group, never the old id.
+        Long restoredKitchen = chores.groupsOf(code).get(0).getId();
+        List<ChoreTask> board = chores.tasksOf(code);
+        assertEquals(firstName, board.get(0).getName(), "board order survives the round trip");
+        assertEquals(restoredKitchen, board.get(0).getGroupId());
+    }
+
+    /**
+     * A backup written before groups existed carries neither the array nor the per-chore key.
+     * Both take their defaults — an empty group list and a null groupId — which already mean
+     * "this family never grouped anything".
+     */
+    @Test
+    void legacyBackupWithoutGroups_restoresEverythingUngrouped() {
+        Member alex = chores.createHome("Old", "Alex");
+        String code = alex.getHomeCode();
+        chores.addGroup(code, "Kitchen", "🍳");
+        chores.setChoreGroup(chores.tasksOf(code).get(0).getId(), chores.groupsOf(code).get(0).getId());
+
+        String json = backup.export(code)
+                .replaceAll("\\s*\"groups\"\\s*:\\s*\\[[^]]*],", "")
+                .replaceAll("\\s*\"groupId\"\\s*:\\s*(null|\\d+)\\s*,", "");
+        assertFalse(json.contains("\"groupId\""), "the key really is gone from the payload");
+
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+
+        assertTrue(chores.groupsOf(code).isEmpty());
+        assertTrue(chores.tasksOf(code).stream().allMatch(t -> t.getGroupId() == null));
+        assertEquals(11, chores.tasksOf(code).size(), "and no chore was lost with the label");
+    }
+
+    /** A hand-edited file can point a chore at a group that isn't in it. The chore is a chore
+     *  either way — it must land ungrouped rather than vanish. */
+    @Test
+    void aDanglingGroupIdInABackup_restoresTheChoreAsUngrouped() {
+        Member alex = chores.createHome("Odd", "Alex");
+        String code = alex.getHomeCode();
+        String json = backup.export(code)
+                .replaceFirst("\"groupId\"\\s*:\\s*null", "\"groupId\":999999");
+
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+
+        assertEquals(11, chores.tasksOf(code).size());
+        assertTrue(chores.tasksOf(code).stream().allMatch(t -> t.getGroupId() == null));
     }
 
     /**

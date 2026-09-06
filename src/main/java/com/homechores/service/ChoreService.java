@@ -2,6 +2,7 @@ package com.homechores.service;
 
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.ChoreGroup;
+import com.homechores.domain.ChoreReminderRepository;
 import com.homechores.domain.ChoreGroupRepository;
 import com.homechores.domain.ChoreTaskRepository;
 import com.homechores.domain.Completion;
@@ -73,6 +74,7 @@ public class ChoreService {
     private final RejoinRequestRepository rejoins;
     private final PushSubscriptionRepository pushSubscriptions;
     private final ChoreGroupRepository groups;
+    private final ChoreReminderRepository choreReminders;
     private final HomeState homeState;
     private final CreditService creditService;
     private final Translations translations;
@@ -93,7 +95,8 @@ public class ChoreService {
                         ChoreTaskRepository tasks, CompletionRepository completions,
                         RejoinRequestRepository rejoins,
                         PushSubscriptionRepository pushSubscriptions,
-                        ChoreGroupRepository groups, HomeState homeState,
+                        ChoreGroupRepository groups,
+                        ChoreReminderRepository choreReminders, HomeState homeState,
                         CreditService creditService, Translations translations,
                         @org.springframework.beans.factory.annotation.Value(
                                 "${homechores.identity.legacy-migration:true}")
@@ -108,6 +111,7 @@ public class ChoreService {
         this.rejoins = rejoins;
         this.pushSubscriptions = pushSubscriptions;
         this.groups = groups;
+        this.choreReminders = choreReminders;
         this.homeState = homeState;
         this.creditService = creditService;
         this.translations = translations;
@@ -392,7 +396,7 @@ public class ChoreService {
 
     /**
      * Deletes a home and everything belonging to it — members, chores, chore groups,
-     * completions, credits, spree tiers and rejoin requests. Irreversible; the caller is responsible
+     * completions, credits, spree tiers, rejoin requests and pending chore reminders. Irreversible; the caller is responsible
      * for confirming intent (see {@code AdminPanel}'s danger zone).
      *
      * <p>The revision is bumped last so every other device still on this home re-renders,
@@ -408,6 +412,7 @@ public class ChoreService {
         }
         rejoins.deleteByHomeCode(norm);
         pushSubscriptions.deleteByHomeCode(norm);
+        choreReminders.deleteByHomeCode(norm);
         completions.deleteByHomeCode(norm);
         creditService.deleteForHome(norm);
         tasks.deleteByHomeCode(norm);
@@ -682,6 +687,7 @@ public class ChoreService {
         creditService.deleteForMember(memberId);
         rejoins.deleteByMemberId(memberId);
         pushSubscriptions.deleteByMemberId(memberId);
+        choreReminders.deleteByMemberId(memberId);
         members.delete(member);
         homeState.bump(homeCode);
         return true;
@@ -805,6 +811,7 @@ public class ChoreService {
         ChoreTask t = tasks.findById(taskId).orElseThrow();
         String homeCode = t.getHomeCode();
         completions.deleteByTaskId(taskId);
+        choreReminders.deleteByTaskId(taskId);
         tasks.delete(t);
         homeState.bump(homeCode);
     }
@@ -856,7 +863,7 @@ public class ChoreService {
     @Transactional
     public ChoreGroup addGroup(String homeCode, String name, String emoji) {
         ChoreGroup g = new ChoreGroup(homeCode,
-                InputLimits.clip(name, InputLimits.GROUP_NAME), cleanEmoji(emoji));
+                InputLimits.clip(name, InputLimits.GROUP_NAME), groupEmoji(emoji));
         g.setSortOrder(groupsOf(homeCode).size()); // append
         ChoreGroup saved = groups.save(g);
         homeState.bump(homeCode);
@@ -867,7 +874,7 @@ public class ChoreService {
     public void updateGroup(Long groupId, String name, String emoji) {
         ChoreGroup g = groups.findById(groupId).orElseThrow();
         g.setName(InputLimits.clip(name, InputLimits.GROUP_NAME));
-        g.setEmoji(cleanEmoji(emoji));
+        g.setEmoji(groupEmoji(emoji));
         groups.save(g);
         homeState.bump(g.getHomeCode());
     }
@@ -1437,6 +1444,11 @@ public class ChoreService {
             task.setBookedAt(null);
             tasks.save(task);
         }
+        // ...and any nudge this member had asked for about it. A notification ninety minutes
+        // later naming a chore they already did is the one way that feature can be worse than
+        // nothing. Only their own: a reminder belongs to the member who armed it, and somebody
+        // else's is retired by the sweep's own due-check instead of a fan-out write here.
+        choreReminders.deleteByMemberIdAndTaskId(memberId, taskId);
 
         boolean approval = home.isRequireApproval();
         CompletionStatus status = approval ? CompletionStatus.PENDING : CompletionStatus.APPROVED;
@@ -1490,6 +1502,8 @@ public class ChoreService {
             task.setBookedAt(null);
             tasks.save(task);
         }
+        // An admin logging it for someone IS that member doing it, so their nudge goes too.
+        choreReminders.deleteByMemberIdAndTaskId(memberId, taskId);
 
         boolean alreadyDoneThisChore = completions.existsByMemberIdAndTaskIdAndStatus(
                 memberId, taskId, CompletionStatus.APPROVED);
@@ -1771,6 +1785,16 @@ public class ChoreService {
             return "🙋 " + c.getNote();
         }
         return task == null ? "?" : task.getEmoji() + " " + task.getName();
+    }
+
+    /**
+     * A group's emoji, where blank stays blank — unlike {@link #cleanEmoji}, which substitutes ✅.
+     * A chore is a tappable card and needs a glyph on it; a group is a line of text above a grid,
+     * and inventing a checkmark for an admin who left the field empty would put a tick over
+     * chores nobody has done.
+     */
+    private static String groupEmoji(String emoji) {
+        return emoji == null || emoji.isBlank() ? null : InputLimits.clip(emoji, InputLimits.EMOJI);
     }
 
     private static String cleanEmoji(String emoji) {

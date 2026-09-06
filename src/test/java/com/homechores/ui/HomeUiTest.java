@@ -189,6 +189,14 @@ class HomeUiTest extends SpringUIUnitTest {
         toggleSection(summaryPrefix, true);
     }
 
+    /** The invite menu specifically — the header also holds the appearance picker, which is a
+     *  MenuBar too. */
+    private List<MenuBar> inviteMenus() {
+        return $(MenuBar.class).all().stream()
+                .filter(m -> m.getClassNames().contains("invite-menu") && usable(m))
+                .toList();
+    }
+
     private List<Div> filterChips() {
         return $(Div.class).all().stream()
                 .filter(d -> d.getClassNames().contains("filter-chip") && usable(d))
@@ -313,6 +321,73 @@ class HomeUiTest extends SpringUIUnitTest {
         clickButton("Save");
 
         assertEquals(12, service.tasksOf(code).size(), "new chore persisted (11 seeded + 1)");
+    }
+
+    @Test
+    void admin_canCreateAGroup_andTheBoardShowsItAsAHeading() {
+        Member admin = service.createHome("Shared", "Alex");
+        String code = admin.getHomeCode();
+        SessionContext.signIn(admin.getId(), code);
+        navigate(HomeView.class);
+
+        $(Tabs.class).first().setSelectedIndex(2);
+        openSection("Chore groups");
+        clickButton("Add group");
+        setField("Group name", "Kitchen");
+        clickButton("Save");
+
+        assertEquals(1, service.groupsOf(code).size());
+        service.setChoreGroup(service.tasksOf(code).get(0).getId(),
+                service.groupsOf(code).get(0).getId());
+
+        $(Tabs.class).first().setSelectedIndex(0);
+        assertTrue(groupHeadings().stream().anyMatch(h -> h.contains("Kitchen")),
+                "the group is a heading on the board, over its own grid");
+        assertTrue(groupHeadings().stream().anyMatch(h -> h.contains("Other chores")),
+                "and the ungrouped remainder gets named once any group is showing");
+    }
+
+    /**
+     * The guarantee for every home that exists at upgrade time: no groups means the board it
+     * always had — one grid, no headings at all.
+     */
+    @Test
+    void aHomeWithNoGroups_rendersOneUnheadedGrid() {
+        Member admin = service.createHome("Plain", "Alex");
+        SessionContext.signIn(admin.getId(), admin.getHomeCode());
+        navigate(HomeView.class);
+
+        assertTrue(groupHeadings().isEmpty(), "no groups, no headings");
+        assertEquals(1, $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("task-grid") && usable(d)).count());
+    }
+
+    @Test
+    void admin_canMoveAChoreUp_whichReordersTheBoard() {
+        Member admin = service.createHome("Shared", "Alex");
+        String code = admin.getHomeCode();
+        SessionContext.signIn(admin.getId(), code);
+        navigate(HomeView.class);
+        String second = service.tasksOf(code).get(1).getName();
+
+        $(Tabs.class).first().setSelectedIndex(2);
+        openSection("Chores");
+        // Every row carries "Move up"; the first one is disabled, so the second row's is the
+        // first usable one.
+        $(Button.class).all().stream()
+                .filter(b -> "Move up".equals(b.getAriaLabel().orElse("")) && b.isEnabled()
+                        && usable(b))
+                .findFirst().orElseThrow()
+                .click();
+
+        assertEquals(second, service.tasksOf(code).get(0).getName());
+    }
+
+    private List<String> groupHeadings() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("group-heading") && usable(d))
+                .map(Div::getText)
+                .toList();
     }
 
     /**
@@ -752,8 +827,39 @@ class HomeUiTest extends SpringUIUnitTest {
         assertTrue($(Span.class).all().stream()
                 .anyMatch(s -> s.getClassNames().contains("code-chip") && usable(s)),
                 "a lone creator still needs the code front and center");
-        assertTrue($(MenuBar.class).all().stream().noneMatch(this::usable),
+        // By class, not by type: the appearance picker is a MenuBar in the same header now, so
+        // "is there a MenuBar" no longer means "is the invite plumbing collapsed".
+        assertTrue(inviteMenus().isEmpty(),
                 "no overflow menu while there is nobody to overflow for");
+    }
+
+    /**
+     * The appearance picker replaced the theme select rather than joining it, so the header gains
+     * a setting without gaining width — the ≤640px action row was already at its limit before the
+     * theme select and the reminder bell were added to it.
+     */
+    @Test
+    void appearanceMenu_offersBothSchemesAndPalettes() {
+        Member alex = service.createHome("Looks", "Alex");
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+
+        MenuBar appearance = $(MenuBar.class).all().stream()
+                .filter(m -> m.getClassNames().contains("appearance-menu") && usable(m))
+                .findFirst().orElseThrow(() -> new AssertionError("No appearance menu"));
+
+        List<String> labels = appearance.getItems().get(0).getSubMenu().getItems().stream()
+                .map(i -> i.getElement().getTextRecursively().trim())
+                .filter(t -> !t.isEmpty())
+                .toList();
+        assertTrue(labels.stream().anyMatch(l -> l.contains("Dark")), "the scheme rows survive");
+        for (String palette : List.of("Green", "Pink", "Blue", "Grey")) {
+            assertTrue(labels.stream().anyMatch(l -> l.contains(palette)),
+                    palette + " is offered; had " + labels);
+        }
+        assertTrue($(com.vaadin.flow.component.select.Select.class).all().stream()
+                        .filter(this::usable).count() <= 1,
+                "only the language select is left — the theme select gave up its width");
     }
 
     @Test
@@ -767,8 +873,8 @@ class HomeUiTest extends SpringUIUnitTest {
         assertTrue($(Span.class).all().stream()
                 .noneMatch(s -> s.getClassNames().contains("code-chip") && usable(s)),
                 "the inline code row retires once the family has company");
-        MenuBar invite = $(MenuBar.class).all().stream().filter(this::usable)
-                .findFirst().orElseThrow(() -> new AssertionError("No invite menu"));
+        MenuBar invite = inviteMenus().stream().findFirst()
+                .orElseThrow(() -> new AssertionError("No invite menu"));
         var items = invite.getItems().get(0).getSubMenu().getItems();
         assertEquals(3, items.size(), "code, copy link, share");
         assertTrue(items.get(0).getElement().getTextRecursively().contains(code),

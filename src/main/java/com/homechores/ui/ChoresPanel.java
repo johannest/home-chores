@@ -1,6 +1,7 @@
 package com.homechores.ui;
 
 import com.homechores.domain.Cadence;
+import com.homechores.domain.ChoreGroup;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.Completion;
 import com.homechores.domain.DivisionStyle;
@@ -9,11 +10,15 @@ import com.homechores.domain.InputLimits;
 import com.homechores.domain.Member;
 import com.homechores.domain.Seasons;
 import com.homechores.domain.TimeWindows;
+import com.homechores.service.ChoreReminderService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
+import com.homechores.service.PushReminderService;
+import com.homechores.service.WebPushSender;
 import com.homechores.service.ChoreService.CompleteOutcome;
 import com.homechores.service.ChoreService.LockReason;
 import com.homechores.service.ChoreService.TaskView;
+import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.details.Details;
@@ -27,7 +32,9 @@ import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.data.value.ValueChangeMode;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -40,6 +47,12 @@ class ChoresPanel extends VerticalLayout {
 
     private final ChoreService service;
     private final CreditService creditService;
+    private final ChoreReminderService snoozes;
+    private final PushReminderService reminders;
+    private final WebPushSender pushSender;
+
+    /** taskId → when its nudge fires, refreshed once per board render. */
+    private final Map<Long, Instant> armedReminders = new java.util.HashMap<>();
     private final String homeCode;
     private final Long memberId;
 
@@ -48,7 +61,9 @@ class ChoresPanel extends VerticalLayout {
     private final Div undoStrip = new Div();
     private final Div leaderboard = new Div();
     private final Div filterBar = new Div();
-    private final Div taskGrid = new Div();
+    /** The board's group sections: a heading and a .task-grid per section. A home with no groups
+     *  gets exactly one unheaded grid, so nothing about it changes. */
+    private final Div board = new Div();
 
     /**
      * One narrowing lens over the board. Declaration order is the order the chips render in.
@@ -91,9 +106,14 @@ class ChoresPanel extends VerticalLayout {
     /** Whether the "Done today" list is expanded — same plain-field trick as the lens. */
     private boolean doneTodayOpen = false;
 
-    ChoresPanel(ChoreService service, CreditService creditService, String homeCode, Long memberId) {
+    ChoresPanel(ChoreService service, CreditService creditService, ChoreReminderService snoozes,
+                PushReminderService reminders, WebPushSender pushSender,
+                String homeCode, Long memberId) {
         this.service = service;
         this.creditService = creditService;
+        this.snoozes = snoozes;
+        this.reminders = reminders;
+        this.pushSender = pushSender;
         this.homeCode = homeCode;
         this.memberId = memberId;
         setPadding(false);
@@ -102,14 +122,14 @@ class ChoresPanel extends VerticalLayout {
 
         leaderboard.addClassName("leaderboard");
         filterBar.addClassName("filter-bar");
-        taskGrid.addClassName("task-grid");
+        board.addClassName("board-sections");
 
         undoStrip.setVisible(false);
         // Hidden until there is something worth choosing between, so a simple home looks
         // exactly as it did before.
         filterBar.setVisible(false);
         add(dailyStrip, doneTodayHolder, undoStrip, sectionLabel(T.tr("board.leaderboard")),
-                leaderboard, sectionLabel(T.tr("board.tapPrompt")), filterBar, taskGrid);
+                leaderboard, sectionLabel(T.tr("board.tapPrompt")), filterBar, board);
     }
 
     private Div sectionLabel(String text) {
@@ -175,11 +195,15 @@ class ChoresPanel extends VerticalLayout {
         ring.addClassName("daily-ring");
         ring.setText(done + "/" + target);
         double pct = target == 0 ? 0 : Math.min(1.0, (double) done / target) * 100;
-        ring.getStyle().set("background",
-                "conic-gradient(#10b981 " + pct + "%, var(--lumo-contrast-10pct) " + pct + "%)");
+        // The brand colour comes from the token, not a literal: this ring is the first element on
+        // the board, and a hardcoded green here is what a per-device palette cannot reach.
+        // Only the partial state needs an inline gradient — the filled state is a flat brand fill,
+        // which lives in CSS with the .done class rather than as an inline style overriding it.
         if (done >= target) {
             ring.addClassName("done");
-            ring.getStyle().set("background", "#10b981");
+        } else {
+            ring.getStyle().set("background", "conic-gradient(var(--lumo-primary-color) " + pct
+                    + "%, var(--lumo-contrast-10pct) " + pct + "%)");
         }
 
         Div text = new Div();
@@ -234,6 +258,16 @@ class ChoresPanel extends VerticalLayout {
         boolean rotating = home != null && home.getDivisionStyle() == DivisionStyle.ROTATING;
         // One snapshot for both the chips and the grid, so they can never disagree.
         List<TaskView> all = service.taskViews(homeCode, memberId, SessionContext.timeZone());
+        // One query for this member's armed reminders, never one per card: board render is pinned
+        // at one statement per chore (BoardRenderCostTest) and this has to stay a constant.
+        // Deliberately here rather than inside taskViews — that is the hottest read in the app and
+        // its cost is a tested invariant, and a per-member badge has no business in a per-home
+        // projection.
+        armedReminders.clear();
+        if (pushSender.isEnabled()) {
+            snoozes.forMember(memberId)
+                    .forEach(r -> armedReminders.put(r.getTaskId(), r.getDueAt()));
+        }
 
         List<Filter> chips = availableChips(all);
         if (chips.size() < 2) {
@@ -252,21 +286,65 @@ class ChoresPanel extends VerticalLayout {
 
         renderFilters(chips, admin);
 
-        taskGrid.removeAll();
-        for (TaskView view : shown) {
-            taskGrid.add(taskCard(view, rotating));
+        // Grouping happens strictly AFTER selection, so the "never render an empty board" reset
+        // above still reasons over the flat list and is unaffected by any of this.
+        List<ChoreGroup> groups = service.groupsOf(homeCode);
+        Map<Long, List<TaskView>> buckets = new LinkedHashMap<>();
+        groups.forEach(g -> buckets.put(g.getId(), new ArrayList<>()));
+        List<TaskView> ungrouped = new ArrayList<>();
+        for (TaskView v : shown) {
+            Long gid = v.task().getGroupId();
+            List<TaskView> bucket = gid == null ? null : buckets.get(gid);
+            (bucket != null ? bucket : ungrouped).add(v);
         }
+
         // Neither tile is a chore, so under a narrowed lens they would just dilute the answer —
         // but the default TODAY lens must not hide them, or a fresh board loses "Other help"
         // and the admin's "Add chore". "All" is always the first chip, so both stay one tap away.
+        List<Component> extras = new ArrayList<>();
         if (filter == Filter.ALL || filter == Filter.TODAY) {
             if (home == null || home.isAllowOtherHelp()) {
-                taskGrid.add(otherHelpCard());
+                extras.add(otherHelpCard());
             }
             if (admin) {
-                taskGrid.add(addCard());
+                extras.add(addCard());
             }
         }
+
+        board.removeAll();
+        // Headings appear only once at least one group section is being rendered. A home with no
+        // groups — every home at upgrade time — therefore renders a single unheaded grid, exactly
+        // the board it had before groups existed.
+        boolean anyGroupShown = buckets.values().stream().anyMatch(b -> !b.isEmpty());
+        for (ChoreGroup g : groups) {
+            List<TaskView> bucket = buckets.get(g.getId());
+            if (!bucket.isEmpty()) { // an empty group is not a heading over nothing
+                board.add(groupHeading(g.display()), gridOf(bucket, rotating, admin, List.of()));
+            }
+        }
+        if (!ungrouped.isEmpty() || !extras.isEmpty()) {
+            // "Other chores" over nothing but the 🙋/＋ tiles would be a lie — they are not chores.
+            if (anyGroupShown && !ungrouped.isEmpty()) {
+                board.add(groupHeading(T.tr("board.group.ungrouped")));
+            }
+            board.add(gridOf(ungrouped, rotating, admin, extras));
+        }
+    }
+
+    private Div groupHeading(String text) {
+        Div h = new Div();
+        h.setText(text);
+        h.addClassName("group-heading");
+        return h;
+    }
+
+    private Div gridOf(List<TaskView> views, boolean rotating, boolean admin,
+                       List<Component> extras) {
+        Div grid = new Div();
+        grid.addClassName("task-grid");
+        views.forEach(v -> grid.add(taskCard(v, rotating, admin)));
+        extras.forEach(grid::add);
+        return grid;
     }
 
     /** The views the current lens shows. */
@@ -357,7 +435,7 @@ class ChoresPanel extends VerticalLayout {
         }
     }
 
-    private Div taskCard(TaskView view, boolean rotating) {
+    private Div taskCard(TaskView view, boolean rotating, boolean admin) {
         Div card = new Div();
         card.addClassName("task-card");
         if (view.lockedForMe()) {
@@ -380,6 +458,24 @@ class ChoresPanel extends VerticalLayout {
         Long taskId = view.task().getId();
         completeArea.addClickListener(e -> handleComplete(taskId));
         card.add(completeArea);
+
+        // Top-left: .streak owns top-right, and .task-card is already position: relative. It
+        // cannot trigger a completion, because the card's click listener is on the inner
+        // .complete-area rather than on the card — the same reason .book-btn works.
+        // Only when push is actually configured, matching how the header bell is hidden: a
+        // control that exists to explain a server setting the family cannot change is noise.
+        if (pushSender.isEnabled()) {
+            Instant armed = armedReminders.get(taskId);
+            Span snooze = new Span(armed == null ? "⏰" : snoozeBadge(armed));
+            snooze.addClassName("snooze-chip");
+            if (armed != null) {
+                snooze.addClassName("armed");
+            }
+            snooze.getElement().setAttribute("aria-label", T.tr("snooze.aria"));
+            snooze.addClickListener(e -> new SnoozeDialog(snoozes, reminders, pushSender,
+                    memberId, homeCode, view.task(), () -> renderTasks(admin)).open());
+            card.add(snooze);
+        }
 
         String badge = badgeText(view, rotating);
         if (badge != null) {
@@ -409,6 +505,17 @@ class ChoresPanel extends VerticalLayout {
             }
         }
         return card;
+    }
+
+    /**
+     * How an armed reminder reads on the card: an absolute time, not "in 2h". The board only
+     * re-renders when something in the home changes, so a relative label would be wrong within a
+     * minute of being drawn and stay wrong for hours.
+     */
+    private String snoozeBadge(Instant dueAt) {
+        ZoneId zone = SessionContext.timeZone();
+        long days = ChronoUnit.DAYS.between(LocalDate.now(zone), dueAt.atZone(zone).toLocalDate());
+        return days <= 0 ? "⏰ " + SnoozeDialog.localTime(dueAt) : T.tr("snooze.badge.days", days);
     }
 
     /** The single most relevant status line for a card. */

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.homechores.domain.ChoreGroup;
+import com.homechores.domain.ChoreReminderRepository;
 import com.homechores.domain.ChoreGroupRepository;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.ChoreTaskRepository;
@@ -49,6 +50,7 @@ public class BackupService {
     private final MemberRepository members;
     private final ChoreTaskRepository tasks;
     private final ChoreGroupRepository groups;
+    private final ChoreReminderRepository choreReminders;
     private final CompletionRepository completions;
     private final CreditEntryRepository creditEntries;
     private final SpreeTierRepository spreeTiers;
@@ -65,6 +67,7 @@ public class BackupService {
 
     public BackupService(HomeRepository homes, MemberRepository members,
                         ChoreTaskRepository tasks, ChoreGroupRepository groups,
+                        ChoreReminderRepository choreReminders,
                         CompletionRepository completions,
                         CreditEntryRepository creditEntries, SpreeTierRepository spreeTiers,
                         RejoinRequestRepository rejoins, HomeState homeState) {
@@ -72,6 +75,7 @@ public class BackupService {
         this.members = members;
         this.tasks = tasks;
         this.groups = groups;
+        this.choreReminders = choreReminders;
         this.completions = completions;
         this.creditEntries = creditEntries;
         this.spreeTiers = spreeTiers;
@@ -217,6 +221,11 @@ public class BackupService {
         // Wipe current data for this home. Rejoin requests go too: their member ids are
         // about to be remapped, so any survivor would point at the wrong person.
         rejoins.deleteByHomeCode(code);
+        // Pending chore reminders go with them, for the reason the rejoin requests do: restore
+        // remaps every member and task id, so a survivor would nudge the wrong person about the
+        // wrong chore. They are excluded from the export for the same reason PushSubscription is
+        // — a pending, device-targeted notification is not family history.
+        choreReminders.deleteByHomeCode(code);
         completions.deleteByHomeCode(code);
         creditEntries.deleteByHomeCode(code);
         spreeTiers.deleteByHomeCode(code);

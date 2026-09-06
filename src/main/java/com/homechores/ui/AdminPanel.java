@@ -1,5 +1,6 @@
 package com.homechores.ui;
 
+import com.homechores.domain.ChoreGroup;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.Completion;
 import com.homechores.domain.DivisionStyle;
@@ -23,6 +24,7 @@ import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.Div;
+import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.notification.Notification;
@@ -42,6 +44,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -68,14 +71,14 @@ class AdminPanel extends VerticalLayout {
      *  changes with the language switcher and now embeds a count. */
     private enum Section {
         REJOINS, HELP, APPROVALS, LOG_FOR, RECENT,
-        MEMBERS, CHORES, REWARDS, SETTINGS, BACKUP, DANGER
+        MEMBERS, GROUPS, CHORES, REWARDS, SETTINGS, BACKUP, DANGER
     }
 
     /**
      * Cards the admin has opened or closed by hand; absent means "use the smart default".
      *
      * <p>This is what makes collapsing viable at all. Every settings toggle writes through
-     * immediately, which bumps HomeState and rebuilds all eleven sections from scratch — without a
+     * immediately, which bumps HomeState and rebuilds all twelve sections from scratch — without a
      * remembered choice, a card would slam shut under the admin's finger on every tap.
      */
     private final EnumMap<Section, Boolean> openState = new EnumMap<>(Section.class);
@@ -102,6 +105,8 @@ class AdminPanel extends VerticalLayout {
         // Daily work above, weekly work here, set-once configuration below it: settings alone is
         // ~950px of controls an admin touches at setup and then never again.
         add(membersSection());
+        // The card that creates the headings sits above the card that assigns them.
+        add(groupsSection());
         add(choresSection());
         add(rewardsSection());
         add(settingsSection());
@@ -767,14 +772,46 @@ class AdminPanel extends VerticalLayout {
 
     // ---- Chores -------------------------------------------------------------
 
+    /**
+     * The home's chores, grouped under their group headings and reorderable within each group.
+     *
+     * <p>Sub-headings appear only once the home actually has groups, so a family that never makes
+     * one sees exactly the flat list they saw before.
+     */
     private Details choresSection() {
         List<ChoreTask> chores = service.tasksOf(homeCode);
+        List<ChoreGroup> groups = service.groupsOf(homeCode);
         Details s = section(Section.CHORES, T.tr("admin.chores", chores.size()), false);
         Button add = new Button(T.tr("admin.addChore"), VaadinIcon.PLUS.create(), e -> choreDialog(null));
         add.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SMALL);
         s.add(add);
 
-        for (ChoreTask t : chores) {
+        Map<Long, ChoreGroup> byId = new HashMap<>();
+        groups.forEach(g -> byId.put(g.getId(), g));
+
+        Long shownHeading = null;
+        boolean first = true;
+        for (int i = 0; i < chores.size(); i++) {
+            ChoreTask t = chores.get(i);
+            ChoreGroup group = t.getGroupId() == null ? null : byId.get(t.getGroupId());
+            Long groupId = group == null ? null : group.getId();
+            if (!groups.isEmpty() && (first || !java.util.Objects.equals(groupId, shownHeading))) {
+                Div head = new Div();
+                head.setText(group == null ? T.tr("board.group.ungrouped") : group.display());
+                head.addClassName("sub");
+                head.getStyle().set("margin-top", "var(--lumo-space-s)");
+                s.add(head);
+                shownHeading = groupId;
+            }
+            first = false;
+
+            // First and last of a bucket, so the arrows can be disabled rather than offer a tap
+            // that does nothing. Neighbour comparison beats asking the service: the list is
+            // already in board order and already grouped.
+            boolean firstInBucket = i == 0 || !sameBucket(chores.get(i - 1), groupId, byId);
+            boolean lastInBucket = i == chores.size() - 1
+                    || !sameBucket(chores.get(i + 1), groupId, byId);
+
             Div emoji = new Div();
             emoji.setText(t.getEmoji());
             emoji.getStyle().set("font-size", "1.4rem");
@@ -784,8 +821,14 @@ class AdminPanel extends VerticalLayout {
             name.getStyle().set("font-weight", "600");
             name.addClassName("grow");
 
+            Button up = moveButton(VaadinIcon.ARROW_UP, "admin.moveUp", !firstInBucket,
+                    () -> service.moveChore(t.getId(), -1));
+            Button down = moveButton(VaadinIcon.ARROW_DOWN, "admin.moveDown", !lastInBucket,
+                    () -> service.moveChore(t.getId(), 1));
+
             Button edit = new Button(VaadinIcon.EDIT.create(), e -> choreDialog(t));
             edit.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+            edit.setAriaLabel(T.tr("admin.chore.title.edit"));
             Button del = new Button(VaadinIcon.TRASH.create(), e ->
                     confirm(T.tr("admin.deleteChore.title", t.getName()),
                             T.tr("admin.deleteChore.text"), () -> {
@@ -795,11 +838,144 @@ class AdminPanel extends VerticalLayout {
             del.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY,
                     ButtonVariant.LUMO_SMALL);
 
-            Div row = new Div(emoji, name, edit, del);
+            Div row = new Div(emoji, name, tools(up, down, edit, del));
             row.addClassName("list-row");
             s.add(row);
         }
         return s;
+    }
+
+    /** Is this chore in the same bucket as {@code groupId}? A groupId whose group is gone counts
+     *  as ungrouped, exactly as {@code ChoreService.tasksOf} treats it. */
+    private static boolean sameBucket(ChoreTask other, Long groupId, Map<Long, ChoreGroup> byId) {
+        Long theirs = other.getGroupId() != null && byId.containsKey(other.getGroupId())
+                ? other.getGroupId() : null;
+        return java.util.Objects.equals(theirs, groupId);
+    }
+
+    /**
+     * Wraps a row's controls so the cluster wraps as a block on a narrow phone. Individual
+     * buttons in a wrapping .list-row can otherwise split three-and-one, which reads as broken.
+     */
+    private static Div tools(Component... controls) {
+        Div box = new Div(controls);
+        box.addClassName("row-tools");
+        return box;
+    }
+
+    /** An icon-only reorder button. Disabled at the ends of its bucket rather than hidden, so the
+     *  row does not reflow as things move. Icon-only means the label lives in the aria-label. */
+    private Button moveButton(VaadinIcon icon, String labelKey, boolean enabled, Runnable action) {
+        Button b = new Button(icon.create(), e -> {
+            action.run();
+            refresh();
+        });
+        b.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+        b.setAriaLabel(T.tr(labelKey));
+        b.setEnabled(enabled);
+        return b;
+    }
+
+    /** Chore groups: the board's headings, created and arranged here. */
+    private Details groupsSection() {
+        List<ChoreGroup> groups = service.groupsOf(homeCode);
+        Details s = section(Section.GROUPS, T.tr("admin.groups", groups.size()), false);
+
+        // Div, not Span: a Span sits inline and would share a line with the button below it.
+        // The other sections get away with Spans because they return before adding anything else.
+        Div info = new Div();
+        info.setText(T.tr("admin.groups.info"));
+        info.addClassName("sub");
+        info.getStyle().set("margin-bottom", "var(--lumo-space-s)");
+        s.add(info);
+
+        Button add = new Button(T.tr("admin.addGroup"), VaadinIcon.PLUS.create(),
+                e -> groupDialog(null));
+        add.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SMALL);
+        s.add(add);
+
+        if (groups.isEmpty()) {
+            Div none = new Div();
+            none.setText(T.tr("admin.groups.none"));
+            none.addClassName("sub");
+            none.getStyle().set("margin-top", "var(--lumo-space-s)");
+            s.add(none);
+            return s;
+        }
+
+        for (int i = 0; i < groups.size(); i++) {
+            ChoreGroup g = groups.get(i);
+            Div emoji = new Div();
+            emoji.setText(g.getEmoji());
+            emoji.getStyle().set("font-size", "1.4rem");
+
+            Div name = new Div();
+            name.setText(g.getName());
+            name.getStyle().set("font-weight", "600");
+            name.addClassName("grow");
+
+            Button up = moveButton(VaadinIcon.ARROW_UP, "admin.moveUp", i > 0,
+                    () -> service.moveGroup(g.getId(), -1));
+            Button down = moveButton(VaadinIcon.ARROW_DOWN, "admin.moveDown", i < groups.size() - 1,
+                    () -> service.moveGroup(g.getId(), 1));
+
+            Button edit = new Button(VaadinIcon.EDIT.create(), e -> groupDialog(g));
+            edit.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+            edit.setAriaLabel(T.tr("admin.group.title.edit"));
+            Button del = new Button(VaadinIcon.TRASH.create(), e ->
+                    confirm(T.tr("admin.deleteGroup.title", g.getName()),
+                            T.tr("admin.deleteGroup.text"), () -> {
+                                service.deleteGroup(g.getId());
+                                refresh();
+                            }));
+            del.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY,
+                    ButtonVariant.LUMO_SMALL);
+
+            Div row = new Div(emoji, name, tools(up, down, edit, del));
+            row.addClassName("list-row");
+            s.add(row);
+        }
+        return s;
+    }
+
+    private void groupDialog(ChoreGroup existing) {
+        Dialog d = new Dialog();
+        d.setHeaderTitle(T.tr(existing == null
+                ? "admin.group.title.add" : "admin.group.title.edit"));
+        d.setWidth("min(90vw, 24em)");
+
+        TextField name = new TextField(T.tr("admin.group.name"));
+        name.setMaxLength(InputLimits.GROUP_NAME);
+        name.setWidthFull();
+        TextField emoji = new TextField(T.tr("admin.group.emoji"));
+        emoji.setMaxLength(4);
+        emoji.setWidthFull();
+        if (existing != null) {
+            name.setValue(existing.getName() == null ? "" : existing.getName());
+            emoji.setValue(existing.getEmoji() == null ? "" : existing.getEmoji());
+        }
+
+        Button save = new Button(T.tr("common.save"), e -> {
+            if (name.getValue() == null || name.getValue().isBlank()) {
+                name.setInvalid(true);
+                name.setErrorMessage(T.tr("admin.group.nameRequired"));
+                return;
+            }
+            if (existing == null) {
+                service.addGroup(homeCode, name.getValue(), emoji.getValue());
+            } else {
+                service.updateGroup(existing.getId(), name.getValue(), emoji.getValue());
+            }
+            d.close();
+            refresh();
+        });
+        save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+
+        VerticalLayout body = new VerticalLayout(name, emoji);
+        body.setPadding(false);
+        d.add(body);
+        d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), save);
+        d.open();
     }
 
     private void choreDialog(ChoreTask existing) {
@@ -812,6 +988,19 @@ class AdminPanel extends VerticalLayout {
         TextField emoji = new TextField(T.tr("admin.chore.emoji"));
         emoji.setWidthFull();
         emoji.setMaxLength(4);
+        // Identity first, then where it lives, then when it is due. Hidden entirely until the
+        // home has a group — a picker offering only "No group" is noise.
+        List<ChoreGroup> groupList = service.groupsOf(homeCode);
+        Select<ChoreGroup> group = new Select<>();
+        group.setLabel(T.tr("admin.chore.group"));
+        group.setItems(groupList);
+        // Null-safe on purpose: setEmptySelectionAllowed pushes the empty item through this same
+        // generator, so a bare ChoreGroup::display method reference NPEs on the "No group" row.
+        group.setItemLabelGenerator(g -> g == null ? T.tr("admin.chore.group.none") : g.display());
+        group.setEmptySelectionAllowed(true);
+        group.setEmptySelectionCaption(T.tr("admin.chore.group.none"));
+        group.setWidthFull();
+        group.setVisible(!groupList.isEmpty());
         FrequencyField freq = new FrequencyField();
         IntegerField credit = new IntegerField(T.tr("admin.chore.credits"));
         credit.setStepButtonsVisible(true);
@@ -840,6 +1029,8 @@ class AdminPanel extends VerticalLayout {
             hours.setValue(existing.getAvailableWindows() == null
                     ? "" : existing.getAvailableWindows());
             seasons.setValue(Seasons.asSet(existing.getSeasons()));
+            groupList.stream().filter(g -> g.getId().equals(existing.getGroupId()))
+                    .findFirst().ifPresent(group::setValue);
         }
         Button save = new Button(T.tr("common.save"), e -> {
             if (name.isEmpty()) {
@@ -859,18 +1050,21 @@ class AdminPanel extends VerticalLayout {
             int credits = credit.getValue() == null ? 0 : Math.max(0, credit.getValue());
             // The Set overload cannot fail — the values come straight from the enum.
             String seasonValue = Seasons.normalize(seasons.getValue());
+            Long groupId = group.getValue() == null ? null : group.getValue().getId();
             if (existing == null) {
                 service.addTask(homeCode, name.getValue(), emoji.getValue(), days, credits, windows,
-                        seasonValue);
+                        seasonValue, groupId);
             } else {
+                // One call, so one write and one redraw on every connected phone — never a save
+                // followed by a separate setChoreGroup.
                 service.updateTask(existing.getId(), name.getValue(), emoji.getValue(), days,
-                        credits, windows, seasonValue);
+                        credits, windows, seasonValue, groupId);
             }
             d.close();
             refresh();
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        VerticalLayout body = new VerticalLayout(name, emoji, freq, credit, hours, seasons);
+        VerticalLayout body = new VerticalLayout(name, emoji, group, freq, credit, hours, seasons);
         body.setPadding(false);
         d.add(body);
         d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), save);

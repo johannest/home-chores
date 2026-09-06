@@ -88,7 +88,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
 
         card.addClassName("auth-card");
 
-        Div langRow = new Div(new ThemeSwitcher(), new LanguageSwitcher());
+        Div langRow = new Div(new AppearanceMenu(), new LanguageSwitcher());
         langRow.getStyle().set("display", "flex").set("justify-content", "flex-end")
                 .set("gap", "var(--lumo-space-s)");
 

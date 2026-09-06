@@ -3,7 +3,9 @@ package com.homechores.ui;
 import com.homechores.service.StatsService.CountBar;
 import com.homechores.service.StatsService.DayCount;
 import com.homechores.service.StatsService.FeedbackSplit;
+import com.homechores.service.StatsService.PeriodBucket;
 import com.vaadin.flow.component.Component;
+import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
@@ -89,23 +91,56 @@ final class Charts {
         Div trend = new Div();
         trend.addClassName("trend");
         for (DayCount d : days) {
-            Div col = new Div();
-            col.addClassName("trend-col");
-
-            Div bar = new Div();
-            bar.addClassName("trend-bar");
-            int pct = max == 0 ? 0 : (int) (d.value() * 100 / max);
-            bar.getStyle().set("height", pct + "%");
-            bar.getElement().setAttribute("title", d.value() + " on " + d.date());
-
-            Span day = new Span(d.date().getDayOfWeek()
-                    .getDisplayName(TextStyle.NARROW, Locale.ENGLISH));
-            day.addClassName("trend-day");
-
-            col.add(bar, day);
-            trend.add(col);
+            // The weekday initial was hardcoded to English, which put "M T W T F S S" over a
+            // Finnish and a Swedish board too. Same for the tooltip, which was assembled with a
+            // bare " on " between the count and the date.
+            trend.add(column(d.value(), max,
+                    d.date().getDayOfWeek().getDisplayName(TextStyle.NARROW, locale()),
+                    T.tr("charts.tooltip", d.value(), d.date())));
         }
         return trend;
+    }
+
+    /**
+     * Vertical columns for a week- or month-grained trend. Same recipe as {@link #dayTrend}; the
+     * labels arrive already formatted, because the service is where the locale is known.
+     *
+     * <p>Twelve columns is the cap ({@code StatsService.TREND_WEEKS}), which is what a ~360px
+     * phone column fits: the page must never scroll sideways, so a longer trend has to thin its
+     * labels rather than widen itself.
+     */
+    static Component periodTrend(List<PeriodBucket> buckets) {
+        long max = buckets.stream().mapToLong(PeriodBucket::value).max().orElse(0);
+        Div trend = new Div();
+        trend.addClassName("trend");
+        trend.addClassName("trend-wide");
+        for (PeriodBucket b : buckets) {
+            trend.add(column(b.value(), max, b.label(),
+                    T.tr("charts.tooltip", b.value(), b.caption())));
+        }
+        return trend;
+    }
+
+    private static Div column(long value, long max, String label, String tooltip) {
+        Div col = new Div();
+        col.addClassName("trend-col");
+
+        Div bar = new Div();
+        bar.addClassName("trend-bar");
+        bar.getStyle().set("height", (max == 0 ? 0 : (int) (value * 100 / max)) + "%");
+        bar.getElement().setAttribute("title", tooltip);
+
+        Span caption = new Span(label);
+        caption.addClassName("trend-day");
+
+        col.add(bar, caption);
+        return col;
+    }
+
+    /** The UI's locale, guarded like {@link T#tr} — there is no UI in a unit test. */
+    private static Locale locale() {
+        UI ui = UI.getCurrent();
+        return ui == null ? Locale.ENGLISH : ui.getLocale();
     }
 
     private static Component empty(String text) {

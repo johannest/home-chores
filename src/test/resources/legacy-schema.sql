@@ -6,10 +6,10 @@
 --                   last_active_at
 --   MEMBER        : device_secret_hash, created_at, avatar, terms_accepted_at,
 --                   reminder_time, zone_id, reminder_locale, last_reminded_on
---   CHORE_TASK    : seasons
+--   CHORE_TASK    : seasons, group_id, sort_order
 --   COMPLETION    : note
 --   CREDIT_ENTRY  : completion_id
---   (whole tables): REJOIN_REQUEST, PUSH_SUBSCRIPTION
+--   (whole tables): REJOIN_REQUEST, PUSH_SUBSCRIPTION, CHORE_GROUP
 --
 -- Column widths are the old, wider ones (VARCHAR(255) names) on purpose: ddl-auto=update
 -- never narrows an existing column, so a real upgraded database keeps them and the service

@@ -226,6 +226,36 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   joining, or logging/reviewing a chore; background push traffic and opt-in reminders
   never count. Off by default in code.
 
+### Phase 6
+
+- **US-50 Arrange the board.** As an admin, I can move a chore up or down so the board reads in
+  the order my family actually works through it, instead of the order the chores happened to be
+  created in. Arrows rather than dragging, because the board lives on phones. Rearranging is
+  purely cosmetic: it never changes who the rotation assigns what to (§4.5), and a home that
+  never touches it keeps exactly the order it had.
+- **US-52 See what I did today, this week, this month.** As a family member, my statistics open on
+  a row of four counts — today, this week, this month, all time — and I can narrow the charts to
+  any of them, so "am I keeping up?" is answerable at a glance instead of inferable from a 7-day
+  bar chart. As someone who has used the app for a while, I also get **12-week and 12-month
+  trends**, because a fortnight is too short to show whether a household is drifting.
+
+- **US-54 Remind me about this one later.** As a family member who can't do a chore right now, I
+  can tap ⏰ on its card and pick "in 1h / 2h / 4h / 8h / a day / a week", and get one push
+  notification naming that chore when the time comes. One nudge per chore per person, replaced
+  rather than stacked if I change my mind, and it goes away by itself the moment I do the chore —
+  a notification ninety minutes later about something I already did is the one way this could be
+  worse than nothing.
+
+- **US-53 Pick a colour.** As a family member, I can change how FlashChores looks on *my* phone —
+  green, pink, blue or grey — alongside the light/dark choice I already had, because a board that
+  sits on the kitchen counter all day should be one somebody wants to look at. Per device:
+  nothing about it reaches the home or the other members.
+
+- **US-51 Group the chores.** As an admin, I can create chore groups — 🍳 Kitchen, 🧺 Laundry —
+  and put chores in them, so a long board reads as sections instead of one wall of cards.
+  Chores I do not group sit under "Other chores" at the bottom. Deleting a group keeps its
+  chores and their history; it is a label, not a container.
+
 ### Phase 5
 
 - **US-43 Log help nobody made a card for.** As a family member who helped in a way the
@@ -369,6 +399,30 @@ and the next interaction signs the phone straight back in.
 - New homes are seeded with 11 default chores, localized to the creator's language
   (see US-33).
 
+### 4.2b Chore groups and board order
+- **Groups** (`ChoreGroup`: name, emoji, position) are the board's section headings — 🍳 Kitchen,
+  🧺 Laundry. A chore carries a nullable `groupId`; chores without one form a trailing
+  "Other chores" section. Admin-only, created and arranged in their own Admin card above Chores.
+- **A group is a label, not a container.** Deleting one keeps every chore in it, and their whole
+  history — they simply drop to the ungrouped section. The confirmation says so.
+- **Order** is `ChoreTask.sortOrder`, dense 0..n-1 within each group, arranged with ↑/↓ in the
+  Admin tab. Move up/down rather than drag-and-drop: the app is phone-first and HTML5 drag events
+  do not fire on mobile touch. Arrows are disabled at the ends of a bucket, not hidden, so rows
+  do not reflow as things move.
+- **The upgrade is invisible.** `sortOrder` lands on existing rows at 0, so the board query
+  tie-breaks on `createdAt` and a home that never reorders anything keeps exactly the order it
+  had. Renumbering is lazy and per-bucket — the first move in a group is what gives it real
+  positions. Deleting or adding a chore deliberately leaves a gap; a gap changes no visible order.
+- **Two orderings, named apart.** `ChoreService.tasksOf` is board order (groups, then position,
+  then creation time) and feeds every renderer plus the statistics bars, so the charts keep
+  matching the board. `tasksInRotationOrder` is creation order and feeds the rotation alone
+  (§4.5). A dangling `groupId` — a deleted group, a hand-edited backup — reads as ungrouped
+  rather than making the chore vanish.
+- **On the board**, a heading appears only once at least one group section is being rendered, so
+  a home with no groups renders exactly the single unheaded grid it always did. Empty groups show
+  no heading; a filter narrows *within* sections. Groups are structure, filter chips are lenses —
+  groups deliberately get no chips of their own (§4.4c).
+
 ### 4.3 Completing a chore — locks & fairness
 Checks happen in this order; the first failure blocks the tap with a localized
 message and shows a matching badge on the card (`LockReason`):
@@ -449,8 +503,10 @@ message and shows a matching badge on the card (`LockReason`):
 - **The board never renders empty because of a filter.** If the chosen bucket disappears or its
   result is empty, the lens resets to `All`. Under rotating division the member's own assigned
   card is always included, whatever the lens, so the board cannot become a dead end.
-- Filtering happens in `ChoresPanel` only. `rotationAssignedChoreId` indexes the chore list by
-  position, so a filtered service-side list would silently reassign everyone's daily chore.
+- Filtering happens in `ChoresPanel` only, and so does sectioning by group (§4.2b). The *order*
+  now comes from the service; the panel decides visibility and grouping. `rotationAssignedChoreId`
+  indexes the chore list by position, so a filtered or reordered list would silently reassign
+  everyone's daily chore — which is why rotation reads `tasksInRotationOrder`, never `tasksOf`.
 - "Other help" and "Add chore" are not chores, so they show only under `All` and the
   default `Today` — the opening board must not hide them.
 
@@ -465,7 +521,9 @@ message and shows a matching badge on the card (`LockReason`):
 ### 4.5 Rotating division
 - `Home.divisionStyle` ∈ {`DEFAULT`, `ROTATING`}; `Home.rotationEnforced`
   (default true) applies in rotating mode.
-- Assignment: with members ordered by join time and chores by creation time,
+- Assignment: with members ordered by join time and chores by **creation** time
+  (`ChoreService.tasksInRotationOrder` — deliberately not the board order, so that arranging
+  the board in the Admin tab is a layout preference and never reassigns anyone's day),
   member *m* is assigned chore `(m + epochDay) mod choreCount` — one chore per
   member per day, rotating daily, no server state.
 - Cards show "⭐ Your turn" (own) or "<name> today" (others). Enforced mode blocks
@@ -513,11 +571,34 @@ message and shows a matching badge on the card (`LockReason`):
 
 ### 4.9 Statistics & charts
 - Rendered with a small dependency-free SVG/CSS **BarChart** (no commercial add-on).
-- **My stats** (any member): total approved; bar chart of my chores by type; my
-  feedback split (hate/ok/love); 7-day adherence (done vs target per day).
-- **Home stats** (admin): bar chart of approved completions per member; chore
-  popularity (completions per chore); feedback per chore (hate–ok–love split);
-  14-day activity trend; per-member adherence today.
+- **Periods.** A chip row picks a lens — **Today / This week / This month / All time** — above a
+  row of four tiles showing all four counts at once. The tiles are deliberately *not* filtered:
+  the question is a comparison ("what did I do today, this week, this month"), and a row showing
+  only the selected period would answer a quarter of it per tap. Weeks run Monday–Sunday, the
+  same week `lastWeekChoreMaster` uses; months are calendar months; both use the server zone.
+- **What the lens narrows**: the per-chore bars, the feedback split and (home) the per-member and
+  popularity bars. What it never narrows: the headline tiles, the trends, today's adherence, and
+  feedback-per-chore — "which chore does this family hate" needs more than a week of reactions.
+- **Bucketing is by `doneAt`**, so a completion approved days late still belongs to the day it
+  was *done*. Approval never moves a row between periods.
+- **Cost.** The period is applied inside the single pass that already loads the working set, and
+  the longer trends are derived from the same per-day map. Bounding the query per lens instead
+  would be one round trip per chip against a `doneAt` with no index behind it — more work, to
+  avoid a comparison per row already in memory, and it would cost the "one query for the working
+  set" property `BoardRenderCostTest` pins.
+- **My stats** (any member): total approved; the period tiles; bar chart of my chores by type
+  under the lens; my feedback split; 7-day adherence; **12-week and 12-month trends**.
+- **Home stats** (admin): per-member and chore-popularity bars under the lens; feedback per chore;
+  14-day activity; **12-week and 12-month trends**; per-member adherence today.
+- **Twelve columns is the cap** (`StatsService.TREND_WEEKS`): that is what a ~360px phone column
+  fits at a readable width, and the page must never scroll sideways. The axis carries digits —
+  `15.6` for a week, the month *number* for a month — with the readable form in the tooltip,
+  because a localized short month ("marrask.") is half again wider than its column and
+  `overflow-x: hidden` would clip it rather than reveal it (§4.15.1).
+- The lens lives in a field on `StatsPanel`, so it survives every `HomeState` rebuild and resets
+  on navigation. Tapping a chip re-renders that panel only and **never bumps `HomeState`** —
+  which period one member is looking at is not the family's business, the same rule the board's
+  filter chips follow.
 
 ### 4.10 Approvals (admin)
 - A list of all `PENDING` chore completions for the home, newest first, each with member,
@@ -529,7 +610,7 @@ message and shows a matching badge on the card (`LockReason`):
 - Live-updates when members submit; the Admin tab shows a pending-count badge.
 
 ### 4.11 Backup / restore (admin)
-- **Backup**: a JSON document `{ version, home, members[], tasks[], completions[],
+- **Backup**: a JSON document `{ version, home, members[], groups[], tasks[], completions[],
   spreeTiers[], credits[] }` for this home only (the "family DB"), offered as a
   file download `home-chores-<code>-backup.json`. Tasks include interval, credit
   value and availability windows; completions include the other-help `note`.
@@ -572,6 +653,33 @@ message and shows a matching badge on the card (`LockReason`):
 - Default chores are seeded using the home creator's locale (chore names are data;
   they don't change retroactively when the UI language changes).
 
+### 4.12b Appearance: colour scheme and palette
+- Two independent **per-device** axes, both in `localStorage`, neither a home setting: the colour
+  **scheme** (auto / light / dark, narrowing the `light dark` the server ships) and the brand
+  **palette** (green / pink / blue / grey). Both are applied by the inline `<head>` script in
+  `index.html`, before Vaadin loads, so there is no flash of the wrong one.
+- **A palette is three numbers**, not a second copy of every token: `--brand-h`, `--brand-h2` and
+  a saturation multiplier `--brand-sat`, which every brand colour in `styles.css` is written in
+  terms of. Four copies of each `light-dark()` pair would be four chances for one scheme to drift
+  unnoticed. "Grey" is the palette a hue alone cannot express, so it drops `--brand-sat` and buys
+  back the text token's contrast with lightness — the file's one per-palette token override.
+- The palette rides on its own **`data-palette`** attribute. Vaadin owns `theme` on `<html>` and
+  rewrites it wholesale on every scheme change, which would carry a palette parked there away.
+- **`html, html[theme]`, not a bare `html`.** Lumo ships
+  `[theme~="dark"] { --lumo-primary-color: … }`, whose specificity beats a plain `html` — so in
+  *forced* dark mode every brand token silently lost to Lumo's blue and the app stopped being
+  green. Auto mode was unaffected, which is why it went unnoticed.
+- **Semantic colours deliberately do not follow the palette**: the hate/ok/love segments, the
+  error red, the streak flame, the credit gold, member colours. Those encode meaning, and the same
+  bar must not read differently on two phones in one kitchen.
+- The picker is a single palette-glyph **`MenuBar`** in the header holding both axes. It replaced
+  the 7.5em theme select rather than joining it: the ≤640px action row was already at its limit
+  (§4.15.1), so this adds a setting while making the header *narrower*.
+- `@PWA(themeColor)` and the icon set are build-time constants, so the **installed** app's splash
+  and task-switcher card stay green whatever palette is chosen. The in-page
+  `<meta name="theme-color">` is patched to match, since a green address bar above a pink header
+  is visible for the whole session.
+
 ### 4.13 PWA & sharing
 - `@PWA` app shell: manifest (standalone display, theme color `#10b981`, white
   background), service worker, offline fallback stub.
@@ -594,6 +702,54 @@ message and shows a matching badge on the card (`LockReason`):
   pruned when the push service reports 404/410, deleted with their member/home, and
   excluded from backups. On iOS this requires the PWA installed to the Home Screen
   (16.4+); the dialog says so.
+
+### 4.13b Per-chore reminders (one-shot snooze)
+- A ⏰ on each chore card opens a six-chip dialog (1h / 2h / 4h / 8h / 1d / 1w). Offsets are
+  relative to **now**, not to when the chore next comes due: the member is looking at the board
+  when they ask, and ten of the eleven seeded chores have no interval for a due date to anchor to.
+- **The row is the reminder.** `ChoreReminder` exists from the moment it is asked for until it
+  fires, and is then deleted — a one-shot has no recurrence, so there is no `lastRemindedOn`
+  equivalent and nothing to make idempotent beyond the row's own existence. **At most one per
+  member per chore**, upserted: "in 2h" then "actually, tomorrow" moves it rather than arming a
+  second. Enforced in the service, not with a unique index, since `ddl-auto=update` adding one to
+  a populated table is exactly the kind of thing that bites.
+- `ChoreReminderService` is a **sibling** of `PushReminderService`, not an extension: their working
+  sets are opposite. The daily sweep evaluates every member with a reminder configured, every
+  minute; this one asks for what is already due — normally nothing, one query returning no rows,
+  which is what makes a fifth job on the single-thread scheduler affordable. What they share is
+  the transport and the discipline: **no transaction spans a blocking push send**, and sends are
+  capped (10 here, lower than the daily 20 because the two share a thread).
+- **Retired unconditionally** — sent, undeliverable, member gone, or no longer due. A row that can
+  never produce a useful notification must not be reconsidered every sixty seconds forever, and
+  unconditional deletion bounds the crash window to one duplicate nudge rather than an endless
+  retry.
+- **"Someone else did it" needs no write.** The sweep checks `isDue` when a reminder actually
+  fires and retires it silently if the chore is no longer due, instead of fanning a write out
+  across every member's reminders on the hottest path in the app.
+- **Cancelled by**: completing the chore (own reminder only — `complete` and `completeFor`),
+  deleting the chore, removing the member, deleting the home, restoring a backup (ids are
+  remapped, so a survivor would nudge the wrong person about the wrong chore), and turning the
+  daily reminder off (which destroys the browser subscription these would be delivered to).
+- **Excluded from backups**, like `PushSubscription`: a pending, device-targeted notification is
+  not family history.
+- The ⏰ shows only when VAPID keys are configured, like the header bell — a control that exists to
+  explain a server setting the family cannot change is noise. A member who has never enabled
+  notifications runs the permission flow first, and the reminder is stored only on `granted`;
+  arming one that provably cannot be delivered would be a lie the board would then badge.
+- An armed reminder badges its own card with the **absolute** time it will fire, not "in 2h": the
+  board only re-renders when something in the home changes, so a relative label would be wrong
+  within a minute. Cancelling lives inside the dialog, never on the card's chip — a one-tap
+  destructive action on a card someone may be trying to complete is the stray-tap problem
+  `confirmCompletion` exists to solve.
+- Arming **does not bump `HomeState`**: one member's private nudge is not the family's business.
+- The board lookup is **one query per render** in `ChoresPanel`, never one per card and never
+  inside `taskViews` — that method's cost is a tested invariant (`BoardRenderCostTest`), and a
+  per-member badge has no business in a per-home projection.
+- **Tapping any FlashChores notification opens the board, not the chore.** Vaadin's generated
+  service worker hard-codes `/` in its `notificationclick` handler, and overriding it would mean
+  owning the precache manifest, the offline fallback and the connection-lost channel — plus
+  widening `WebPushSender.send` to carry a URL, a method the daily reminder shares. Two invariants
+  disturbed to save one tap; the notification already names the chore.
 
 ### 4.14 Live sync
 - `HomeState` keeps a per-home revision **Vaadin Signal**; every mutation bumps it.
@@ -673,9 +829,9 @@ everyone in the home except the admin doing the logging.
 - Governed by `homechores.retention.abandoned-home-days` (**0 = disabled, the default**)
   and `homechores.retention.cron` (nightly at 03:30 by default). `findAbandoned(cutoff)`
   is a dry run for inspecting candidates without deleting.
-- Deletion reuses `ChoreService.deleteHome`, so the cascade across all eight tables
-  — rejoin requests, push subscriptions, completions, credits, spree tiers, chores,
-  members, the home row — stays in one place; sweeps log counts only, since a home
+- Deletion reuses `ChoreService.deleteHome`, so the cascade across all ten tables
+  — rejoin requests, push subscriptions, chore reminders, completions, credits, spree tiers,
+  chores, chore groups, members, the home row — stays in one place; sweeps log counts only, since a home
   code is the home's access credential.
 - Time-based deletion of homes that *were* used exists as its own opt-in tier
   (`inactive-home-days`, US-40) and follows the safeguard this section always demanded:
@@ -699,7 +855,7 @@ retention candidates before enabling the sweep.
   (`--maintenance.command=…`), which prints a JSON result between fence markers and shuts
   itself down. Vaadin's Spring integration requires a web context, so the launcher gives it
   an ephemeral **loopback** port for the couple of seconds the command runs.
-- **No hand-written SQL.** Deletion calls `ChoreService.deleteHome`, so the eight-table
+- **No hand-written SQL.** Deletion calls `ChoreService.deleteHome`, so the ten-table
   cascade (§4.11.2) lives in one tested place; SQL by hand would risk orphaned rows.
   Restore likewise goes through `BackupService`, which remaps ids rather than trusting
   the ones in the file.
@@ -839,7 +995,13 @@ scales up, not the other way round.
   stats counted apart from chores, backup round-trip keeping the note and the setting), and
   logging a chore for someone (counts for them and not the admin, immediate even with approval
   on, admin recorded as reviewer, goes in despite the streak lock and before an interval chore
-  is due, credits to the member who did it, clears a booking, unmarkable, cross-home refused).
+  is due, credits to the member who did it, clears a booking, unmarkable, cross-home refused),
+  and chore groups and board order — the headline case being that **reordering chores does not
+  change today's rotation assignment** (and that the enforcement gate still names the same chore
+  the badge does), plus group CRUD, deleting a group keeping its chores and history, move-past-
+  the-end being a no-op, buckets staying dense, a dangling groupId rendering as ungrouped, a
+  cross-home group being refused, the legacy database keeping its exact order until something
+  moves, and groups round-tripping a backup (including a pre-groups file restoring ungrouped).
 - **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest`,
   browserless): create-home flow navigates to the board with three tabs; join flow
   (two tabs, no Admin); PIN claim reveals the Admin tab; admin adds a chore from the
@@ -849,8 +1011,29 @@ scales up, not the other way round.
   gate on raises a request instead of creating a member; deleting the home needs the code typed correctly and
   signs the admin out; a member logs other help from the board and it waits uncounted, while an
   admin accepts it (counted) and promotes it to a chore, or declines it (no chore added); an
-  admin logs a chore for another member from the Admin tab; and the session lifetime is the
-  member's until the PIN is entered, and the admin's from then on.
+  admin logs a chore for another member from the Admin tab; an admin creates a chore group and the
+  board shows it as a heading over its own grid while a home with no groups still renders one
+  unheaded grid; moving a chore up reorders the board; and the session lifetime is the member's
+  until the PIN is entered, and the admin's from then on.
+- **Statistics periods** (`StatsPeriodTest`): yesterday counts in the week but not in today; the
+  week starts Monday, matching the chore-master badge; REJECTED counts in no period; a
+  **late-approved completion buckets by when it was done, not when it was approved**; the headline
+  tiles stay all-time under every lens; trends are zero-filled and end with the current bucket; a
+  chore done last month lands in its own column; home bars follow the lens while the headline does
+  not; and **axis labels stay narrow in every language** — the case Finnish broke.
+- **Per-chore reminders** (`ChoreReminderServiceTest`, sender mocked): fires once and the row is
+  gone; nothing before its time; arming twice moves it rather than stacking; completing cancels the
+  member's own but not another's; an admin logging it for someone cancels theirs; a chore someone
+  else did is retired without sending; deleting the chore / member / home clears them; a restore
+  drops them; a dead subscription is pruned and the reminder still retired; a member with no
+  devices still has it retired; the sweep is capped and the rest go next minute; absurd offsets are
+  clamped; and the notification is in the member's own language even if they never used the daily
+  reminder. Plus `SnoozeUiTest` (push mocked as configured): a chip on every chore card and none on
+  the 🙋/＋ tiles, no chips at all without VAPID keys, the dialog offers every offset, and an armed
+  reminder badges its own card and only that one.
+- **Message-bundle parity** (`MessageParityTest`): the three properties files carry identical key
+  sets, and no parameterized value hides a lone apostrophe. A missing key fails nothing at
+  runtime — it simply renders as the key — so it needs a test rather than a reviewer.
 
 ## 7. Out of scope (possible future work)
 - Real authentication/accounts; weekly/monthly leaderboards;

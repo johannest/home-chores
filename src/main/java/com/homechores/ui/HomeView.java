@@ -6,6 +6,7 @@ import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
 import com.homechores.service.HomeState;
+import com.homechores.service.ChoreReminderService;
 import com.homechores.service.PushReminderService;
 import com.homechores.service.StatsService;
 import com.homechores.service.WebPushSender;
@@ -53,6 +54,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     private final CreditService creditService;
     private final HomeState homeState;
     private final PushReminderService reminderService;
+    private final ChoreReminderService snoozeService;
     private final WebPushSender pushSender;
 
     private String homeCode;
@@ -67,13 +69,15 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
 
     public HomeView(ChoreService service, StatsService statsService, BackupService backupService,
                     CreditService creditService, HomeState homeState,
-                    PushReminderService reminderService, WebPushSender pushSender) {
+                    PushReminderService reminderService, ChoreReminderService snoozeService,
+                    WebPushSender pushSender) {
         this.service = service;
         this.statsService = statsService;
         this.backupService = backupService;
         this.creditService = creditService;
         this.homeState = homeState;
         this.reminderService = reminderService;
+        this.snoozeService = snoozeService;
         this.pushSender = pushSender;
         setPadding(false);
         setSpacing(false);
@@ -103,7 +107,8 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         // home; it feeds retention (see HomeCleanupService) and is throttled to hourly.
         service.touchHome(homeCode);
 
-        choresPanel = new ChoresPanel(service, creditService, homeCode, memberId);
+        choresPanel = new ChoresPanel(service, creditService, snoozeService, reminderService,
+                pushSender, homeCode, memberId);
         statsPanel = new StatsPanel(statsService, service, homeCode, memberId);
         adminPanel = new AdminPanel(service, creditService, backupService, homeCode, memberId);
         // Initial render happens from the Signal.effect registered in onAttach.
@@ -204,12 +209,13 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         HorizontalLayout right = new HorizontalLayout();
         right.addClassName("header-actions");
         right.setAlignItems(FlexComponent.Alignment.CENTER);
-        right.add(new ThemeSwitcher(), new LanguageSwitcher());
+        right.add(new AppearanceMenu(), new LanguageSwitcher());
         if (pushSender.isEnabled()) {
             Button remind = headerButton(T.tr("reminder.button"), VaadinIcon.BELL,
                     ButtonVariant.LUMO_CONTRAST);
             remind.addClickListener(e ->
-                    new ReminderDialog(reminderService, pushSender, memberId, homeCode).open());
+                    new ReminderDialog(reminderService, snoozeService, pushSender, memberId, homeCode)
+                            .open());
             right.add(remind);
         }
         if (admin) {
