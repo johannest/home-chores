@@ -17,6 +17,7 @@ import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H1;
+import com.vaadin.flow.component.html.Image;
 import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.Icon;
@@ -92,8 +93,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         langRow.getStyle().set("display", "flex").set("justify-content", "flex-end")
                 .set("gap", "var(--lumo-space-s)");
 
-        H1 title = new H1("⚡ FlashChores");
-        title.addClassName("brand-title");
+        H1 title = brandTitle();
         Paragraph sub = new Paragraph(T.tr("landing.tagline"));
         sub.addClassName("brand-sub");
 
@@ -136,10 +136,21 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         add(restoring, card, waiting, footer);
     }
 
+    /**
+     * The brand line: the app icon next to the name. The icon is the full-bleed master rather
+     * than logo.svg, whose white frame would show as a square in dark mode; the corners are
+     * rounded in CSS instead. The image is decorative, so it has an empty alt.
+     */
+    private static H1 brandTitle() {
+        Image logo = new Image("icons/icon.svg", "");
+        H1 title = new H1(logo, new Span("FlashChores"));
+        title.addClassName("brand-title");
+        return title;
+    }
+
     private void buildRestoringCard() {
         restoring.addClassName("restore-overlay");
-        H1 title = new H1("⚡ FlashChores");
-        title.addClassName("brand-title");
+        H1 title = brandTitle();
         ProgressBar bar = new ProgressBar();
         bar.setIndeterminate(true);
         Paragraph text = new Paragraph(T.tr("landing.restoring"));

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    FlashChores favicon variant, used for 16 and 32 px. Same palette as logo.svg (gradient tile,
+    white house, white check), but the window and speed lines are dropped: at that size they
+    only smudge. House and check are scaled up so the silhouette survives.
+  -->
+  <defs>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="512" y2="512">
+      <stop offset="0" stop-color="#10B771"/>
+      <stop offset="1" stop-color="#0DA2E7"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g transform="rotate(12 262 268)">
+    <rect x="160" y="240" width="204" height="168" rx="12" fill="#FFFFFF"/>
+    <path d="M126 256 L262 128 L398 256 Z" fill="#FFFFFF"/>
+    <path d="M126 256 L262 128 L398 256" fill="none" stroke="#FFFFFF" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <!-- a gradient-coloured outline under the check separates it from the house -->
+  <path d="M212 392 L300 478 L474 302" fill="none" stroke="url(#bg)" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M212 392 L300 478 L474 302" fill="none" stroke="#FFFFFF" stroke-width="54" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

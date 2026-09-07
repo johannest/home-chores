@@ -160,6 +160,9 @@ vaadin-select::part(label) {
 }
 
 .brand-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
     font-size: 2.4rem;
     font-weight: 800;
     line-height: 1.05;
@@ -168,6 +171,14 @@ vaadin-select::part(label) {
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+}
+
+/* The icon scales with the title's font size, so the two breakpoints below cover it too. */
+.brand-title img {
+    height: 1.15em;
+    width: auto;
+    border-radius: 22%;
+    flex: none;
 }
 
 .brand-sub {
