@@ -8,19 +8,21 @@ import com.vaadin.flow.component.html.ListItem;
 import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.UnorderedList;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
-import com.vaadin.flow.router.PageTitle;
+import com.vaadin.flow.router.HasDynamicTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.router.RouterLink;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * The brief user agreement every home creator and joiner ticks a checkbox for on the
  * landing page. Kept deliberately short and plain — a family should actually read it.
- * Like {@link PrivacyView}, the legal text is maintained in English only; the UI around
- * it (checkbox label, links) is translated.
+ * The text lives in the message bundles ({@code terms.*}) and is shown in the visitor's
+ * language; the English bundle is the authoritative wording. {@link PrivacyView} is still
+ * English only.
  */
 @Route("terms")
-@PageTitle("User agreement — FlashChores")
-public class TermsView extends VerticalLayout {
+public class TermsView extends VerticalLayout implements HasDynamicTitle {
 
     public TermsView(HomeCleanupService cleanup) {
         addClassName("centered-page");
@@ -32,84 +34,63 @@ public class TermsView extends VerticalLayout {
         card.addClassName("auth-card");
         card.getStyle().set("max-width", "640px").set("text-align", "left");
 
-        H1 title = new H1("FlashChores user agreement");
+        H1 title = new H1(T.tr("terms.title"));
         title.addClassName("brand-title");
         title.getStyle().set("font-size", "2rem");
 
-        Paragraph intro = new Paragraph(
-                "By creating or joining a home you agree to the following. It is short — "
-                        + "please do read it.");
+        Paragraph intro = new Paragraph(T.tr("terms.intro"));
         intro.addClassName("brand-sub");
         card.add(title, intro);
 
-        // The retention sentences are generated from the actual configured windows, so the
-        // agreement can't quietly drift out of step with what the server really does.
-        StringBuilder retention = new StringBuilder(
-                "FlashChores is meant for ongoing family use, not for storage. Opening the "
-                        + "app, joining, or logging a chore all count as using a home.");
-        if (cleanup.getEmptyHomeHours() > 0) {
-            retention.append(" A home that is never taken into use — nobody else joined and "
-                    + "no chores were ever logged — is deleted automatically after about "
-                    + Math.max(1, cleanup.getEmptyHomeHours() / 24) + " day(s)");
-            if (cleanup.getAbandonedHomeDays() > 0) {
-                retention.append(" (after " + cleanup.getAbandonedHomeDays()
-                        + " days at the latest)");
-            }
-            retention.append(".");
-        } else if (cleanup.getAbandonedHomeDays() > 0) {
-            retention.append(" A home that is never taken into use — nobody else joined and "
-                    + "no chores were ever logged — is deleted automatically after "
-                    + cleanup.getAbandonedHomeDays() + " days.");
-        }
-        if (cleanup.getInactiveHomeDays() > 0) {
-            retention.append(" A home that nobody in the family has opened or used for "
-                    + cleanup.getInactiveHomeDays() + " days is also deleted — members, "
-                    + "chores and history included. If your family comes back after a "
-                    + "longer break and the home is gone, contact us (see the privacy "
-                    + "page): removed homes are backed up right before deletion and can "
-                    + "usually be restored.");
-        } else {
-            retention.append(" Homes a family actually uses are never deleted for being idle.");
-        }
-        card.add(section("1. Unused homes are removed", retention.toString()));
+        card.add(section(T.tr("terms.s1.title"), retention(cleanup)));
 
-        card.add(sectionList("2. Don't enter real personal details", new String[]{
-                "Do not use real first names or surnames anywhere in the app — not for the "
-                        + "home, not for its members, not in chore names or notes.",
-                "Use nicknames instead: “Our Nest”, “Mom”, “Dad”, "
-                        + "“The Kid” — the app works exactly as well with them.",
-                "Never enter sensitive personal data of any kind (addresses, birthdays, "
-                        + "health details, and so on). The app never asks for any of it.",
+        card.add(sectionList(T.tr("terms.s2.title"), new String[]{
+                T.tr("terms.s2.item1"), T.tr("terms.s2.item2"), T.tr("terms.s2.item3"),
         }));
+        card.add(section(T.tr("terms.s3.title"), T.tr("terms.s3.body")));
+        card.add(section(T.tr("terms.s4.title"), T.tr("terms.s4.body")));
 
-        card.add(section("3. Security, on a best-effort basis",
-                "We do our best to keep FlashChores safe and the data in it protected. Still, "
-                        + "no online service can promise perfect security. By using the app you "
-                        + "accept that the service is provided “as is”, and that we are "
-                        + "not legally liable for damage caused by a third party gaining unlawful "
-                        + "access to the data. This is also why rule 2 matters: a board that only "
-                        + "ever held nicknames has nothing sensitive to lose."));
-
-        card.add(section("4. Fair use",
-                "The service is free for households. Don't use it to store unrelated data, "
-                        + "flood it with automated sign-ups, or interfere with other homes."));
-
-        Paragraph privacy = new Paragraph("How data is handled, stored and deleted is described "
-                + "in the privacy notice.");
-        Div privacyLine = new Div(privacy,
-                new RouterLink("Privacy at FlashChores", PrivacyView.class));
+        Div privacyLine = new Div(new Paragraph(T.tr("terms.privacy.text")),
+                new RouterLink(T.tr("terms.privacy.link"), PrivacyView.class));
         card.add(privacyLine);
 
-        Paragraph updated = new Paragraph("Last updated: September 2026");
+        Paragraph updated = new Paragraph(T.tr("terms.updated"));
         updated.addClassName("feedback-hint");
         card.add(updated);
 
-        RouterLink back = new RouterLink("← Back to FlashChores", LandingView.class);
+        RouterLink back = new RouterLink(T.tr("terms.back"), LandingView.class);
         back.getStyle().set("font-weight", "600").set("margin-top", "var(--lumo-space-m)")
                 .set("display", "inline-block");
         card.add(back);
 
         add(card);
+    }
+
+    @Override
+    public String getPageTitle() {
+        return T.tr("terms.pageTitle");
+    }
+
+    /**
+     * The retention sentences are generated from the actual configured windows, so the
+     * agreement can't quietly drift out of step with what the server really does.
+     */
+    private static String retention(HomeCleanupService cleanup) {
+        List<String> sentences = new ArrayList<>();
+        sentences.add(T.tr("terms.retention.base"));
+        if (cleanup.getEmptyHomeHours() > 0) {
+            String latest = cleanup.getAbandonedHomeDays() > 0
+                    ? " " + T.tr("terms.retention.latest", cleanup.getAbandonedHomeDays())
+                    : "";
+            sentences.add(T.tr("terms.retention.neverUsed",
+                    Math.max(1, cleanup.getEmptyHomeHours() / 24), latest));
+        } else if (cleanup.getAbandonedHomeDays() > 0) {
+            sentences.add(T.tr("terms.retention.neverUsedDays", cleanup.getAbandonedHomeDays()));
+        }
+        sentences.add(cleanup.getInactiveHomeDays() > 0
+                ? T.tr("terms.retention.inactive", cleanup.getInactiveHomeDays())
+                : T.tr("terms.retention.neverIdle"));
+        return String.join(" ", sentences);
     }
 
     private Div section(String heading, String body) {
