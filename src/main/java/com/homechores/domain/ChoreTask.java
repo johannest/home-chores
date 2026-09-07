@@ -17,8 +17,7 @@ public class ChoreTask {
 
     private String homeCode;
 
-    /** Length backstop for {@link InputLimits#TASK_NAME}; the service layer clips first.
-     *  ({@code ddl-auto=update} won't narrow the column on databases that predate it.) */
+    /** Length backstop for {@link InputLimits#TASK_NAME}; the service layer clips first. */
     @Column(length = InputLimits.TASK_NAME)
     private String name;
 

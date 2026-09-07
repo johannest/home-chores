@@ -11,9 +11,10 @@
 --   CREDIT_ENTRY  : completion_id
 --   (whole tables): REJOIN_REQUEST, PUSH_SUBSCRIPTION, CHORE_GROUP, CHORE_REMINDER
 --
--- Column widths are the old, wider ones (VARCHAR(255) names) on purpose: ddl-auto=update
--- never narrows an existing column, so a real upgraded database keeps them and the service
--- layer's InputLimits.clip is the only thing enforcing length. See InputLimits.
+-- Column widths are the old, wider ones (VARCHAR(255) names) on purpose: this is what a
+-- real upgraded database looks like before ddl-auto=update narrows the columns to the
+-- InputLimits widths at startup (the ALTER fails, non-fatally, for any row holding a longer
+-- value; the sample rows here are short, so it succeeds). See InputLimits.
 
 CREATE TABLE "PUBLIC"."HOME"(
     "CODE" CHARACTER VARYING(255) NOT NULL,
