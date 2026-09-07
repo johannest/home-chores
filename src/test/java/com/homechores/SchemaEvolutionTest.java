@@ -134,24 +134,9 @@ class SchemaEvolutionTest {
 
         Member alex = byName("Alex");
         assertNull(alex.getDeviceSecretHash(), "no device had a secret before Phase 4");
-        assertNull(alex.getCreatedAt(), "rows predating the column read null");
         assertNull(alex.getAvatar());
         assertNull(alex.getTermsAcceptedAt());
         assertNull(alex.getReminderTime());
-    }
-
-    /**
-     * The one place a null {@code createdAt} carries meaning: it is how the legacy
-     * identity migration tells a genuine pre-upgrade device from a new arrival.
-     */
-    @Test
-    void aPreUpgradeDeviceCanStillBeMigratedOntoADeviceSecret() {
-        Member sam = byName("Sam");
-        String secret = service.migrateLegacyIdentity(sam.getId(), CODE).orElseThrow();
-
-        assertTrue(service.verifyDeviceSecret(sam.getId(), secret));
-        assertTrue(service.migrateLegacyIdentity(sam.getId(), CODE).isEmpty(),
-                "and only once");
     }
 
     @Test

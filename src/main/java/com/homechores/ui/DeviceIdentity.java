@@ -32,8 +32,7 @@ final class DeviceIdentity {
     private DeviceIdentity() {
     }
 
-    /** A member id + home code + device secret recovered from the browser. {@code secret}
-     *  is null for a value written before secrets existed (see {@link #parse}). */
+    /** A member id + home code + device secret recovered from the browser. */
     record Stored(Long memberId, String homeCode, String secret) {
     }
 
@@ -83,16 +82,14 @@ final class DeviceIdentity {
             return Optional.empty();
         }
         String[] parts = raw.split("\\|", 3);
-        // Two parts is the pre-secret format. It surfaces with a null secret so the
-        // landing view can offer it for one-time migration (see LandingView.restoreFrom);
-        // it is never enough to sign in by itself.
-        if (parts.length < 2 || parts[1].isBlank()
-                || (parts.length == 3 && parts[2].isBlank())) {
+        // Two parts is the format from before device secrets existed. Its one-time migration
+        // path was retired in September 2026, so such a value can no longer sign anyone in;
+        // it reads as "no identity" and the landing view clears it.
+        if (parts.length < 3 || parts[1].isBlank() || parts[2].isBlank()) {
             return Optional.empty();
         }
         try {
-            return Optional.of(new Stored(Long.valueOf(parts[0]), parts[1],
-                    parts.length == 3 ? parts[2] : null));
+            return Optional.of(new Stored(Long.valueOf(parts[0]), parts[1], parts[2]));
         } catch (NumberFormatException e) {
             return Optional.empty(); // storage tampered with or written by an older version
         }

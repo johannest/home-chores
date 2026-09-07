@@ -455,11 +455,6 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
      * stored secret is the one issued to this member's device. The secret is the actual
      * proof — member ids are guessable, so without it a hand-written localStorage value
      * would sign anyone in as any member.
-     *
-     * <p>A value written before secrets existed carries none. The first such device to
-     * show up for a member is trusted once and upgraded in place (see
-     * {@link ChoreService#migrateLegacyIdentity}), so existing families keep signing in
-     * silently across the deploy instead of all being sent through the rejoin flow.
      */
     private boolean restoreFrom(DeviceIdentity.Stored stored) {
         Optional<Member> m = service.findMember(stored.memberId());
@@ -468,14 +463,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
             return false;
         }
         String secret = stored.secret();
-        if (secret == null) {
-            secret = service.migrateLegacyIdentity(stored.memberId(), stored.homeCode())
-                    .orElse(null);
-            if (secret == null) {
-                return false; // migration off, or this member's device already has a secret
-            }
-            DeviceIdentity.remember(stored.memberId(), stored.homeCode(), secret);
-        } else if (!service.verifyDeviceSecret(stored.memberId(), secret)) {
+        if (!service.verifyDeviceSecret(stored.memberId(), secret)) {
             return false;
         }
         SessionContext.signIn(m.get().getId(), m.get().getHomeCode());
