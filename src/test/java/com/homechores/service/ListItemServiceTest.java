@@ -192,12 +192,12 @@ class ListItemServiceTest {
         LocalDate today = LocalDate.now();
         lists.setDinner(code, today.minusDays(1), alex.getId(), "Yesterday");
         lists.setDinner(code, today, alex.getId(), "Today");
-        lists.setDinner(code, today.plusDays(6), alex.getId(), "Last of week");
-        lists.setDinner(code, today.plusDays(7), alex.getId(), "Next week");
+        lists.setDinner(code, today.plusDays(7), alex.getId(), "Same weekday next week");
+        lists.setDinner(code, today.plusDays(8), alex.getId(), "Beyond the window");
 
-        Map<LocalDate, ListItem> week = lists.dinners(code, today, today.plusDays(6));
+        Map<LocalDate, ListItem> week = lists.dinners(code, today, today.plusDays(7));
 
-        assertEquals(List.of(today, today.plusDays(6)), List.copyOf(week.keySet()), "both ends inclusive, calendar order");
+        assertEquals(List.of(today, today.plusDays(7)), List.copyOf(week.keySet()), "both ends inclusive, calendar order");
         assertTrue(lists.openItems(code, ListKind.TODO).isEmpty(), "dinners never leak into the other lists");
         assertTrue(lists.openItems(code, ListKind.GROCERY).isEmpty());
     }

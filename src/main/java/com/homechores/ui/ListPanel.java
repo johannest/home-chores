@@ -55,6 +55,9 @@ class ListPanel extends VerticalLayout {
     /** Half-typed dinner slots, by day — the same survival trick as {@link #draft}. */
     private final Map<LocalDate, String> dinnerDrafts = new HashMap<>();
 
+    /** Dinner slots shown: today plus a full week, so a Sunday plan reaches next Sunday. */
+    static final int WINDOW_DAYS = 8;
+
     /** Sub-tab order; the tabs and the kinds are matched by index. */
     private static final List<ListKind> KINDS = List.of(ListKind.GROCERY, ListKind.TODO, ListKind.DINNER);
 
@@ -156,22 +159,23 @@ class ListPanel extends VerticalLayout {
     // ---- Dinner week ----------------------------------------------------------
 
     /**
-     * Seven rows from today, in the member's own zone: the window slides by itself, so every day
-     * reveals a fresh empty slot a week out. No add row and no done section — a day is set,
-     * changed or cleared, never ticked.
+     * Eight rows from today — today plus a full week — in the member's own zone: the window
+     * slides by itself, so every day reveals a fresh empty slot. Eight rather than seven so that
+     * planning next week on a Sunday still reaches next Sunday. No add row and no done section
+     * — a day is set, changed or cleared, never ticked.
      */
     private void renderDinnerWeek() {
         ZoneId zone = SessionContext.timeZone();
         LocalDate today = LocalDate.now(zone);
         UI ui = UI.getCurrent();
         Locale locale = ui == null ? Locale.ENGLISH : ui.getLocale();
-        Map<LocalDate, ListItem> set = lists.dinners(homeCode, today, today.plusDays(6));
+        Map<LocalDate, ListItem> set = lists.dinners(homeCode, today, today.plusDays(WINDOW_DAYS - 1));
         Map<Long, String> names = memberNames();
 
         Div week = new Div();
         week.addClassName("shared-list");
         week.addClassName("dinner-week");
-        for (int i = 0; i < 7; i++) {
+        for (int i = 0; i < WINDOW_DAYS; i++) {
             LocalDate day = today.plusDays(i);
             week.add(dinnerRow(day, i == 0, set.get(day), names, locale));
         }

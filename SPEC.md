@@ -549,7 +549,8 @@ message and shows a matching badge on the card (`LockReason`):
 - Every edit bumps `HomeState` (after commit, like everything else) and `touchHome`s, so a
   family that only uses the list is still "active" for retention.
 - The sub-tab is view-local (a panel field, like the stats lens) and never bumps `HomeState`.
-- **Dinner** is a different shape: a sliding window of seven days from today (member's zone),
+- **Dinner** is a different shape: a sliding window of eight days — today plus a full week, so
+  planning next week on a Sunday still reaches next Sunday — from today (member's zone),
   one free-text slot per day, rows labelled with the localized full weekday and short date,
   today highlighted. A slot is set, changed or cleared inline (Enter or the ✓ button), never
   ticked; `createdAt`/`createdByMemberId` on a dinner row mean "last set at / by", shown under

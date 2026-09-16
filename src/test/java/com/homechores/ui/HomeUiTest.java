@@ -202,7 +202,7 @@ class HomeUiTest extends SpringUIUnitTest {
                 .toList();
     }
 
-    /** The seven dinner text boxes, today first. */
+    /** The dinner text boxes, today first. */
     private List<TextField> dinnerFields() {
         return $(TextField.class).all().stream()
                 .filter(f -> "What's for dinner?".equals(f.getPlaceholder()) && usable(f))
@@ -1265,7 +1265,7 @@ class HomeUiTest extends SpringUIUnitTest {
         assertTrue(listItemRows().get(0).getElement().getTextRecursively().contains("Call the plumber"));
     }
 
-    /** The dinner week: seven slots from today, set inline, a draft outliving another phone's edit. */
+    /** The dinner week: today plus a full week of slots, set inline, a draft outliving another phone's edit. */
     @Test
     void member_canSetTodaysDinner_andADraftSurvivesAnotherPhonesEdit() {
         Member alex = service.createHome("Listful", "Alex");
@@ -1277,7 +1277,7 @@ class HomeUiTest extends SpringUIUnitTest {
         listKindTabs().setSelectedIndex(2); // Dinner
 
         List<Div> rows = dinnerRows();
-        assertEquals(7, rows.size(), "a week from today");
+        assertEquals(8, rows.size(), "today plus a full week: a Sunday plan reaches next Sunday");
         assertTrue(rows.get(0).getClassNames().contains("today"));
         assertFalse(rows.get(1).getClassNames().contains("today"));
         java.time.LocalDate today = java.time.LocalDate.now(SessionContext.timeZone());
