@@ -459,40 +459,16 @@ vaadin-checkbox-group::part(group-field) {
 }
 
 /* ---- Leaderboard ---- */
-/* One row that scrolls sideways on its own. With five or more members the old wrapping row
-   took three lines of a phone screen before a single chore card showed. It bleeds to the
-   screen edge (negative margin = .page-pad's --page-pad) so a cut-off chip peeks in and says
-   "more this way", and hides the scrollbar, which would cost the very row of height this is
-   trying to save. overscroll-behavior keeps the swipe from being handed to the page — the page
-   itself must never scroll sideways (see the "Touch & small screens" section). */
 .leaderboard {
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     gap: var(--lumo-space-s);
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior-x: contain;
-    scroll-snap-type: x proximity;
-    scrollbar-width: none;
-    margin: 0 calc(-1 * var(--page-pad));
-    /* Vertical room for the .me ring, which overflow-y: hidden would otherwise clip. */
-    padding: 3px var(--page-pad) 3px;
-    /* Explicit: as a flex child it would otherwise size to its content and never scroll. The
-       width is the column plus the two bled margins. */
-    width: calc(100% + 2 * var(--page-pad));
-    box-sizing: border-box;
-    min-width: 0;
-}
-.leaderboard::-webkit-scrollbar {
-    display: none;
+    width: 100%;
 }
 
 .member-chip {
     display: flex;
     align-items: center;
-    flex: 0 0 auto;
-    white-space: nowrap;
-    scroll-snap-align: start;
     gap: 8px;
     padding: 6px 12px 6px 6px;
     border-radius: 999px;
@@ -654,10 +630,7 @@ vaadin-checkbox-group::part(group-field) {
 }
 
 .page-pad {
-    /* The column's side padding, as a variable so a full-bleed row (the leaderboard) can undo
-       exactly it at every breakpoint. */
-    --page-pad: var(--lumo-space-m);
-    padding: var(--page-pad);
+    padding: var(--lumo-space-m);
     /* viewport-fit=cover: keep the header out from under the camera island. */
     padding-top: max(var(--lumo-space-m), env(safe-area-inset-top));
     max-width: 760px;
@@ -1209,8 +1182,7 @@ vaadin-checkbox-group::part(group-field) {
     }
 
     .page-pad {
-        --page-pad: var(--lumo-space-s);
-        padding: var(--page-pad);
+        padding: var(--lumo-space-s);
         padding-top: max(var(--lumo-space-s), env(safe-area-inset-top));
         padding-left: max(var(--lumo-space-s), env(safe-area-inset-left));
         padding-right: max(var(--lumo-space-s), env(safe-area-inset-right));

@@ -588,9 +588,8 @@ message and shows a matching badge on the card (`LockReason`):
 - **new-chore** achievement = first `APPROVED` completion of that chore by that member.
 - Leaderboard shows each member with their **badge count** and 💎 credit balance
   (when > 0); admins are badged 👑. Ordered by badge count, highest first, ties in join order
-  (stable sort). One horizontally scrollable row that bleeds to the screen edge so a cut-off
-  chip hints at more; on the member's first render of the board the row is nudged so their own
-  chip is visible, and never moved again by live rebuilds.
+  (stable sort). The chips wrap to as many lines as the family needs: a single horizontally
+  scrollable row was tried and reverted — the power users wanted every member visible at once.
 - **Badge counter reset** (`Home.counterReset`: NEVER / WEEKLY / MONTHLY / YEARLY, default
   MONTHLY; `Home.counterResetAt`: the admin's last "Reset counters now"). The badge counts
   `APPROVED` completions done since the later of the current period's start (server zone, weeks
@@ -961,10 +960,8 @@ scales up, not the other way round.
   Chores or Admin panel that switched to Lists or Stats used to land with the tab bar and the
   whole short panel scrolled out of view. `HomeView` scrolls `<body>` (the scroller) to the top on the
   member's own tab tap — never on a `HomeState` rebuild, which must not move anyone's scroll.
-- **No horizontal scrolling, ever** — of the page. The app is a single column; any sideways
-  travel of the page is a layout bug, and being able to drag it half out of the viewport feels
-  broken. The one deliberate inner scroller is the leaderboard row (§4.6), which sets
-  `overscroll-behavior-x: contain` so a swipe past its end is not handed to the page.
+- **No horizontal scrolling, ever.** The app is a single column; any sideways travel is a
+  layout bug, and being able to drag the page half out of the viewport feels broken.
   `html, body` set `overflow-x: hidden` and `overscroll-behavior-x: none` as a backstop,
   but overflow is fixed at its source — the backstop hides a control rather than
   revealing it, so a clipped element is *less* visible, not more. When checking layout,

@@ -1333,6 +1333,13 @@ class HomeUiTest extends SpringUIUnitTest {
             completions.save(c);
         }
         service.resetCounters(code); // every badge back to zero → join order again
+        Home home = service.findHome(code).orElseThrow();
+        assertEquals(0, service.badgeCount(sam.getId(), home), "Sam's badge is back to zero");
+        // A genuinely new HomeView (and ChoresPanel): navigating to the route you are already on
+        // keeps the instance, and whether the push-driven rebuild has landed yet is timing.
+        // Privacy, not Landing: the landing page forwards a signed-in member straight back.
+        navigate(PrivacyView.class);
+        navigate(HomeView.class);
 
         assertEquals(List.of("Alex", "Sam", "Kim"), leaderboardNames(), "ties keep the join order");
     }
