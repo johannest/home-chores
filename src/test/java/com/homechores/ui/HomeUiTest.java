@@ -175,6 +175,16 @@ class HomeUiTest extends SpringUIUnitTest {
         tabs.setSelectedTab(tab);
     }
 
+    /** Leaderboard chips left to right, by member name (the 👑 crown is stripped). */
+    private List<String> leaderboardNames() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("member-chip") && usable(d))
+                .map(d -> d.getChildren().filter(Span.class::isInstance).map(Span.class::cast)
+                        .map(sp -> sp.getElement().getTextRecursively().replace("👑", "").trim())
+                        .findFirst().orElse("?"))
+                .toList();
+    }
+
     /** The shared list's add box has no label, only a placeholder — look it up by that. */
     private void setFieldByPlaceholder(String placeholder, String value) {
         TextField f = $(TextField.class).all().stream()
@@ -1298,5 +1308,32 @@ class HomeUiTest extends SpringUIUnitTest {
         lists.setDinner(code, today.plusDays(3), alex.getId(), "Pizza"); // bumps the home
         assertEquals("Tac", dinnerFields().get(1).getValue(), "the draft is still there");
         assertEquals("Pasta", dinnerFields().get(0).getValue(), "today's saved slot too");
+    }
+
+    /** The leaderboard ranks by the badge counter, highest first; ties keep the join order. */
+    @Test
+    void leaderboard_ranksByBadgeCount_highestFirst() {
+        Member alex = service.createHome("Ranked", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        service.joinHome(code, "Kim").orElseThrow();
+        List<ChoreTask> tasks = service.tasksOf(code);
+        service.complete(tasks.get(0).getId(), sam.getId());
+        service.complete(tasks.get(1).getId(), sam.getId());
+        service.complete(tasks.get(2).getId(), alex.getId());
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+
+        assertEquals(List.of("Sam", "Alex", "Kim"), leaderboardNames(), "two, one, none");
+
+        // The reset counts from its own instant; back-date the completions so they are not in the
+        // same millisecond as the reset (the badge counts doneAt >= reset).
+        for (Completion c : completions.findAll()) {
+            c.setDoneAt(c.getDoneAt().minusSeconds(60));
+            completions.save(c);
+        }
+        service.resetCounters(code); // every badge back to zero → join order again
+
+        assertEquals(List.of("Alex", "Sam", "Kim"), leaderboardNames(), "ties keep the join order");
     }
 }

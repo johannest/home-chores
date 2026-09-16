@@ -107,6 +107,9 @@ class ChoresPanel extends VerticalLayout {
     /** Whether the "Done today" list is expanded — same plain-field trick as the lens. */
     private boolean doneTodayOpen = false;
 
+    /** Whether the leaderboard row has been nudged to show this member's own chip yet. */
+    private boolean leaderboardScrolledToMe = false;
+
     ChoresPanel(ChoreService service, CreditService creditService, ChoreReminderService snoozes,
                 PushReminderService reminders, WebPushSender pushSender,
                 String homeCode, Long memberId) {
@@ -222,9 +225,18 @@ class ChoresPanel extends VerticalLayout {
     private void renderLeaderboard() {
         leaderboard.removeAll();
         Home home = service.findHome(homeCode).orElse(null);
-        for (Member m : service.membersOf(homeCode)) {
-            // The badge counts since the home's reset period / last manual reset; stats do not.
-            long count = home == null ? service.completionCount(m.getId()) : service.badgeCount(m.getId(), home);
+        // The badge counts since the home's reset period / last manual reset; stats do not.
+        Map<Long, Long> counts = new LinkedHashMap<>();
+        List<Member> ranked = new ArrayList<>(service.membersOf(homeCode));
+        for (Member m : ranked) {
+            counts.put(m.getId(), home == null
+                    ? service.completionCount(m.getId()) : service.badgeCount(m.getId(), home));
+        }
+        // Highest count first; ties keep the join order (List.sort is stable), so a fresh home
+        // with everyone at zero still lists the family in the order it was built.
+        ranked.sort((a, b) -> Long.compare(counts.get(b.getId()), counts.get(a.getId())));
+        for (Member m : ranked) {
+            long count = counts.get(m.getId());
 
             Div dot = MemberAvatar.dot(m);
 
@@ -251,6 +263,20 @@ class ChoresPanel extends VerticalLayout {
                 // there is, since it's literally the picture being changed.
                 chip.addClickListener(e ->
                         new AvatarPickerDialog(service, m, this::refresh).open());
+                // Ranked far right, your own chip would open off screen. Nudge the row once
+                // per visit, horizontally only (scrollIntoView could move the page), and never
+                // on a live rebuild — another member's tap must not move this phone's row.
+                if (!leaderboardScrolledToMe) {
+                    leaderboardScrolledToMe = true;
+                    // Bounding rects, not offsetLeft: the row is not a positioned ancestor,
+                    // so offsetLeft would measure from the page and be off by the page padding.
+                    chip.getElement().executeJs(
+                            "const p = this.parentElement;"
+                            + "const over = this.getBoundingClientRect().right"
+                            + "  - p.getBoundingClientRect().right"
+                            + "  + parseFloat(getComputedStyle(p).paddingRight);"
+                            + "if (over > 0) { p.scrollLeft += over; }");
+                }
             }
             leaderboard.add(chip);
         }
