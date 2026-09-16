@@ -297,6 +297,16 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
                 selected = PanelTab.CHORES;
             }
             showSelected();
+            // A tab switch starts at the top. A phone that was deep in the long Chores or Admin
+            // panel would otherwise land on a short panel with the tab bar and all of its content
+            // scrolled out of the viewport. The scroller is <body> (styles.css gives it the
+            // viewport height and overflow auto), which window.scrollTo does not move, so both
+            // are reset. Only on the member's own tap: showSelected() also runs on every
+            // HomeState rebuild, and a family member's action must not yank this phone's scroll.
+            if (e.isFromClient()) {
+                UI.getCurrent().getPage().executeJs(
+                        "document.body.scrollTop = 0; document.documentElement.scrollTop = 0;");
+            }
         });
         tabs.getStyle().set("margin-bottom", "var(--lumo-space-m)");
         return tabs;

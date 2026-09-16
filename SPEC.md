@@ -944,6 +944,10 @@ retention candidates before enabling the sweep.
 The app is used mostly on phones, so the layout is designed for a ~360–400px column and
 scales up, not the other way round.
 
+- **A tab switch starts at the top.** The page is the scroller, so a phone deep in the long
+  Chores or Admin panel that switched to Lists or Stats used to land with the tab bar and the
+  whole short panel scrolled out of view. `HomeView` scrolls `<body>` (the scroller) to the top on the
+  member's own tab tap — never on a `HomeState` rebuild, which must not move anyone's scroll.
 - **No horizontal scrolling, ever.** The app is a single column; any sideways travel is a
   layout bug, and being able to drag the page half out of the viewport feels broken.
   `html, body` set `overflow-x: hidden` and `overscroll-behavior-x: none` as a backstop,
