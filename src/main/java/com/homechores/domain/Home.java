@@ -49,6 +49,22 @@ public class Home {
     @Column(columnDefinition = "integer not null default 3")
     private int maxInARow = DEFAULT_MAX_IN_A_ROW;
 
+    /**
+     * How often the leaderboard badge counter starts over. Statistics are untouched — this only
+     * decides since when the number in a member's chip counts. Stored as text with an explicit
+     * default so {@code ddl-auto=update} can add it to populated databases (see the note on
+     * {@code approveRejoin}); existing homes therefore adopt the monthly default.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(columnDefinition = "varchar(16) not null default 'MONTHLY'")
+    private CounterReset counterReset = CounterReset.MONTHLY;
+
+    /**
+     * When an admin last pressed "reset counters now". The badge counts completions done after
+     * the later of this and the current period's start. Nullable: never pressed.
+     */
+    private Instant counterResetAt;
+
     /** How chores are divided among members. */
     @Enumerated(EnumType.STRING)
     private DivisionStyle divisionStyle = DivisionStyle.DEFAULT;
@@ -165,6 +181,22 @@ public class Home {
 
     public void setMaxInARow(int maxInARow) {
         this.maxInARow = maxInARow;
+    }
+
+    public CounterReset getCounterReset() {
+        return counterReset;
+    }
+
+    public void setCounterReset(CounterReset counterReset) {
+        this.counterReset = counterReset;
+    }
+
+    public Instant getCounterResetAt() {
+        return counterResetAt;
+    }
+
+    public void setCounterResetAt(Instant counterResetAt) {
+        this.counterResetAt = counterResetAt;
     }
 
     /** Whether the fairness rule is on at all for this home. */

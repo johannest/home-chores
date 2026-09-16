@@ -3,6 +3,7 @@ package com.homechores.ui;
 import com.homechores.domain.ChoreGroup;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.Completion;
+import com.homechores.domain.CounterReset;
 import com.homechores.domain.DivisionStyle;
 import com.homechores.domain.Home;
 import com.homechores.domain.InputLimits;
@@ -600,6 +601,24 @@ class AdminPanel extends VerticalLayout {
             }
         });
 
+        Select<CounterReset> counterReset = new Select<>();
+        counterReset.setLabel(T.tr("admin.counterReset"));
+        counterReset.setHelperText(T.tr("admin.counterReset.helper"));
+        counterReset.setWidthFull();
+        counterReset.setItems(CounterReset.values());
+        counterReset.setItemLabelGenerator(cr ->
+                T.tr("admin.counterReset." + cr.name().toLowerCase(java.util.Locale.ROOT)));
+        counterReset.setValue(home.getCounterReset());
+        counterReset.addValueChangeListener(e -> {
+            if (e.getValue() != null) {
+                Home h = service.findHome(homeCode).orElseThrow();
+                h.setCounterReset(e.getValue());
+                service.saveHome(h);
+            }
+        });
+        Button resetNow = new Button(T.tr("admin.resetCounters"), e -> resetCountersDialog());
+        resetNow.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+
         Select<DivisionStyle> style = new Select<>();
         style.setLabel(T.tr("admin.divisionStyle"));
         // Short option labels with the explanation underneath: the full sentences used to
@@ -670,6 +689,7 @@ class AdminPanel extends VerticalLayout {
 
         VerticalLayout body = new VerticalLayout(confirmTaps, confirmHint, approval,
                 otherHelp, otherHelpHint, style, enforced, maxRow, bookingHours, target,
+                counterReset, resetNow,
                 joinGate, joinHint, rejoinGate, rejoinHint, nameRow, pinLabel, pinRow);
         body.setPadding(false);
         body.setSpacing(true);
@@ -1371,6 +1391,22 @@ class AdminPanel extends VerticalLayout {
         yes.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_ERROR);
         d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), yes);
         d.open();
+    }
+
+    /** A whole family's badges go to zero at once, so it asks first; the statistics are untouched. */
+    private void resetCountersDialog() {
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle(T.tr("admin.resetCounters"));
+        dialog.add(new Span(T.tr("admin.resetCounters.confirm")));
+        Button yes = new Button(T.tr("admin.resetCounters"), e -> {
+            service.resetCounters(homeCode);
+            dialog.close();
+            toast(T.tr("admin.resetCounters.done"));
+        });
+        yes.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        Button cancel = new Button(T.tr("common.cancel"), e -> dialog.close());
+        dialog.getFooter().add(cancel, yes);
+        dialog.open();
     }
 
     private void toast(String msg) {

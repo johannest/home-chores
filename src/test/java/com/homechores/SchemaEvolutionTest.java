@@ -125,6 +125,8 @@ class SchemaEvolutionTest {
         assertTrue(home.isConfirmCompletion(), "confirm-before-completing on");
         assertTrue(home.isAllowOtherHelp(), "other help on");
         assertEquals(3, home.getMaxInARow(), "the fairness limit every home used to have");
+        assertEquals(com.homechores.domain.CounterReset.MONTHLY, home.getCounterReset(),
+                "an old home's badges start counting monthly");
     }
 
     /** Nullable columns added later read back null, and everything downstream copes. */
@@ -132,6 +134,7 @@ class SchemaEvolutionTest {
     void columnsAddedSinceTheHomeWasCreated_readBackNull() {
         Home home = service.findHome(CODE).orElseThrow();
         assertNull(home.getLastActiveAt(), "no activity was ever recorded for this home");
+        assertNull(home.getCounterResetAt(), "nobody has pressed reset");
         assertNotNull(home.lastActiveOrCreated(), "so it falls back to the creation time");
 
         Member alex = byName("Alex");

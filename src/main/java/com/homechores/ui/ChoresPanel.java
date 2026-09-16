@@ -221,8 +221,10 @@ class ChoresPanel extends VerticalLayout {
 
     private void renderLeaderboard() {
         leaderboard.removeAll();
+        Home home = service.findHome(homeCode).orElse(null);
         for (Member m : service.membersOf(homeCode)) {
-            long count = service.completionCount(m.getId());
+            // The badge counts since the home's reset period / last manual reset; stats do not.
+            long count = home == null ? service.completionCount(m.getId()) : service.badgeCount(m.getId(), home);
 
             Div dot = MemberAvatar.dot(m);
 

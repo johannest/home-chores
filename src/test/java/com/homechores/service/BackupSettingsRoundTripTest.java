@@ -2,12 +2,15 @@ package com.homechores.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.homechores.domain.DivisionStyle;
+import com.homechores.domain.CounterReset;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -44,6 +47,8 @@ class BackupSettingsRoundTripTest {
         h.setDailyTargetPerMember(3);      // default 1
         h.setBookingTimeoutHours(12);      // default 4
         h.setMaxInARow(5);                 // default 3
+        h.setCounterReset(CounterReset.YEARLY); // default MONTHLY
+        h.setCounterResetAt(Instant.parse("2026-01-01T00:00:00Z")); // default null
         chores.saveHome(h);
         return h.getAdminPin();
     }
@@ -70,6 +75,8 @@ class BackupSettingsRoundTripTest {
         assertEquals(3, after.getDailyTargetPerMember(), "dailyTargetPerMember");
         assertEquals(12, after.getBookingTimeoutHours(), "bookingTimeoutHours");
         assertEquals(5, after.getMaxInARow(), "maxInARow");
+        assertEquals(CounterReset.YEARLY, after.getCounterReset(), "counterReset");
+        assertEquals(Instant.parse("2026-01-01T00:00:00Z"), after.getCounterResetAt(), "counterResetAt");
     }
 
     /**
@@ -88,7 +95,9 @@ class BackupSettingsRoundTripTest {
                 .replaceAll("\\s*\"approveJoin\"\\s*:\\s*(true|false|null)\\s*,", "")
                 .replaceAll("\\s*\"confirmCompletion\"\\s*:\\s*(true|false|null)\\s*,", "")
                 .replaceAll("\\s*\"allowOtherHelp\"\\s*:\\s*(true|false|null)\\s*,", "")
-                .replaceAll(",\\s*\"maxInARow\"\\s*:\\s*\\d+", "");
+                .replaceAll(",\\s*\"maxInARow\"\\s*:\\s*\\d+", "")
+                .replaceAll(",\\s*\"counterReset\"\\s*:\\s*\"[A-Z]+\"", "")
+                .replaceAll(",\\s*\"counterResetAt\"\\s*:\\s*(\"[^\"]*\"|null)", "");
 
         backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
 
@@ -98,6 +107,8 @@ class BackupSettingsRoundTripTest {
         assertTrue(after.isConfirmCompletion());
         assertTrue(after.isAllowOtherHelp());
         assertEquals(3, after.getMaxInARow(), "absent limit means the classic three");
+        assertEquals(CounterReset.MONTHLY, after.getCounterReset(), "absent reset period means monthly");
+        assertNull(after.getCounterResetAt());
     }
 
     /**

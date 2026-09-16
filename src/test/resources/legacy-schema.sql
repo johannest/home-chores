@@ -3,7 +3,7 @@
 --
 -- Deliberately missing everything added since:
 --   HOME          : approve_rejoin, approve_join, confirm_completion, allow_other_help,
---                   last_active_at, max_in_a_row
+--                   last_active_at, max_in_a_row, counter_reset, counter_reset_at
 --   MEMBER        : device_secret_hash, created_at, avatar, terms_accepted_at,
 --                   reminder_time, zone_id, reminder_locale, last_reminded_on
 --   CHORE_TASK    : seasons, group_id, sort_order

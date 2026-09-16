@@ -1705,9 +1705,52 @@ public class ChoreService {
         return members.countByHomeCode(normalizeCode(homeCode));
     }
 
-    /** Number of APPROVED completions by this member (leaderboard count). */
+    /** Number of APPROVED completions by this member, ever (milestones, admin views, stats). */
     public long completionCount(Long memberId) {
         return completions.countByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
+    }
+
+    /**
+     * The number in the member's leaderboard chip: APPROVED completions done since the later of
+     * the home's current counter period start ({@link Home#getCounterReset()}, server zone,
+     * weeks starting Monday like the stats) and the admin's last "reset now". With NEVER and no
+     * manual reset this is {@link #completionCount}. Nothing else counts this way — statistics,
+     * milestones and credits stay all-time on purpose.
+     */
+    public long badgeCount(Long memberId, Home home) {
+        Instant since = counterSince(home, Instant.now());
+        return since == null
+                ? completionCount(memberId)
+                : completions.countByMemberIdAndStatusAndDoneAtGreaterThanEqual(
+                        memberId, CompletionStatus.APPROVED, since);
+    }
+
+    /** The instant the badge counter currently counts from; null = all time. Package-private for tests. */
+    static Instant counterSince(Home home, Instant now) {
+        ZoneId zone = ZoneId.systemDefault();
+        LocalDate today = LocalDate.ofInstant(now, zone);
+        LocalDate start = switch (home.getCounterReset()) {
+            case WEEKLY -> today.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
+            case MONTHLY -> today.withDayOfMonth(1);
+            case YEARLY -> today.withDayOfYear(1);
+            case NEVER -> null;
+        };
+        Instant periodStart = start == null ? null : start.atStartOfDay(zone).toInstant();
+        Instant manual = home.getCounterResetAt();
+        if (periodStart == null) {
+            return manual;
+        }
+        return manual != null && manual.isAfter(periodStart) ? manual : periodStart;
+    }
+
+    /** "Reset counters now": every member's badge starts from zero; statistics keep everything. */
+    @Transactional
+    public void resetCounters(String homeCode) {
+        Home home = homes.findById(normalizeCode(homeCode)).orElseThrow();
+        home.setCounterResetAt(Instant.now());
+        touch(home);
+        homes.save(home);
+        homeState.bump(home.getCode());
     }
 
     /**

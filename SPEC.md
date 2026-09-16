@@ -586,8 +586,18 @@ message and shows a matching badge on the card (`LockReason`):
 - **Milestones** (5/10/25/50/100/250) evaluated on the member's approved count at the
   moment a completion becomes approved.
 - **new-chore** achievement = first `APPROVED` completion of that chore by that member.
-- Leaderboard shows each member with their approved count and 💎 credit balance
+- Leaderboard shows each member with their **badge count** and 💎 credit balance
   (when > 0); admins are badged 👑.
+- **Badge counter reset** (`Home.counterReset`: NEVER / WEEKLY / MONTHLY / YEARLY, default
+  MONTHLY; `Home.counterResetAt`: the admin's last "Reset counters now"). The badge counts
+  `APPROVED` completions done since the later of the current period's start (server zone, weeks
+  from Monday like the stats) and the manual reset (`ChoreService.badgeCount`). Only that
+  number: `completionCount`, milestones, credits, the chore master and every statistic stay
+  all-time. "Reset counters now" asks first (the whole family's badges go to zero at once),
+  stamps `counterResetAt` and bumps the home. A manual reset outlives a period boundary only
+  until the next period starts. The column carries a DDL default, so existing homes adopt
+  monthly on upgrade. Both fields travel through backup; older files restore as MONTHLY with
+  no reset stamp.
 - **Avatars**: each member may pick an animal avatar from a fixed CC0 set (Kenney
   "Animal Pack Redux", 30 round faces under `META-INF/resources/avatars/`, id whitelisted
   in `Avatars`). Rendered by the shared `MemberAvatar` dot (color ring + image, or

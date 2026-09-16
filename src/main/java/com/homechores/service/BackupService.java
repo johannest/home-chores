@@ -13,6 +13,7 @@ import com.homechores.domain.ChoreTaskRepository;
 import com.homechores.domain.Completion;
 import com.homechores.domain.CompletionRepository;
 import com.homechores.domain.CompletionStatus;
+import com.homechores.domain.CounterReset;
 import com.homechores.domain.CreditEntry;
 import com.homechores.domain.CreditEntryRepository;
 import com.homechores.domain.CreditType;
@@ -98,7 +99,8 @@ public class BackupService {
                 home.isRequireApproval(), home.getDailyTargetPerMember(), home.getDivisionStyle(),
                 home.isRotationEnforced(), home.getBookingTimeoutHours(), home.isApproveRejoin(),
                 home.isApproveJoin(), home.isConfirmCompletion(), home.isAllowOtherHelp(),
-                home.getCreatedAt(), home.getMaxInARow());
+                home.getCreatedAt(), home.getMaxInARow(), home.getCounterReset(),
+                home.getCounterResetAt());
         for (Member m : members.findByHomeCodeOrderByJoinedAtAsc(homeCode)) {
             b.members.add(new MemberDto(m.getId(), m.getName(), m.getColor(), m.isAdmin(),
                     m.getJoinedAt(), m.getAvatar()));
@@ -217,6 +219,8 @@ public class BackupService {
         home.setConfirmCompletion(b.home.confirmCompletion == null || b.home.confirmCompletion);
         home.setAllowOtherHelp(b.home.allowOtherHelp == null || b.home.allowOtherHelp);
         home.setMaxInARow(Home.clampMaxInARow(b.home.maxInARow)); // absent in older files → 3
+        home.setCounterReset(b.home.counterReset == null ? CounterReset.MONTHLY : b.home.counterReset);
+        home.setCounterResetAt(b.home.counterResetAt);
         if (b.home.bookingTimeoutHours > 0) {
             home.setBookingTimeoutHours(b.home.bookingTimeoutHours);
         }
@@ -417,7 +421,9 @@ public class BackupService {
                           Boolean approveRejoin, Boolean approveJoin, Boolean confirmCompletion,
                           Boolean allowOtherHelp, Instant createdAt,
                           /** Boxed for the same reason: pre-setting backups restore as 3. */
-                          Integer maxInARow) {
+                          Integer maxInARow,
+                          /** Null in older files → MONTHLY; the reset stamp is simply absent. */
+                          CounterReset counterReset, Instant counterResetAt) {
     }
 
     /** {@code avatar} is absent in pre-avatar backups and deserializes to null — fine. */
