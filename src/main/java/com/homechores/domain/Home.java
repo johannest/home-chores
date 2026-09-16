@@ -33,6 +33,22 @@ public class Home {
     /** How many chores each member is expected to do per day (1–3). */
     private int dailyTargetPerMember = 1;
 
+    /** The default for {@link #maxInARow}: the limit every home had before it was a setting. */
+    public static final int DEFAULT_MAX_IN_A_ROW = 3;
+
+    /** The choices the admin settings offer for {@link #maxInARow}; 0 means no limit. */
+    public static final java.util.List<Integer> MAX_IN_A_ROW_OPTIONS = java.util.List.of(0, 2, 3, 4, 5, 10);
+
+    /**
+     * How many times one member may complete the SAME chore in a row before it locks for them
+     * until someone else does it; {@code 0} switches the rule off. Only applies in
+     * {@link DivisionStyle#DEFAULT} — rotation ignores the streak. Families asked for this:
+     * a fixed three was too tight for a home where one person genuinely owns a chore. See the
+     * note on {@code approveRejoin} for why the column carries an explicit default.
+     */
+    @Column(columnDefinition = "integer not null default 3")
+    private int maxInARow = DEFAULT_MAX_IN_A_ROW;
+
     /** How chores are divided among members. */
     @Enumerated(EnumType.STRING)
     private DivisionStyle divisionStyle = DivisionStyle.DEFAULT;
@@ -141,6 +157,24 @@ public class Home {
 
     public void setDailyTargetPerMember(int dailyTargetPerMember) {
         this.dailyTargetPerMember = dailyTargetPerMember;
+    }
+
+    public int getMaxInARow() {
+        return maxInARow;
+    }
+
+    public void setMaxInARow(int maxInARow) {
+        this.maxInARow = maxInARow;
+    }
+
+    /** Whether the fairness rule is on at all for this home. */
+    public boolean isStreakLimited() {
+        return maxInARow > 0;
+    }
+
+    /** A stored or restored value that is not one of the offered options falls back to the default. */
+    public static int clampMaxInARow(Integer value) {
+        return value != null && MAX_IN_A_ROW_OPTIONS.contains(value) ? value : DEFAULT_MAX_IN_A_ROW;
     }
 
     public DivisionStyle getDivisionStyle() {

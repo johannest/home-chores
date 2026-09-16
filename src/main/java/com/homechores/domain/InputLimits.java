@@ -40,6 +40,12 @@ public final class InputLimits {
     public static final int GROUP_NAME = 30;
 
     /**
+     * One line on the shared grocery / to-do list. Longer than a chore name because a to-do is
+     * a sentence ("ask the neighbour about the fence before Friday") shown in a full-width row.
+     */
+    public static final int LIST_ITEM = 160;
+
+    /**
      * Chore emoji, server-side cap. The UI caps at 4 UTF-16 units, but a single emoji
      * grapheme (skin tones, family sequences) can be longer — 16 leaves room for one
      * real emoji while still shutting out free text.

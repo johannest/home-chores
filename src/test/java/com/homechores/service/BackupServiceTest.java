@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.homechores.domain.ChoreGroup;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.Home;
+import com.homechores.domain.ListItem;
+import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import com.homechores.service.BackupService.RestoreResult;
 import java.nio.charset.StandardCharsets;
@@ -25,6 +27,51 @@ class BackupServiceTest {
     StatsService stats;
     @Autowired
     BackupService backup;
+    @Autowired
+    ListItemService lists;
+
+    /** The shared lists are family data, so they ride along — ticked state and ticker included. */
+    @Test
+    void sharedLists_surviveTheRoundTrip_withTheTickerRemapped() {
+        Member alex = chores.createHome("Listful", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = chores.joinHome(code, "Sam").orElseThrow();
+        lists.add(code, ListKind.GROCERY, alex.getId(), "Milk");
+        ListItem bread = lists.add(code, ListKind.GROCERY, sam.getId(), "Bread").orElseThrow();
+        lists.setDone(bread.getId(), sam.getId(), true);
+        lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber");
+        java.time.LocalDate today = java.time.LocalDate.now();
+        lists.setDinner(code, today, sam.getId(), "Pasta");
+
+        String json = backup.export(code);
+        assertTrue(json.contains("\"listItems\""));
+        assertTrue(json.contains("Bread"));
+        assertTrue(json.contains("\"day\" : \"" + today + "\""), "the dinner's day travels as an ISO date");
+
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+
+        assertEquals(List.of("Milk"),
+                lists.openItems(code, ListKind.GROCERY).stream().map(ListItem::getText).toList());
+        List<ListItem> done = lists.doneItems(code, ListKind.GROCERY);
+        assertEquals(1, done.size());
+        assertEquals("Bread", done.get(0).getText());
+        Member restoredSam = chores.findMemberByName(code, "Sam").orElseThrow();
+        assertEquals(restoredSam.getId(), done.get(0).getDoneByMemberId(),
+                "the ticker points at the restored Sam, not the old id");
+        assertEquals(1, lists.openItems(code, ListKind.TODO).size());
+        ListItem dinner = lists.dinners(code, today, today).get(today);
+        assertEquals("Pasta", dinner.getText(), "the dinner slot is back on its day");
+        assertEquals(restoredSam.getId(), dinner.getCreatedByMemberId(), "set by the restored Sam");
+
+        // A file from before the lists existed has no such key: restore leaves the lists empty.
+        String old = json.replaceAll(",\\s*\"listItems\"\\s*:\\s*\\[[^\\]]*\\]", "");
+        assertFalse(old.contains("listItems"), "precondition: key stripped");
+        backup.restore(old.getBytes(StandardCharsets.UTF_8), code);
+        assertTrue(lists.openItems(code, ListKind.GROCERY).isEmpty());
+        assertTrue(lists.doneItems(code, ListKind.GROCERY).isEmpty());
+        assertTrue(lists.dinners(code, today, today).isEmpty());
+        assertEquals(2, chores.membersOf(code).size(), "everything else still restores");
+    }
 
     @Test
     void exportThenRestore_roundTripsData() {

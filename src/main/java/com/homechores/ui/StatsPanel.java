@@ -104,7 +104,6 @@ class StatsPanel extends VerticalLayout {
         body.add(today);
 
         body.add(headlineRow(s.counts()));
-        body.add(periodChips());
 
         String lens = T.tr("stats.period." + period.name().toLowerCase(Locale.ROOT));
         body.add(Charts.card(T.tr("stats.byChore.period", lens),
@@ -117,15 +116,19 @@ class StatsPanel extends VerticalLayout {
     }
 
     /**
-     * Today / this week / this month / all time, side by side and always all-time facts.
+     * Today / this week / this month / all time, side by side and always all-time facts — and
+     * also the lens picker: tapping a tile selects that period for the charts below.
      *
-     * <p>Deliberately not filtered by the selected lens: the question the power users asked —
-     * "what did I do today, this week, this month" — is a comparison, and a row that only ever
-     * showed the selected period would answer one quarter of it per tap.
+     * <p>The counts are deliberately not filtered by the selected lens: the question the power
+     * users asked — "what did I do today, this week, this month" — is a comparison, and a row
+     * that only ever showed the selected period would answer one quarter of it per tap. The
+     * tiles used to sit above a separate chip row with the very same four labels; users read
+     * that as redundant and tried to tap the tiles, so now the tiles are the picker.
      */
     private Div headlineRow(PeriodCounts counts) {
         Div row = new Div();
         row.addClassName("stat-tiles");
+        row.getElement().setAttribute("role", "group");
         for (Period p : Period.values()) {
             Div tile = new Div();
             tile.addClassName("stat-tile");
@@ -137,31 +140,30 @@ class StatsPanel extends VerticalLayout {
             Span label = new Span(T.tr("stats.headline." + p.name().toLowerCase(Locale.ROOT)));
             label.addClassName("stat-label");
             tile.add(value, label);
+            // A plain Div, so the button semantics are spelled out by hand: focusable, announced
+            // as a toggle, and operable from the keyboard like the button it looks like.
+            tile.getElement().setAttribute("role", "button");
+            tile.getElement().setAttribute("tabindex", "0");
+            tile.getElement().setAttribute("aria-pressed", String.valueOf(p == period));
+            tile.addClickListener(e -> selectPeriod(p));
+            tile.getElement().addEventListener("keydown", e -> selectPeriod(p))
+                    .setFilter("event.key === 'Enter' || event.key === ' '")
+                    .preventDefault();
             row.add(tile);
         }
         return row;
     }
 
-    /** The lens picker. Reuses the board's chip recipe so the two rows read the same way. */
-    private Div periodChips() {
-        Div bar = new Div();
-        bar.addClassName("filter-bar");
-        for (Period p : Period.values()) {
-            Div chip = new Div();
-            chip.addClassName("filter-chip");
-            if (p == period) {
-                chip.addClassName("selected");
-            }
-            chip.setText(T.tr("stats.period." + p.name().toLowerCase(Locale.ROOT)));
-            chip.addClickListener(e -> {
-                period = p;
-                // This panel only. A lens is one member's view preference, so it must not bump
-                // HomeState and redraw the whole family's screens.
-                renderBody(showHome);
-            });
-            bar.add(chip);
+    /**
+     * Re-renders this panel only. A lens is one member's view preference, so it must not bump
+     * HomeState and redraw the whole family's screens.
+     */
+    private void selectPeriod(Period p) {
+        if (p == period) {
+            return;
         }
-        return bar;
+        period = p;
+        renderBody(showHome);
     }
 
     private static Paragraph emptyPeriod() {
@@ -193,7 +195,6 @@ class StatsPanel extends VerticalLayout {
         }
 
         body.add(headlineRow(s.counts()));
-        body.add(periodChips());
 
         String lens = T.tr("stats.period." + period.name().toLowerCase(Locale.ROOT));
         body.add(Charts.card(T.tr("stats.perMember.period", lens),

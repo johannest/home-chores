@@ -43,6 +43,7 @@ class BackupSettingsRoundTripTest {
         h.setDivisionStyle(DivisionStyle.ROTATING); // default DEFAULT
         h.setDailyTargetPerMember(3);      // default 1
         h.setBookingTimeoutHours(12);      // default 4
+        h.setMaxInARow(5);                 // default 3
         chores.saveHome(h);
         return h.getAdminPin();
     }
@@ -68,6 +69,7 @@ class BackupSettingsRoundTripTest {
         assertEquals(DivisionStyle.ROTATING, after.getDivisionStyle(), "divisionStyle");
         assertEquals(3, after.getDailyTargetPerMember(), "dailyTargetPerMember");
         assertEquals(12, after.getBookingTimeoutHours(), "bookingTimeoutHours");
+        assertEquals(5, after.getMaxInARow(), "maxInARow");
     }
 
     /**
@@ -85,7 +87,8 @@ class BackupSettingsRoundTripTest {
                 .replaceAll("\\s*\"approveRejoin\"\\s*:\\s*(true|false|null)\\s*,", "")
                 .replaceAll("\\s*\"approveJoin\"\\s*:\\s*(true|false|null)\\s*,", "")
                 .replaceAll("\\s*\"confirmCompletion\"\\s*:\\s*(true|false|null)\\s*,", "")
-                .replaceAll("\\s*\"allowOtherHelp\"\\s*:\\s*(true|false|null)\\s*,", "");
+                .replaceAll("\\s*\"allowOtherHelp\"\\s*:\\s*(true|false|null)\\s*,", "")
+                .replaceAll(",\\s*\"maxInARow\"\\s*:\\s*\\d+", "");
 
         backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
 
@@ -94,6 +97,7 @@ class BackupSettingsRoundTripTest {
         assertTrue(after.isApproveJoin(), "absent join gate means gated, not open");
         assertTrue(after.isConfirmCompletion());
         assertTrue(after.isAllowOtherHelp());
+        assertEquals(3, after.getMaxInARow(), "absent limit means the classic three");
     }
 
     /**

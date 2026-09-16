@@ -10,9 +10,11 @@ import com.homechores.domain.ChoreTask;
 import com.homechores.domain.Completion;
 import com.homechores.domain.CompletionRepository;
 import com.homechores.domain.Home;
+import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import com.homechores.domain.Season;
 import com.homechores.service.ChoreService;
+import com.homechores.service.ListItemService;
 import com.vaadin.flow.component.ClickEvent;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.ComponentUtil;
@@ -25,6 +27,7 @@ import com.vaadin.flow.component.html.Image;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.menubar.MenuBar;
 import com.vaadin.flow.component.select.Select;
+import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
 import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
@@ -46,6 +49,9 @@ class HomeUiTest extends SpringUIUnitTest {
 
     @Autowired
     CompletionRepository completions;
+
+    @Autowired
+    ListItemService lists;
 
     /** Pin the UI language to English so the text-based lookups below are stable. */
     @BeforeEach
@@ -158,6 +164,65 @@ class HomeUiTest extends SpringUIUnitTest {
         return $(Span.class).all().stream().anyMatch(s -> text.equals(s.getText()));
     }
 
+    /** Selects a top-level tab by its label, so tests do not hard-code tab positions. */
+    private void selectTab(String label) {
+        Tabs tabs = $(Tabs.class).first();
+        Tab tab = tabs.getChildren()
+                .filter(Tab.class::isInstance).map(Tab.class::cast)
+                .filter(t -> t.getElement().getTextRecursively().trim().startsWith(label))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No tab: " + label));
+        tabs.setSelectedTab(tab);
+    }
+
+    /** The shared list's add box has no label, only a placeholder — look it up by that. */
+    private void setFieldByPlaceholder(String placeholder, String value) {
+        TextField f = $(TextField.class).all().stream()
+                .filter(x -> placeholder.equals(x.getPlaceholder()) && usable(x))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No usable field with placeholder: " + placeholder));
+        f.setValue(value);
+    }
+
+    private List<Div> listItemRows() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("list-item") && usable(d))
+                .toList();
+    }
+
+    private Tabs listKindTabs() {
+        return $(Tabs.class).all().stream()
+                .filter(t -> t.getClassNames().contains("list-kind-tabs") && usable(t))
+                .findFirst().orElseThrow(() -> new AssertionError("No list sub-tabs"));
+    }
+
+    private List<Div> dinnerRows() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("dinner-row") && usable(d))
+                .toList();
+    }
+
+    /** The seven dinner text boxes, today first. */
+    private List<TextField> dinnerFields() {
+        return $(TextField.class).all().stream()
+                .filter(f -> "What's for dinner?".equals(f.getPlaceholder()) && usable(f))
+                .toList();
+    }
+
+    /** The stats headline tiles (Today / This week / This month / All time). */
+    private List<Div> statTiles() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("stat-tile") && usable(d))
+                .toList();
+    }
+
+    private Div statTile(String label) {
+        return statTiles().stream()
+                .filter(d -> d.getElement().getTextRecursively().endsWith(label))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No stat tile: " + label));
+    }
+
     /** An admin card by the start of its summary — the counts in some titles move around. */
     private Details adminSection(String summaryPrefix) {
         return $(Details.class).all().stream()
@@ -233,7 +298,7 @@ class HomeUiTest extends SpringUIUnitTest {
     // ---- tests --------------------------------------------------------------
 
     @Test
-    void createHome_navigatesToBoard_asAdmin_withThreeTabs() {
+    void createHome_navigatesToBoard_asAdmin_withFourTabs() {
         navigate(LandingView.class);
         setField("Home name", "Test Home");
         setField("Your name", "Alex");
@@ -242,12 +307,12 @@ class HomeUiTest extends SpringUIUnitTest {
         clickButton("Let's go 🚀"); // dismiss the "home created / here's your PIN" dialog
 
         assertInstanceOf(HomeView.class, getCurrentView());
-        assertEquals(3, tabCount(), "admin sees Chores + Stats + Admin");
+        assertEquals(4, tabCount(), "admin sees Chores + List + Stats + Admin");
         assertTrue(hasSpanWithText("Alex"), "creator appears on the leaderboard");
     }
 
     @Test
-    void joinHome_navigatesToBoard_asMember_withTwoTabs() {
+    void joinHome_navigatesToBoard_asMember_withThreeTabs() {
         Member admin = service.createHome("Shared", "Alex");
         Home home = service.findHome(admin.getHomeCode()).orElseThrow();
         home.setApproveJoin(false); // no gate: joining signs in straight away
@@ -261,7 +326,7 @@ class HomeUiTest extends SpringUIUnitTest {
         clickButton("Join home 🙌");
 
         assertInstanceOf(HomeView.class, getCurrentView());
-        assertEquals(2, tabCount(), "a plain member has no Admin tab");
+        assertEquals(3, tabCount(), "a plain member has no Admin tab");
     }
 
     /** By default a first-time join waits for an admin — a guessed code alone creates nobody. */
@@ -297,13 +362,13 @@ class HomeUiTest extends SpringUIUnitTest {
 
         SessionContext.signIn(sam.getId(), sam.getHomeCode());
         navigate(HomeView.class);
-        assertEquals(2, tabCount());
+        assertEquals(3, tabCount());
 
         clickButton("Admin?");
         setField("Admin PIN", home.getAdminPin());
         clickButton("Unlock");
 
-        assertEquals(3, tabCount(), "correct PIN unlocks the Admin tab");
+        assertEquals(4, tabCount(), "correct PIN unlocks the Admin tab");
     }
 
     @Test
@@ -314,7 +379,7 @@ class HomeUiTest extends SpringUIUnitTest {
         navigate(HomeView.class);
 
         // Switch to the Admin tab (index 2) and add a chore.
-        $(Tabs.class).first().setSelectedIndex(2);
+        selectTab("Admin");
         openSection("Chores");
         clickButton("Add chore");
         setField("Chore name", "Iron shirts");
@@ -330,7 +395,7 @@ class HomeUiTest extends SpringUIUnitTest {
         SessionContext.signIn(admin.getId(), code);
         navigate(HomeView.class);
 
-        $(Tabs.class).first().setSelectedIndex(2);
+        selectTab("Admin");
         openSection("Chore groups");
         clickButton("Add group");
         setField("Group name", "Kitchen");
@@ -370,7 +435,7 @@ class HomeUiTest extends SpringUIUnitTest {
         navigate(HomeView.class);
         String second = service.tasksOf(code).get(1).getName();
 
-        $(Tabs.class).first().setSelectedIndex(2);
+        selectTab("Admin");
         openSection("Chores");
         // Every row carries "Move up"; the first one is disabled, so the second row's is the
         // first usable one.
@@ -462,7 +527,7 @@ class HomeUiTest extends SpringUIUnitTest {
         String code = admin.getHomeCode();
         SessionContext.signIn(admin.getId(), code);
         navigate(HomeView.class);
-        $(Tabs.class).first().setSelectedIndex(2); // Admin tab
+        selectTab("Admin");
         openSection("Danger zone");
 
         clickButton("Delete this home");
@@ -537,7 +602,7 @@ class HomeUiTest extends SpringUIUnitTest {
 
         SessionContext.signIn(admin.getId(), code);
         navigate(HomeView.class);
-        $(Tabs.class).first().setSelectedIndex(2); // Admin tab
+        selectTab("Admin");
         openSection("Recent chores");
 
         clickButton("Unmark");
@@ -575,7 +640,7 @@ class HomeUiTest extends SpringUIUnitTest {
 
         SessionContext.signIn(admin.getId(), code);
         navigate(HomeView.class);
-        $(Tabs.class).first().setSelectedIndex(2); // Admin tab
+        selectTab("Admin");
 
         clickButton("Accept");
         clickButton("Accept help");
@@ -599,7 +664,7 @@ class HomeUiTest extends SpringUIUnitTest {
 
         SessionContext.signIn(admin.getId(), code);
         navigate(HomeView.class);
-        $(Tabs.class).first().setSelectedIndex(2);
+        selectTab("Admin");
 
         clickButton("Decline");
 
@@ -617,7 +682,7 @@ class HomeUiTest extends SpringUIUnitTest {
 
         SessionContext.signIn(admin.getId(), code);
         navigate(HomeView.class);
-        $(Tabs.class).first().setSelectedIndex(2); // Admin tab
+        selectTab("Admin");
         openSection("Log a chore for someone");
 
         // "Who did it" offers the other members only, so the default is already Sam.
@@ -658,7 +723,7 @@ class HomeUiTest extends SpringUIUnitTest {
         Member sam = service.joinHome(admin.getHomeCode(), "Sam").orElseThrow();
         SessionContext.signIn(sam.getId(), sam.getHomeCode());
         navigate(HomeView.class);
-        assertEquals(2, tabCount());
+        assertEquals(3, tabCount());
     }
 
     // ---- Board filter chips -------------------------------------------------
@@ -995,7 +1060,7 @@ class HomeUiTest extends SpringUIUnitTest {
         String code = alex.getHomeCode();
         SessionContext.signIn(alex.getId(), code);
         navigate(HomeView.class);
-        $(Tabs.class).first().setSelectedIndex(2);
+        selectTab("Admin");
         openSection("Chores");
         clickButton("Add chore");
 
@@ -1016,7 +1081,7 @@ class HomeUiTest extends SpringUIUnitTest {
         Member alex = service.createHome("Shared", "Alex");
         SessionContext.signIn(alex.getId(), alex.getHomeCode());
         navigate(HomeView.class);
-        $(Tabs.class).first().setSelectedIndex(2);
+        selectTab("Admin");
 
         for (String title : List.of("Home settings", "Backup", "Danger zone", "Chores",
                 "Members", "Rewards", "Recent chores", "Log a chore")) {
@@ -1030,7 +1095,7 @@ class HomeUiTest extends SpringUIUnitTest {
         service.joinHome(alex.getHomeCode(), "Sam");
         SessionContext.signIn(alex.getId(), alex.getHomeCode());
         navigate(HomeView.class);
-        $(Tabs.class).first().setSelectedIndex(2);
+        selectTab("Admin");
 
         assertEquals("Chores (11)", adminSection("Chores").getSummaryText());
         assertEquals("Members (2)", adminSection("Members").getSummaryText());
@@ -1052,7 +1117,7 @@ class HomeUiTest extends SpringUIUnitTest {
 
         SessionContext.signIn(alex.getId(), code);
         navigate(HomeView.class);
-        $(Tabs.class).first().setSelectedIndex(2);
+        selectTab("Admin");
         assertTrue(adminSection("Pending approvals").isOpened(), "a queue opens itself");
 
         clickButton("Approve");
@@ -1067,7 +1132,7 @@ class HomeUiTest extends SpringUIUnitTest {
         String code = alex.getHomeCode();
         SessionContext.signIn(alex.getId(), code);
         navigate(HomeView.class);
-        $(Tabs.class).first().setSelectedIndex(2);
+        selectTab("Admin");
         openSection("Home settings");
 
         // Any mutation bumps the home and rebuilds all eleven sections from scratch.
@@ -1088,7 +1153,7 @@ class HomeUiTest extends SpringUIUnitTest {
         service.complete(service.tasksOf(code).get(0).getId(), sam.getId());
         SessionContext.signIn(alex.getId(), code);
         navigate(HomeView.class);
-        $(Tabs.class).first().setSelectedIndex(2);
+        selectTab("Admin");
 
         toggleSection("Pending approvals", false);
         service.addTask(code, "Sweep the porch", "🧹", 0);
@@ -1112,5 +1177,126 @@ class HomeUiTest extends SpringUIUnitTest {
         assertEquals(1, service.completionCount(admin.getId()), "counted without a review step");
         assertTrue(service.pendingOtherHelp(code).isEmpty(), "nothing waits in the admin queue");
         assertFalse(celebrateTitles().isEmpty(), "and it is celebrated like a chore");
+    }
+
+    /** The four headline tiles are the period picker; the duplicate chip row is gone. */
+    @Test
+    void statsTiles_pickThePeriod_andThereIsNoSeparateChipRow() {
+        Member admin = service.createHome("Numbers", "Alex");
+        String code = admin.getHomeCode();
+        SessionContext.signIn(admin.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Stats");
+
+        assertEquals(4, statTiles().size(), "Today / This week / This month / All time");
+        assertTrue(filterChips().isEmpty(), "no chip row under the tiles any more");
+        assertTrue(statTile("This week").getClassNames().contains("selected"), "week is the default lens");
+        assertEquals("button", statTile("This week").getElement().getAttribute("role"));
+
+        Div month = statTile("This month");
+        ComponentUtil.fireEvent(month, new ClickEvent<>(month));
+
+        assertTrue(statTile("This month").getClassNames().contains("selected"));
+        assertFalse(statTile("This week").getClassNames().contains("selected"));
+        assertEquals("true", statTile("This month").getElement().getAttribute("aria-pressed"));
+        assertTrue($(Div.class).all().stream().anyMatch(d ->
+                        d.getClassNames().contains("chart-title")
+                                && d.getElement().getTextRecursively().contains("This month")),
+                "the per-chore chart follows the tile's lens");
+    }
+
+    /** The shared list: anyone adds, anyone ticks, and none of it is a chore. */
+    @Test
+    void member_canAddTickAndClearSharedListItems_withoutLoggingAChore() {
+        Member alex = service.createHome("Listful", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        SessionContext.signIn(sam.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Lists");
+
+        setFieldByPlaceholder("Add an item…", "Milk");
+        clickButton("Add");
+        assertEquals(1, listItemRows().size(), "the line shows up");
+        assertEquals("Milk", lists.openItems(code, ListKind.GROCERY).get(0).getText());
+        assertEquals(sam.getId(), lists.openItems(code, ListKind.GROCERY).get(0).getCreatedByMemberId());
+
+        // Tick it the way a person does: the checkbox listener only reacts to client input.
+        Checkbox tick = $(Checkbox.class).all().stream().filter(this::usable).findFirst().orElseThrow();
+        test(tick).click();
+
+        assertTrue(lists.openItems(code, ListKind.GROCERY).isEmpty());
+        assertEquals(sam.getId(), lists.doneItems(code, ListKind.GROCERY).get(0).getDoneByMemberId());
+        assertTrue(listItemRows().get(0).getClassNames().contains("done"), "struck through");
+        assertTrue(listItemRows().get(0).getElement().getTextRecursively().contains("Sam"),
+                "and it says who ticked it");
+        assertEquals(0, service.completionCount(sam.getId()), "ticking a grocery is not a chore");
+
+        clickButton("Clear done");
+        assertTrue(listItemRows().isEmpty());
+        assertTrue(lists.doneItems(code, ListKind.GROCERY).isEmpty());
+    }
+
+    /** Which list one member is looking at survives another phone's edit, like the stats lens. */
+    @Test
+    void listSubTab_survivesAnotherMembersEdit() {
+        Member alex = service.createHome("Listful", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Lists");
+
+        Tabs kinds = $(Tabs.class).all().stream()
+                .filter(t -> t.getClassNames().contains("list-kind-tabs") && usable(t))
+                .findFirst().orElseThrow();
+        kinds.setSelectedIndex(1); // To-do
+        setFieldByPlaceholder("Add an item…", "Call the plumber");
+        clickButton("Add");
+        assertEquals(1, lists.openItems(code, ListKind.TODO).size(), "landed on the to-do list");
+
+        lists.add(code, ListKind.GROCERY, sam.getId(), "Milk"); // Sam's phone bumps the home
+
+        Tabs after = $(Tabs.class).all().stream()
+                .filter(t -> t.getClassNames().contains("list-kind-tabs") && usable(t))
+                .findFirst().orElseThrow();
+        assertEquals(1, after.getSelectedIndex(), "still on To-do");
+        assertEquals(1, listItemRows().size(), "showing the to-do, not Sam's grocery");
+        assertTrue(listItemRows().get(0).getElement().getTextRecursively().contains("Call the plumber"));
+    }
+
+    /** The dinner week: seven slots from today, set inline, a draft outliving another phone's edit. */
+    @Test
+    void member_canSetTodaysDinner_andADraftSurvivesAnotherPhonesEdit() {
+        Member alex = service.createHome("Listful", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        SessionContext.signIn(sam.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Lists");
+        listKindTabs().setSelectedIndex(2); // Dinner
+
+        List<Div> rows = dinnerRows();
+        assertEquals(7, rows.size(), "a week from today");
+        assertTrue(rows.get(0).getClassNames().contains("today"));
+        assertFalse(rows.get(1).getClassNames().contains("today"));
+        java.time.LocalDate today = java.time.LocalDate.now(SessionContext.timeZone());
+        assertTrue(rows.get(0).getElement().getTextRecursively()
+                        .contains(ListPanel.dayLabel(today, Locale.ENGLISH)),
+                "the row is labelled with the weekday and date");
+
+        setFieldByPlaceholder("What's for dinner?", "Pasta"); // the first such field is today's
+        clickButton("Save");
+
+        assertEquals("Pasta", lists.dinners(code, today, today).get(today).getText());
+        assertTrue(dinnerRows().get(0).getElement().getTextRecursively().contains("Sam"),
+                "and it says who planned it");
+
+        // A half-typed slot for tomorrow survives Alex planning another day on their phone.
+        TextField tomorrow = dinnerFields().get(1);
+        tomorrow.setValue("Tac");
+        lists.setDinner(code, today.plusDays(3), alex.getId(), "Pizza"); // bumps the home
+        assertEquals("Tac", dinnerFields().get(1).getValue(), "the draft is still there");
+        assertEquals("Pasta", dinnerFields().get(0).getValue(), "today's saved slot too");
     }
 }

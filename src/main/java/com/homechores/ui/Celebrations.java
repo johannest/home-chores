@@ -88,7 +88,7 @@ final class Celebrations {
     static void showBlocked(CompleteOutcome o) {
         String chore = o.task().getName();
         String msg = switch (o.blockReason()) {
-            case STREAK -> T.tr("blocked.streak", chore, ChoreService.MAX_IN_A_ROW);
+            case STREAK -> T.tr("blocked.streak", chore, o.newStreak());
             case BOOKED -> T.tr("blocked.booked", chore);
             case NOT_DUE -> T.tr("blocked.notDue", chore);
             case NOT_ASSIGNED -> T.tr("blocked.notAssigned", chore);

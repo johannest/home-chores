@@ -22,7 +22,7 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Undo a mis-tap** | The celebration dialog offers *"Oops — undo this"*, and a quiet strip on the board lets a member take back their **own** chore for 10 minutes after doing it. Beyond that it's an admin job. |
 | **Admin can unmark** | A **Recent chores** list on the Admin tab unmarks any completion, however old and whoever did it — including one already approved. Any 💎 credits it earned are taken back with it. |
 | **Tap-to-complete chores** | Big chore cards under the **Chores** tab. Tap the one you just did. New homes start with **11 localized default chores**. |
-| **Fairness rule** | A member may do the *same* chore at most **3 times in a row** (`ChoreService.MAX_IN_A_ROW`); the 4th tap is blocked until *someone else* does it. |
+| **Fairness rule** | A member may do the *same* chore at most **N times in a row** (admin setting, default 3, choices No limit / 2 / 3 / 4 / 5 / 10); the next tap is blocked until *someone else* does it. |
 | **Booking ("I'll do it")** | A member can reserve a chore; others are blocked until the booking is completed, cancelled, or expires (admin-configurable hold, 1–24 h, default 4). |
 | **Division styles** | *Free-for-all* (default, fair rotation via the streak rule) or *Rotating*: every member gets one assigned chore per day, rotating daily. Rotation can be **enforced** (only your chore) or a highlighted suggestion. |
 | **Interval chores** | A chore can repeat every N days (e.g. water plants every 7 days). Until due again, the card shows "🕒 in Nd" and is locked. |
@@ -36,7 +36,8 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Chore groups & order** | Admins can create groups (🍳 Kitchen, 🧺 Laundry) that become headings on the board, and move chores up/down within them (arrows, not dragging — the board lives on phones). Ungrouped chores sit under *Other chores*. Deleting a group keeps its chores. Rearranging is purely cosmetic: it never changes who the daily rotation assigns what to. |
 | **Admin CRUD** | Under the **Admin** tab: add/edit/delete chores (name, emoji, group, interval, credits, hours), rename/remove members, promote/demote admins, rename the home, change the PIN. |
 | **Optional approval** | Admins can require approval. Completions then wait as **pending** until an admin **approves** (counts) or **rejects** (discarded). A badge shows the pending count. |
-| **Statistics & charts** | The **Stats** tab opens on four counts side by side — **today, this week, this month, all time** — and a chip row narrows the charts to any of them. Personal charts (chores by type, feedback split, 7-day trend) plus **12-week and 12-month trends** for the longer view. Admins also get **Home stats**: per-member totals, chore popularity, feedback per chore, 14-day activity, daily-goal adherence. Charts are dependency-free (no licensed add-on). |
+| **Shared lists** | A **Lists** tab with **Groceries**, **To-do** and **Dinner** for the whole family. Anyone adds a line, whoever is at the store ticks it off — nothing here is a chore, so ticking earns no credits and starts no streak. Ticked lines show struck through with who ticked them, can be unticked, and vanish after 24 h (or on **Clear done**). **Dinner** is a sliding week from today: one free-text slot per day, labelled with the weekday, today highlighted; as days pass a new empty slot appears a week out. Included in backups. |
+| **Statistics & charts** | The **Stats** tab opens on four counts side by side — **today, this week, this month, all time** — and tapping a count picks that period for the charts below. Personal charts (chores by type, feedback split, 7-day trend) plus **12-week and 12-month trends** for the longer view. Admins also get **Home stats**: per-member totals, chore popularity, feedback per chore, 14-day activity, daily-goal adherence. Charts are dependency-free (no licensed add-on). |
 | **Delete the home** | A **Danger zone** at the bottom of the Admin tab wipes the whole family — members, chores, completions, credits, settings. Confirmed by typing the home code, and it prompts for a backup first. Everyone still on the board is signed out live. |
 | **Retention (opt-in)** | Tracks when each home was last *used* (a chore, a review, opening the board — not background traffic). Three windows: `empty-home-hours` (72h in prod config) and `abandoned-home-days` purge homes that were never used (**no chore history and at most one member**); `inactive-home-days` (30 in prod config) additionally deletes **any** home nobody has used that long — after writing a full JSON safety export to `retention.export-dir` (the operator's undo; export failure keeps the home). `/terms` and `/privacy` state the windows automatically. Off when all are 0. |
 | **Backup / restore** | Admins can download a JSON backup of the whole family (settings, members, chores, groups and their order, completions, credits, spree tiers) and restore from one (replaces current data after a confirmation). |
@@ -254,7 +255,9 @@ credits/sprees, stats, backup round-trip, admin/PIN, localized seeding) run agai
 in-memory H2 database; UI tests use Vaadin's browserless **UI Unit Testing**
 (`SpringUIUnitTest`). *(The `vaadin-charts-flow` test dependency is only there so the
 test base class's `test(Chart)` overload resolves during JUnit scanning — the app never
-uses Charts.)*
+uses Charts.)* `ArchitectureTest` (ArchUnit) pins the package layering and the coding
+conventions listed in SPEC §6, so a stray repository in a view or a Vaadin import in a
+service fails the build rather than a review.
 
 ## Credits
 
@@ -276,8 +279,8 @@ uses Charts.)*
   the gate, anyone holding one could step into a member's identity. The admin PIN bypasses
   the gate but doesn't grant admin by itself; the header's "Admin?" action still does that.
 - The fairness rule is intentionally per-chore: doing a *different* chore doesn't reset
-  your streak on the locked one — someone else has to take a turn. Tweak `MAX_IN_A_ROW`
-  in `ChoreService` to change the limit.
+  your streak on the locked one — someone else has to take a turn. The limit is a per-home
+  admin setting (`Home.maxInARow`, default 3; "No limit" switches the rule off).
 - Availability hours are evaluated in each member's **browser time zone**; intervals
   and spree streaks use the server's time zone (a self-hosted family server is
   normally in the household's zone anyway).

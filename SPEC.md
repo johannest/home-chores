@@ -54,6 +54,7 @@ Terms in **bold** map to concepts in the code.
 | Turn accepted other help into a new chore | — | ✅ |
 | Copy/share the home code and join link | ✅ | ✅ |
 | Switch UI language | ✅ | ✅ |
+| Add / tick / untick / delete / clear lines on the shared grocery and to-do lists | ✅ | ✅ |
 | See own statistics | ✅ | ✅ |
 | See home-wide statistics | — | ✅ |
 | Add / edit / delete chores (incl. interval, hours, credits) | — | ✅ |
@@ -87,7 +88,9 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   that it's recorded and celebrated.
 - **US-05 Add a chore.** (Admin-only — see US-10.)
 - **US-06 Fair rotation.** As a household, no one may do the *same* chore more than
-  **3 times in a row**; the 4th tap is blocked until someone else does that chore.
+  **N times in a row** (admin setting `Home.maxInARow`, default 3, choices No limit / 2 / 3 /
+  4 / 5 / 10); the next tap is blocked until someone else does that chore. "No limit" turns
+  the rule off for homes where one person genuinely owns a chore.
 - **US-07 Celebrations.** As a member, I see confetti on completion, a "new chore
   unlocked" popup the first time I do a chore, and milestone trophies at
   5/10/25/50/100/250 personal chores.
@@ -446,9 +449,11 @@ message and shows a matching badge on the card (`LockReason`):
    member's assigned chore today. Rotation ignores booking and the streak rule.
 4. **Booking** (`BOOKED`): blocked if someone else holds a live booking.
 5. **Fairness** (`STREAK`): for the chore's non-`REJECTED` completions newest
-   first, count the leading run by one member. If that member's run ≥ 3, they are
+   first, count the leading run by one member. If that member's run ≥
+   `Home.maxInARow` (default 3; 0 = rule off, so this step never blocks), they are
    locked out until a different member does it. Pending completions count toward
-   the run (so approval can't be gamed).
+   the run (so approval can't be gamed). The blocked message names the actual run,
+   which matters when an admin lowers the limit under a longer existing run.
 
 - **Approval-aware creation**:
   - `requireApproval == false` → completion saved `APPROVED`; celebrations and
@@ -519,6 +524,43 @@ message and shows a matching badge on the card (`LockReason`):
 - "Other help" and "Add chore" are not chores, so they show only under `All` and the
   default `Today` — the opening board must not hide them.
 
+### 4.4e Shared lists (groceries, to-dos and dinners)
+- A **Lists** tab between Chores and Stats, for everyone. Three sub-tabs, **Groceries**,
+  **To-do** and **Dinner**, backed by one table (`ListItem`: `homeCode`, `kind`
+  GROCERY/TODO/DINNER, `text` ≤ 160, `createdAt`, `createdByMemberId`, `doneAt`,
+  `doneByMemberId`, nullable `day` for dinners).
+- **Not chores.** Ticking a line creates no `Completion`, earns no credits, starts no streak
+  and needs no approval — whoever is at the store ticks the milk off. That is why the feature
+  lives in its own `ListItemService` rather than in `ChoreService`.
+- Anyone in the home may add, tick, untick, delete or **Clear done**; a shared list is shared.
+  A member of another home is refused (`IllegalArgumentException`), the same line the snooze
+  service holds.
+- Quick entry: a text box with Enter-to-add at the top of the list; the half-typed draft is a
+  panel field, so another phone's edit re-rendering the panel does not lose it. Blank lines
+  add nothing; long lines are clipped (`InputLimits.LIST_ITEM`).
+- Ticked lines sink to a **Done (n)** section, struck through, with who ticked them and when.
+  Ticking an already ticked line keeps the original ticker (two phones racing must not flip
+  it). Unticking clears both stamps.
+- **24-hour retention**, applied twice on purpose: the read path only returns done lines with
+  `doneAt` inside the window, so they age out of every board on its next render with no
+  write; an hourly sweep (`homechores.list.purge-ms`) reclaims the rows and never bumps
+  `HomeState`. Purging on read was rejected because the read runs inside every open device's
+  render effect.
+- Every edit bumps `HomeState` (after commit, like everything else) and `touchHome`s, so a
+  family that only uses the list is still "active" for retention.
+- The sub-tab is view-local (a panel field, like the stats lens) and never bumps `HomeState`.
+- **Dinner** is a different shape: a sliding window of seven days from today (member's zone),
+  one free-text slot per day, rows labelled with the localized full weekday and short date,
+  today highlighted. A slot is set, changed or cleared inline (Enter or the ✓ button), never
+  ticked; `createdAt`/`createdByMemberId` on a dinner row mean "last set at / by", shown under
+  the slot. `ListItemService.setDinner` is an upsert: blank clears, an unchanged save does not
+  bump the home, two phones on the same day — last write wins. A day that has passed drops off
+  the view on the next render; its row is reclaimed by the hourly sweep
+  `DINNER_RETENTION_DAYS` (7) after its day, using the server date, so a backup still holds last
+  week's meals and no visible slot can be purged whatever the member's zone.
+- Backed up and restored with the home (`listItems` in the JSON, member ids remapped; a file
+  from before the lists restores with empty lists) and wiped by `deleteHome`.
+
 ### 4.4d Done today
 - A collapsible home-wide list ("Done today (n)") directly under the daily strip: who did
   what, how long ago, feedback emoji. Same server-date "today" as the daily ring.
@@ -580,10 +622,13 @@ message and shows a matching badge on the card (`LockReason`):
 
 ### 4.9 Statistics & charts
 - Rendered with a small dependency-free SVG/CSS **BarChart** (no commercial add-on).
-- **Periods.** A chip row picks a lens — **Today / This week / This month / All time** — above a
-  row of four tiles showing all four counts at once. The tiles are deliberately *not* filtered:
-  the question is a comparison ("what did I do today, this week, this month"), and a row showing
-  only the selected period would answer a quarter of it per tap. Weeks run Monday–Sunday, the
+- **Periods.** A row of four tiles — **Today / This week / This month / All time** — shows all
+  four counts at once *and* is the lens picker: tapping a tile selects that period for the charts
+  below (the tiles are plain divs with `role="button"`, focusable and operable with Enter/Space).
+  The counts are deliberately *not* filtered: the question is a comparison ("what did I do today,
+  this week, this month"), and a row showing only the selected period would answer a quarter of
+  it per tap. There used to be a separate chip row with the same four labels beneath the tiles;
+  users read it as redundant and tapped the tiles instead, so the chip row was removed. Weeks run Monday–Sunday, the
   same week `lastWeekChoreMaster` uses; months are calendar months; both use the server zone.
 - **What the lens narrows**: the per-chore bars, the feedback split and (home) the per-member and
   popularity bars. What it never narrows: the headline tiles, the trends, today's adherence, and
@@ -605,7 +650,7 @@ message and shows a matching badge on the card (`LockReason`):
   because a localized short month ("marrask.") is half again wider than its column and
   `overflow-x: hidden` would clip it rather than reveal it (§4.15.1).
 - The lens lives in a field on `StatsPanel`, so it survives every `HomeState` rebuild and resets
-  on navigation. Tapping a chip re-renders that panel only and **never bumps `HomeState`** —
+  on navigation. Tapping a tile re-renders that panel only and **never bumps `HomeState`** —
   which period one member is looking at is not the family's business, the same rule the board's
   filter chips follow.
 
@@ -846,9 +891,9 @@ everyone in the home except the admin doing the logging.
 - Governed by `homechores.retention.abandoned-home-days` (**0 = disabled, the default**)
   and `homechores.retention.cron` (nightly at 03:30 by default). `findAbandoned(cutoff)`
   is a dry run for inspecting candidates without deleting.
-- Deletion reuses `ChoreService.deleteHome`, so the cascade across all ten tables
+- Deletion reuses `ChoreService.deleteHome`, so the cascade across all eleven tables
   — rejoin requests, push subscriptions, chore reminders, completions, credits, spree tiers,
-  chores, chore groups, members, the home row — stays in one place; sweeps log counts only, since a home
+  chores, chore groups, shared-list lines, members, the home row — stays in one place; sweeps log counts only, since a home
   code is the home's access credential.
 - Time-based deletion of homes that *were* used exists as its own opt-in tier
   (`inactive-home-days`, US-40) and follows the safeguard this section always demanded:
@@ -1058,6 +1103,18 @@ scales up, not the other way round.
 - **Message-bundle parity** (`MessageParityTest`): the three properties files carry identical key
   sets, and no parameterized value hides a lone apostrophe. A missing key fails nothing at
   runtime — it simply renders as the key — so it needs a test rather than a reviewer.
+- **Architecture rules** (`ArchitectureTest`, ArchUnit over the compiled main classes): the
+  layering `ui → service → domain` with `i18n` a leaf and `maintenance` depended on by nothing;
+  no package cycles; `domain` free of in-house and Vaadin dependencies; services free of Vaadin
+  except `HomeState` and `WebPushSender`; repositories are `domain` interfaces used only by
+  services and the CLI, with derived queries only; entities in `domain` with a protected no-arg
+  constructor; constructor injection only; Spring's `@Transactional`, never Jakarta's; `@Route`
+  in `ui`, `@Service` in `service`, other `@Component`s in `ui` only as `VaadinServiceInitListener`s;
+  `UI.getCurrent()`/`VaadinSession` touched only from `ui` (plus the `LocaleInitListener`
+  session hook); `ui` helpers package-private
+  (`SessionContext` excepted); no standard streams outside `MaintenanceRunner`; no
+  `java.util.logging`. Every rule passed on the day it was written — the suite exists so the
+  next change cannot quietly bend the shape.
 
 ## 7. Out of scope (possible future work)
 - Real authentication/accounts; weekly/monthly leaderboards;

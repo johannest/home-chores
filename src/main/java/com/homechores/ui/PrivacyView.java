@@ -49,6 +49,10 @@ public class PrivacyView extends VerticalLayout {
         card.add(sectionList("What data we store", new String[]{
                 "The names you type for your home and its members (a nickname is fine — see the tip on the sign-in screen).",
                 "Which chores were done, by whom, and when, plus any optional feedback (😖 / 🙂 / 😍).",
+                "The lines your family writes on the shared grocery and to-do lists, who added "
+                        + "each one and when, and who ticked it off. Ticked lines are deleted "
+                        + "automatically a day later. Open lines are part of the home's backup "
+                        + "export so a restored home keeps its shopping list.",
                 "A short home code and a 4-digit admin PIN used to manage the home.",
                 "Only if you turn on the optional chore reminder: your chosen reminder time, "
                         + "your device's timezone, and the push-notification address and keys your "

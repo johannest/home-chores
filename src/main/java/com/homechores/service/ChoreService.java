@@ -13,6 +13,7 @@ import com.homechores.domain.Feedback;
 import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
 import com.homechores.domain.InputLimits;
+import com.homechores.domain.ListItemRepository;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
 import com.homechores.domain.PushSubscriptionRepository;
@@ -50,8 +51,11 @@ public class ChoreService {
 
     private static final Logger log = LoggerFactory.getLogger(ChoreService.class);
 
-    /** A member may complete the SAME chore at most this many times in a row. */
-    public static final int MAX_IN_A_ROW = 3;
+    /**
+     * The default limit on completing the SAME chore in a row. The live value is per home
+     * ({@link Home#getMaxInARow()}, 0 = off); this constant is what new homes start with.
+     */
+    public static final int MAX_IN_A_ROW = Home.DEFAULT_MAX_IN_A_ROW;
 
     /** Milestones that trigger a big celebration (personal approved-chore counts). */
     static final int[] MILESTONES = {5, 10, 25, 50, 100, 250};
@@ -75,6 +79,7 @@ public class ChoreService {
     private final PushSubscriptionRepository pushSubscriptions;
     private final ChoreGroupRepository groups;
     private final ChoreReminderRepository choreReminders;
+    private final ListItemRepository listItems;
     private final HomeState homeState;
     private final CreditService creditService;
     private final Translations translations;
@@ -84,7 +89,8 @@ public class ChoreService {
                         RejoinRequestRepository rejoins,
                         PushSubscriptionRepository pushSubscriptions,
                         ChoreGroupRepository groups,
-                        ChoreReminderRepository choreReminders, HomeState homeState,
+                        ChoreReminderRepository choreReminders, ListItemRepository listItems,
+                        HomeState homeState,
                         CreditService creditService, Translations translations) {
         this.homes = homes;
         this.members = members;
@@ -94,6 +100,7 @@ public class ChoreService {
         this.pushSubscriptions = pushSubscriptions;
         this.groups = groups;
         this.choreReminders = choreReminders;
+        this.listItems = listItems;
         this.homeState = homeState;
         this.creditService = creditService;
         this.translations = translations;
@@ -302,7 +309,8 @@ public class ChoreService {
 
     /**
      * Deletes a home and everything belonging to it — members, chores, chore groups,
-     * completions, credits, spree tiers, rejoin requests and pending chore reminders. Irreversible; the caller is responsible
+     * completions, credits, spree tiers, rejoin requests, pending chore reminders and the shared
+     * grocery / to-do lists. Irreversible; the caller is responsible
      * for confirming intent (see {@code AdminPanel}'s danger zone).
      *
      * <p>The revision is bumped last so every other device still on this home re-renders,
@@ -323,6 +331,7 @@ public class ChoreService {
         creditService.deleteForHome(norm);
         tasks.deleteByHomeCode(norm);
         groups.deleteByHomeCode(norm);
+        listItems.deleteByHomeCode(norm);
         members.deleteByHomeCode(norm);
         homes.deleteById(norm);
         homeState.bump(norm);
@@ -1029,7 +1038,7 @@ public class ChoreService {
                     bookerId, due, inHours, inSeason, rotating, myAssignedChore);
 
             result.add(new TaskView(task, recent.size(), streak, holderId, holderName,
-                    bookerId, bookerName, bookingExpires, due, nextDue,
+                    home.getMaxInARow(), bookerId, bookerName, bookingExpires, due, nextDue,
                     assignedMemberId, assignedName, reason != LockReason.NONE, reason));
         }
         return result;
@@ -1060,7 +1069,8 @@ public class ChoreService {
         if (bookerId != null && !bookerId.equals(memberId)) {
             return LockReason.BOOKED;
         }
-        if (streak >= MAX_IN_A_ROW && memberId != null && memberId.equals(holderId)) {
+        if (home.isStreakLimited() && streak >= home.getMaxInARow()
+                && memberId != null && memberId.equals(holderId)) {
             return LockReason.STREAK;
         }
         return LockReason.NONE;
@@ -1328,7 +1338,7 @@ public class ChoreService {
             if (bookerId != null && !bookerId.equals(memberId)) {
                 return CompleteOutcome.blocked(LockReason.BOOKED, task, member);
             }
-            // 4) Fairness: max N of the same chore in a row.
+            // 4) Fairness: max N of the same chore in a row (per-home setting, 0 = off).
             List<Completion> recent = activeCompletions(taskId);
             if (!recent.isEmpty() && recent.get(0).getMemberId().equals(memberId)) {
                 for (Completion c : recent) {
@@ -1339,8 +1349,8 @@ public class ChoreService {
                     }
                 }
             }
-            if (streak >= MAX_IN_A_ROW) {
-                return CompleteOutcome.blocked(LockReason.STREAK, task, member);
+            if (home.isStreakLimited() && streak >= home.getMaxInARow()) {
+                return CompleteOutcome.blocked(LockReason.STREAK, task, member, streak);
             }
         }
 
@@ -1832,6 +1842,8 @@ public class ChoreService {
             int streak,
             Long streakHolderId,
             String streakHolderName,
+            /** The home's limit on {@code streak}; 0 = the fairness rule is off. */
+            int maxInARow,
             Long bookedById,
             String bookedByName,
             Instant bookingExpiresAt,
@@ -1844,6 +1856,11 @@ public class ChoreService {
 
         public boolean bookedByMe(Long memberId) {
             return bookedById != null && bookedById.equals(memberId);
+        }
+
+        /** Whether the current run has reached the home's limit (never true when the rule is off). */
+        public boolean streakAtLimit() {
+            return maxInARow > 0 && streak >= maxInARow;
         }
 
         public boolean assignedToMe(Long memberId) {
@@ -1862,6 +1879,8 @@ public class ChoreService {
             long memberTotal,
             boolean newChoreForMember,
             Integer milestone,
+            /** The member's run on this chore after completing it — or, for a STREAK block,
+             *  the run that caused the block (so the message names the real number). */
             int newStreak,
             Long completionId,
             int creditsAwarded,
@@ -1872,8 +1891,13 @@ public class ChoreService {
             long doneTodayAfter) {
 
         static CompleteOutcome blocked(LockReason reason, ChoreTask task, Member member) {
-            return new CompleteOutcome(false, false, reason, task, member, 0, false, null, 0, null,
-                    0, null, 0, 0);
+            return blocked(reason, task, member, 0);
+        }
+
+        /** A STREAK block also reports the run that caused it, so the message can name it. */
+        static CompleteOutcome blocked(LockReason reason, ChoreTask task, Member member, int streak) {
+            return new CompleteOutcome(false, false, reason, task, member, 0, false, null, streak,
+                    null, 0, null, 0, 0);
         }
 
         static CompleteOutcome pending(ChoreTask task, Member member, Long completionId) {

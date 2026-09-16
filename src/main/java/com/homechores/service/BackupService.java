@@ -21,6 +21,9 @@ import com.homechores.domain.Feedback;
 import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
 import com.homechores.domain.InputLimits;
+import com.homechores.domain.ListItem;
+import com.homechores.domain.ListItemRepository;
+import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
 import com.homechores.domain.RejoinRequestRepository;
@@ -51,6 +54,7 @@ public class BackupService {
     private final ChoreTaskRepository tasks;
     private final ChoreGroupRepository groups;
     private final ChoreReminderRepository choreReminders;
+    private final ListItemRepository listItems;
     private final CompletionRepository completions;
     private final CreditEntryRepository creditEntries;
     private final SpreeTierRepository spreeTiers;
@@ -67,7 +71,7 @@ public class BackupService {
 
     public BackupService(HomeRepository homes, MemberRepository members,
                         ChoreTaskRepository tasks, ChoreGroupRepository groups,
-                        ChoreReminderRepository choreReminders,
+                        ChoreReminderRepository choreReminders, ListItemRepository listItems,
                         CompletionRepository completions,
                         CreditEntryRepository creditEntries, SpreeTierRepository spreeTiers,
                         RejoinRequestRepository rejoins, HomeState homeState) {
@@ -76,6 +80,7 @@ public class BackupService {
         this.tasks = tasks;
         this.groups = groups;
         this.choreReminders = choreReminders;
+        this.listItems = listItems;
         this.completions = completions;
         this.creditEntries = creditEntries;
         this.spreeTiers = spreeTiers;
@@ -93,7 +98,7 @@ public class BackupService {
                 home.isRequireApproval(), home.getDailyTargetPerMember(), home.getDivisionStyle(),
                 home.isRotationEnforced(), home.getBookingTimeoutHours(), home.isApproveRejoin(),
                 home.isApproveJoin(), home.isConfirmCompletion(), home.isAllowOtherHelp(),
-                home.getCreatedAt());
+                home.getCreatedAt(), home.getMaxInARow());
         for (Member m : members.findByHomeCodeOrderByJoinedAtAsc(homeCode)) {
             b.members.add(new MemberDto(m.getId(), m.getName(), m.getColor(), m.isAdmin(),
                     m.getJoinedAt(), m.getAvatar()));
@@ -119,6 +124,12 @@ public class BackupService {
         for (CreditEntry e : creditEntries.findByHomeCodeOrderByCreatedAtDesc(homeCode)) {
             b.credits.add(new CreditDto(e.getMemberId(), e.getAmount(), e.getType(),
                     e.getReason(), e.getSpreeTierDays(), e.getCompletionId(), e.getCreatedAt()));
+        }
+        // The shared lists are family data (unlike reminders and push subscriptions), so a
+        // restore brings back the half-finished shopping list too.
+        for (ListItem li : listItems.findByHomeCodeOrderByCreatedAtAscIdAsc(homeCode)) {
+            b.listItems.add(new ListItemDto(li.getKind(), li.getText(), li.getCreatedAt(),
+                    li.getCreatedByMemberId(), li.getDoneAt(), li.getDoneByMemberId(), li.getDay()));
         }
         try {
             return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(b);
@@ -205,6 +216,7 @@ public class BackupService {
         home.setApproveJoin(b.home.approveJoin == null || b.home.approveJoin);
         home.setConfirmCompletion(b.home.confirmCompletion == null || b.home.confirmCompletion);
         home.setAllowOtherHelp(b.home.allowOtherHelp == null || b.home.allowOtherHelp);
+        home.setMaxInARow(Home.clampMaxInARow(b.home.maxInARow)); // absent in older files → 3
         if (b.home.bookingTimeoutHours > 0) {
             home.setBookingTimeoutHours(b.home.bookingTimeoutHours);
         }
@@ -231,6 +243,7 @@ public class BackupService {
         spreeTiers.deleteByHomeCode(code);
         tasks.deleteByHomeCode(code);
         groups.deleteByHomeCode(code);
+        listItems.deleteByHomeCode(code);
         members.deleteByHomeCode(code);
 
         // Recreate members and tasks, remapping their (identity-generated) ids.
@@ -283,6 +296,29 @@ public class BackupService {
             entity.setSortOrder(Math.max(0, t.sortOrder));
             ChoreTask saved = tasks.save(entity);
             taskIdMap.put(t.id, saved.getId());
+        }
+        for (ListItemDto li : b.listItems) {
+            String text = InputLimits.clip(li.text, InputLimits.LIST_ITEM);
+            if (text == null || text.isBlank()) {
+                continue; // a hand-edited file can hold an empty line; nothing to show for it
+            }
+            if (li.kind == ListKind.DINNER && li.day == null) {
+                continue; // a dinner without a day would never show and never be purged
+            }
+            // Member ids are remapped like everywhere else; one that no longer resolves leaves the
+            // line in place with no author, because the line itself is what the family needs.
+            ListItem entity = new ListItem(code, li.kind == null ? ListKind.TODO : li.kind, text,
+                    li.createdByMemberId == null ? null : memberIdMap.get(li.createdByMemberId));
+            if (li.createdAt != null) {
+                entity.setCreatedAt(li.createdAt);
+            }
+            if (li.doneAt != null) {
+                entity.setDoneAt(li.doneAt);
+                entity.setDoneByMemberId(
+                        li.doneByMemberId == null ? null : memberIdMap.get(li.doneByMemberId));
+            }
+            entity.setDay(li.day);
+            listItems.save(entity);
         }
         for (SpreeTierDto st : b.spreeTiers) {
             if (st.days > 0 && st.credits > 0) {
@@ -369,6 +405,8 @@ public class BackupService {
         public List<CompletionDto> completions = new ArrayList<>();
         public List<SpreeTierDto> spreeTiers = new ArrayList<>();
         public List<CreditDto> credits = new ArrayList<>();
+        /** Absent in backups written before the shared lists existed: Jackson leaves it empty. */
+        public List<ListItemDto> listItems = new ArrayList<>();
     }
 
     /** The boxed booleans are boxed so backups written before those settings existed
@@ -377,7 +415,9 @@ public class BackupService {
                           int dailyTargetPerMember, DivisionStyle divisionStyle,
                           boolean rotationEnforced, int bookingTimeoutHours,
                           Boolean approveRejoin, Boolean approveJoin, Boolean confirmCompletion,
-                          Boolean allowOtherHelp, Instant createdAt) {
+                          Boolean allowOtherHelp, Instant createdAt,
+                          /** Boxed for the same reason: pre-setting backups restore as 3. */
+                          Integer maxInARow) {
     }
 
     /** {@code avatar} is absent in pre-avatar backups and deserializes to null — fine. */
@@ -404,6 +444,13 @@ public class BackupService {
 
     public record CreditDto(Long memberId, int amount, CreditType type, String reason,
                             int spreeTierDays, Long completionId, Instant createdAt) {
+    }
+
+    /** A shared-list line. {@code doneAt}/{@code doneByMemberId} are null while it is open;
+     *  {@code day} is set only for DINNER slots (absent in files written before dinners existed). */
+    public record ListItemDto(ListKind kind, String text, Instant createdAt,
+                              Long createdByMemberId, Instant doneAt, Long doneByMemberId,
+                              java.time.LocalDate day) {
     }
 
     /** {@code taskId} is null (and {@code note} set) for an "other help" entry. */

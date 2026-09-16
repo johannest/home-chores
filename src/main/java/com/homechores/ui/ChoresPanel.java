@@ -548,8 +548,7 @@ class ChoresPanel extends VerticalLayout {
         if (view.streak() > 0 && view.streakHolderName() != null) {
             String who = view.streakHolderId().equals(memberId)
                     ? T.tr("board.you") : view.streakHolderName();
-            return who + " ×" + view.streak()
-                    + (view.streak() >= ChoreService.MAX_IN_A_ROW ? " 🔒" : " 🔥");
+            return who + " ×" + view.streak() + (view.streakAtLimit() ? " 🔒" : " 🔥");
         }
         return null;
     }

@@ -84,6 +84,40 @@ class ChoreServiceTest {
     }
 
     @Test
+    void fairness_isOffWhenTheHomeSaysSo() {
+        Member alex = service.createHome("Nest", "Alex");
+        Home home = service.findHome(alex.getHomeCode()).orElseThrow();
+        home.setMaxInARow(0);
+        service.saveHome(home);
+        Long dish = tasks(alex.getHomeCode()).get(0).getId();
+
+        for (int i = 0; i < 5; i++) {
+            assertTrue(service.complete(dish, alex.getId()).allowed(), "no limit: tap " + (i + 1));
+        }
+        var view = service.taskViews(alex.getHomeCode(), alex.getId()).stream()
+                .filter(v -> v.task().getId().equals(dish)).findFirst().orElseThrow();
+        assertEquals(5, view.streak(), "the run is still counted for the badge");
+        assertFalse(view.streakAtLimit(), "but it never reads as locked");
+        assertEquals(ChoreService.LockReason.NONE, view.lockReason());
+    }
+
+    @Test
+    void fairness_honoursACustomLimit_andNamesTheRunWhenBlocking() {
+        Member alex = service.createHome("Nest", "Alex");
+        Home home = service.findHome(alex.getHomeCode()).orElseThrow();
+        home.setMaxInARow(2);
+        service.saveHome(home);
+        Long dish = tasks(alex.getHomeCode()).get(0).getId();
+
+        assertTrue(service.complete(dish, alex.getId()).allowed());
+        assertTrue(service.complete(dish, alex.getId()).allowed());
+        var blocked = service.complete(dish, alex.getId());
+        assertFalse(blocked.allowed(), "3rd in a row blocked at limit 2");
+        assertEquals(ChoreService.LockReason.STREAK, blocked.blockReason());
+        assertEquals(2, blocked.newStreak(), "the block reports the run that caused it");
+    }
+
+    @Test
     void approvalOff_countsImmediately_andHitsMilestoneAtFive() {
         Member alex = service.createHome("Nest", "Alex");
         List<ChoreTask> t = tasks(alex.getHomeCode());

@@ -98,6 +98,7 @@ class SchemaEvolutionTest {
     @Autowired BackupService backup;
     @Autowired MemberRepository members;
     @Autowired CompletionRepository completions;
+    @Autowired com.homechores.service.ListItemService lists;
 
     private static final String CODE = "OLDHOME";
 
@@ -123,6 +124,7 @@ class SchemaEvolutionTest {
         assertTrue(home.isApproveJoin(), "join gate on for a pre-existing home");
         assertTrue(home.isConfirmCompletion(), "confirm-before-completing on");
         assertTrue(home.isAllowOtherHelp(), "other help on");
+        assertEquals(3, home.getMaxInARow(), "the fairness limit every home used to have");
     }
 
     /** Nullable columns added later read back null, and everything downstream copes. */
@@ -191,6 +193,12 @@ class SchemaEvolutionTest {
         assertEquals(0, service.pendingRejoinCount(CODE));
         assertTrue(service.pendingOtherHelp(CODE).isEmpty());
         assertTrue(service.groupsOf(CODE).isEmpty());
+        assertTrue(lists.openItems(CODE, com.homechores.domain.ListKind.GROCERY).isEmpty());
+        // ...and writable: the old family can start a shopping list right away.
+        assertTrue(lists.add(CODE, com.homechores.domain.ListKind.GROCERY,
+                byName("Alex").getId(), "Milk").isPresent());
+        assertTrue(lists.setDinner(CODE, java.time.LocalDate.now(), byName("Alex").getId(), "Pasta")
+                .isPresent(), "and plan a dinner");
     }
 
     /**

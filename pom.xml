@@ -22,6 +22,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <vaadin.version>25.2.6</vaadin.version>
+        <archunit.version>1.5.0</archunit.version>
     </properties>
 
     <dependencyManagement>
@@ -88,6 +89,15 @@
         <dependency>
             <groupId>com.vaadin</groupId>
             <artifactId>vaadin-testbench-unit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Architecture rules (ArchitectureTest). The plain artifact, driven from ordinary JUnit
+             tests, rather than archunit-junit5: this project runs on JUnit Jupiter 6 and the
+             ArchUnit engine module still declares the 5.x platform. -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit</artifactId>
+            <version>${archunit.version}</version>
             <scope>test</scope>
         </dependency>
         <!-- Only present so the UI-unit-test base class's test(Chart) overload resolves

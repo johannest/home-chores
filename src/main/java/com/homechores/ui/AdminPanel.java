@@ -584,6 +584,22 @@ class AdminPanel extends VerticalLayout {
             }
         });
 
+        Select<Integer> maxRow = new Select<>();
+        maxRow.setLabel(T.tr("admin.maxInARow"));
+        maxRow.setHelperText(T.tr("admin.maxInARow.helper"));
+        maxRow.setWidthFull();
+        maxRow.setItems(Home.MAX_IN_A_ROW_OPTIONS);
+        maxRow.setItemLabelGenerator(n -> n == 0
+                ? T.tr("admin.maxInARow.off") : T.tr("admin.maxInARow.times", n));
+        maxRow.setValue(home.getMaxInARow());
+        maxRow.addValueChangeListener(e -> {
+            if (e.getValue() != null) {
+                Home h = service.findHome(homeCode).orElseThrow();
+                h.setMaxInARow(e.getValue());
+                service.saveHome(h);
+            }
+        });
+
         Select<DivisionStyle> style = new Select<>();
         style.setLabel(T.tr("admin.divisionStyle"));
         // Short option labels with the explanation underneath: the full sentences used to
@@ -653,7 +669,7 @@ class AdminPanel extends VerticalLayout {
         pinRow.setAlignItems(FlexComponent.Alignment.CENTER);
 
         VerticalLayout body = new VerticalLayout(confirmTaps, confirmHint, approval,
-                otherHelp, otherHelpHint, style, enforced, bookingHours, target,
+                otherHelp, otherHelpHint, style, enforced, maxRow, bookingHours, target,
                 joinGate, joinHint, rejoinGate, rejoinHint, nameRow, pinLabel, pinRow);
         body.setPadding(false);
         body.setSpacing(true);

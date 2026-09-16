@@ -7,6 +7,7 @@ import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
 import com.homechores.service.HomeState;
 import com.homechores.service.ChoreReminderService;
+import com.homechores.service.ListItemService;
 import com.homechores.service.PushReminderService;
 import com.homechores.service.StatsService;
 import com.homechores.service.WebPushSender;
@@ -40,19 +41,20 @@ import com.vaadin.flow.router.Route;
 import com.vaadin.flow.signals.Signal;
 import java.util.Optional;
 
-/** The signed-in home experience: header + tabbed Chores / Stats / Admin panels. */
+/** The signed-in home experience: header + tabbed Chores / List / Stats / Admin panels. */
 @Route("home")
 @PageTitle("FlashChores")
 @JsModule("./confetti.js")
 public class HomeView extends VerticalLayout implements BeforeEnterObserver {
 
-    private enum PanelTab { CHORES, STATS, ADMIN }
+    private enum PanelTab { CHORES, LIST, STATS, ADMIN }
 
     private final ChoreService service;
     private final StatsService statsService;
     private final BackupService backupService;
     private final CreditService creditService;
     private final HomeState homeState;
+    private final ListItemService listService;
     private final PushReminderService reminderService;
     private final ChoreReminderService snoozeService;
     private final WebPushSender pushSender;
@@ -61,6 +63,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     private Long memberId;
 
     private ChoresPanel choresPanel;
+    private ListPanel listPanel;
     private StatsPanel statsPanel;
     private AdminPanel adminPanel;
 
@@ -68,7 +71,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     private PanelTab selected = PanelTab.CHORES;
 
     public HomeView(ChoreService service, StatsService statsService, BackupService backupService,
-                    CreditService creditService, HomeState homeState,
+                    CreditService creditService, HomeState homeState, ListItemService listService,
                     PushReminderService reminderService, ChoreReminderService snoozeService,
                     WebPushSender pushSender) {
         this.service = service;
@@ -76,6 +79,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         this.backupService = backupService;
         this.creditService = creditService;
         this.homeState = homeState;
+        this.listService = listService;
         this.reminderService = reminderService;
         this.snoozeService = snoozeService;
         this.pushSender = pushSender;
@@ -109,6 +113,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
 
         choresPanel = new ChoresPanel(service, creditService, snoozeService, reminderService,
                 pushSender, homeCode, memberId);
+        listPanel = new ListPanel(listService, service, homeCode, memberId);
         statsPanel = new StatsPanel(statsService, service, homeCode, memberId);
         adminPanel = new AdminPanel(service, creditService, backupService, homeCode, memberId);
         // Initial render happens from the Signal.effect registered in onAttach.
@@ -253,8 +258,9 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
 
     private Tabs buildTabs(boolean admin) {
         Tab choresTab = new Tab(VaadinIcon.CHECK_SQUARE_O.create(), new Span(T.tr("home.tab.chores")));
+        Tab listTab = new Tab(VaadinIcon.LIST_UL.create(), new Span(T.tr("home.tab.list")));
         Tab statsTab = new Tab(VaadinIcon.CHART.create(), new Span(T.tr("home.tab.stats")));
-        Tabs tabs = new Tabs(choresTab, statsTab);
+        Tabs tabs = new Tabs(choresTab, listTab, statsTab);
 
         Tab adminTab = null;
         if (admin) {
@@ -268,7 +274,9 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
             adminTab = new Tab(VaadinIcon.COG.create(), label);
             tabs.add(adminTab);
         }
-        if (selected == PanelTab.STATS) {
+        if (selected == PanelTab.LIST) {
+            tabs.setSelectedTab(listTab);
+        } else if (selected == PanelTab.STATS) {
             tabs.setSelectedTab(statsTab);
         } else if (selected == PanelTab.ADMIN && adminTab != null) {
             tabs.setSelectedTab(adminTab);
@@ -279,7 +287,9 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         final Tab finalAdmin = adminTab;
         tabs.addSelectedChangeListener(e -> {
             Tab t = e.getSelectedTab();
-            if (t == statsTab) {
+            if (t == listTab) {
+                selected = PanelTab.LIST;
+            } else if (t == statsTab) {
                 selected = PanelTab.STATS;
             } else if (t == finalAdmin) {
                 selected = PanelTab.ADMIN;
@@ -295,6 +305,10 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     private void showSelected() {
         content.removeAll();
         switch (selected) {
+            case LIST -> {
+                content.add(listPanel);
+                listPanel.refresh();
+            }
             case STATS -> {
                 content.add(statsPanel);
                 statsPanel.refresh();

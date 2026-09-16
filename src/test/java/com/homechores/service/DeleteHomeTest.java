@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.homechores.domain.ChoreTask;
+import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,9 @@ class DeleteHomeTest {
     @Autowired
     CreditService credits;
 
+    @Autowired
+    ListItemService lists;
+
     @Test
     void deleteHome_removesEverythingBelongingToIt() {
         Member alex = service.createHome("Doomed", "Alex");
@@ -38,6 +42,7 @@ class DeleteHomeTest {
         credits.addTier(code, 3, 10);
         service.addGroup(code, "Kitchen", "🍳");
         service.requestRejoin(code, sam.getId(), null);
+        lists.add(code, ListKind.GROCERY, alex.getId(), "Milk");
 
         assertTrue(credits.balance(alex.getId()) > 0, "precondition: credits were earned");
         assertEquals(1, service.pendingRejoins(code).size());
@@ -49,6 +54,7 @@ class DeleteHomeTest {
         assertTrue(service.tasksOf(code).isEmpty());
         assertTrue(service.pendingRejoins(code).isEmpty());
         assertTrue(service.groupsOf(code).isEmpty(), "chore groups go with the home");
+        assertTrue(lists.openItems(code, ListKind.GROCERY).isEmpty(), "and so does the shopping list");
         assertTrue(credits.tiersOf(code).isEmpty());
         assertTrue(credits.ledger(code).isEmpty());
         assertEquals(0, credits.balance(alex.getId()));

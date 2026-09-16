@@ -851,6 +851,17 @@ vaadin-checkbox-group::part(group-field) {
     border: 1px solid transparent;
     text-align: center;
     min-width: 0;
+    /* The tiles are also the period picker (there is no separate chip row any more). */
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 120ms, background 120ms;
+}
+.stat-tile:hover {
+    border-color: var(--lumo-contrast-30pct);
+}
+.stat-tile:focus-visible {
+    outline: 2px solid var(--lumo-primary-color);
+    outline-offset: 1px;
 }
 .stat-tile.selected {
     border-color: var(--lumo-primary-color);
@@ -980,6 +991,75 @@ vaadin-checkbox-group::part(group-field) {
     font-size: 0.78rem;
     color: var(--lumo-secondary-text-color);
 }
+
+/* ---- Shared grocery / to-do list --------------------------------------- */
+.list-kind-tabs {
+    margin-bottom: var(--lumo-space-s);
+}
+.list-add-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: var(--lumo-space-s);
+}
+.list-add-row vaadin-text-field {
+    flex: 1;
+    min-width: 0;
+}
+.list-row.list-item {
+    align-items: center;
+    gap: var(--lumo-space-s);
+}
+.list-row .list-text {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+.list-row .list-text.done {
+    text-decoration: line-through;
+    color: var(--lumo-secondary-text-color);
+    font-weight: 400;
+}
+.list-done-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: var(--lumo-space-m);
+}
+.list-done-title {
+    font-weight: 700;
+    color: var(--lumo-secondary-text-color);
+}
+
+/* The dinner week: seven stacked day slots, today lifted out with the primary tint. */
+.dinner-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+}
+.dinner-row .dinner-day {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--lumo-secondary-text-color);
+    overflow-wrap: anywhere;
+}
+.dinner-row.today {
+    background: var(--lumo-primary-color-10pct);
+    border-radius: var(--lumo-border-radius-m);
+    padding: 8px;
+    margin: 0 -8px;
+}
+.dinner-row.today .dinner-day {
+    color: var(--lumo-primary-text-color);
+}
+.dinner-field {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.dinner-field vaadin-text-field {
+    flex: 1;
+    min-width: 0;
+}
 .pin-box {
     font-family: var(--lumo-font-family-monospace, monospace);
     font-size: 1.4rem;
@@ -1046,12 +1126,18 @@ vaadin-checkbox-group::part(group-field) {
     .filter-chip.selected:hover {
         border-color: var(--lumo-primary-color);
     }
+    .stat-tile:hover {
+        border-color: transparent;
+    }
+    .stat-tile.selected:hover {
+        border-color: var(--lumo-primary-color);
+    }
 }
 
 @media (pointer: coarse) {
     /* The grey flash Safari/Chrome paint over a tapped element fights the card's own
        press animation. */
-    .task-card, .feedback-btn, .member-chip, .filter-chip {
+    .task-card, .feedback-btn, .member-chip, .filter-chip, .stat-tile {
         -webkit-tap-highlight-color: transparent;
     }
     /* The min-height rules below only match vaadin-button, so a menu-bar button — the invite
