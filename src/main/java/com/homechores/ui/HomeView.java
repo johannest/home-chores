@@ -211,41 +211,20 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
             left.add(master);
         });
 
+        // Everything occasional — reminders, appearance, language, Admin?, Leave — sits behind
+        // one "⋯" button, so the header is the title plus (at most) two 40px buttons. On a phone
+        // the old row of labelled buttons pushed the first chore card below the fold.
         HorizontalLayout right = new HorizontalLayout();
         right.addClassName("header-actions");
         right.setAlignItems(FlexComponent.Alignment.CENTER);
-        right.add(new AppearanceMenu(), new LanguageSwitcher());
-        if (pushSender.isEnabled()) {
-            Button remind = headerButton(T.tr("reminder.button"), VaadinIcon.BELL,
-                    ButtonVariant.LUMO_CONTRAST);
-            remind.addClickListener(e ->
-                    new ReminderDialog(reminderService, snoozeService, pushSender, memberId, homeCode)
-                            .open());
-            right.add(remind);
-        }
-        if (admin) {
-            Span badge = new Span(T.tr("home.adminBadge"));
-            badge.addClassName("admin-badge");
-            right.add(badge);
-        } else {
-            Button claim = headerButton(T.tr("home.claimAdmin"), VaadinIcon.KEY,
-                    ButtonVariant.LUMO_CONTRAST);
-            claim.addClickListener(e -> claimAdminDialog());
-            right.add(claim);
-        }
-        Button leave = headerButton(T.tr("home.leave"), VaadinIcon.SIGN_OUT,
-                ButtonVariant.LUMO_TERTIARY);
-        leave.getStyle().set("color", "#fff");
-        leave.addClickListener(e -> {
-            // Leaving is an explicit sign-out, so the device forgets who it was as well.
-            DeviceIdentity.forget();
-            SessionContext.signOut();
-            getUI().ifPresent(ui -> ui.navigate(LandingView.class));
-        });
-        right.add(leave);
         if (!solo) {
             right.add(inviteMenu(home));
         }
+        right.add(new HeaderMenu(admin, pushSender.isEnabled(),
+                () -> new ReminderDialog(reminderService, snoozeService, pushSender, memberId, homeCode)
+                        .open(),
+                this::claimAdminDialog,
+                this::leave));
 
         HorizontalLayout header = new HorizontalLayout(left, right);
         header.addClassName("home-header");
@@ -256,15 +235,27 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         return header;
     }
 
+    /** Leaving is an explicit sign-out, so the device forgets who it was as well. */
+    private void leave() {
+        DeviceIdentity.forget();
+        SessionContext.signOut();
+        getUI().ifPresent(ui -> ui.navigate(LandingView.class));
+    }
+
     private Tabs buildTabs(boolean admin) {
-        Tab choresTab = new Tab(VaadinIcon.CHECK_SQUARE_O.create(), new Span(T.tr("home.tab.chores")));
-        Tab listTab = new Tab(VaadinIcon.LIST_UL.create(), new Span(T.tr("home.tab.list")));
-        Tab statsTab = new Tab(VaadinIcon.CHART.create(), new Span(T.tr("home.tab.stats")));
+        Tab choresTab = new Tab(VaadinIcon.CHECK_SQUARE_O.create(), tabLabel(T.tr("home.tab.chores")));
+        Tab listTab = new Tab(VaadinIcon.LIST_UL.create(), tabLabel(T.tr("home.tab.list")));
+        Tab statsTab = new Tab(VaadinIcon.CHART.create(), tabLabel(T.tr("home.tab.stats")));
         Tabs tabs = new Tabs(choresTab, listTab, statsTab);
+        // Full width, so that below 640px the tabs can share the row equally (icon above label,
+        // see .main-tabs in styles.css). Four labelled tabs side by side need ~410px, and a phone
+        // has ~360: the Admin tab was scrolling off the end behind a chevron nobody noticed.
+        tabs.addClassName("main-tabs");
+        tabs.setWidthFull();
 
         Tab adminTab = null;
         if (admin) {
-            Span label = new Span(T.tr("home.tab.admin"));
+            Span label = tabLabel(T.tr("home.tab.admin"));
             long pending = service.pendingCount(homeCode) + service.pendingRejoinCount(homeCode);
             if (pending > 0) {
                 Span badge = new Span(String.valueOf(pending));
@@ -310,6 +301,12 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         });
         tabs.getStyle().set("margin-bottom", "var(--lumo-space-m)");
         return tabs;
+    }
+
+    private static Span tabLabel(String text) {
+        Span s = new Span(text);
+        s.addClassName("tab-label");
+        return s;
     }
 
     private void showSelected() {

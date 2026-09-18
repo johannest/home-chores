@@ -286,3 +286,5 @@ service fails the build rather than a review.
   and spree streaks use the server's time zone (a self-hosted family server is
   normally in the household's zone anyway).
 - Possible next steps: weekly/monthly leaderboards, real accounts.
+- A mobile UX review from 2026-09-16 with a prioritised fix list lives in
+  `docs/UX-REVIEW-2026-09-16.md`.

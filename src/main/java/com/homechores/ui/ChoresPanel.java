@@ -107,6 +107,9 @@ class ChoresPanel extends VerticalLayout {
     /** Whether the "Done today" list is expanded — same plain-field trick as the lens. */
     private boolean doneTodayOpen = false;
 
+    /** From this many members the leaderboard drops names into tooltips (see renderLeaderboard). */
+    static final int COMPACT_LEADERBOARD_FROM = 4;
+
     ChoresPanel(ChoreService service, CreditService creditService, ChoreReminderService snoozes,
                 PushReminderService reminders, WebPushSender pushSender,
                 String homeCode, Long memberId) {
@@ -122,7 +125,10 @@ class ChoresPanel extends VerticalLayout {
         setWidthFull();
 
         leaderboard.addClassName("leaderboard");
-        filterBar.addClassName("filter-bar");
+        // "scroll": one row that pans sideways. Up to nine lenses used to wrap three rows deep
+        // (four in Finnish) on a phone, all of it above the first chore. SnoozeDialog reuses the
+        // plain .filter-bar recipe for its six offsets, where wrapping is what you want.
+        filterBar.addClassNames("filter-bar", "scroll");
         board.addClassName("board-sections");
 
         undoStrip.setVisible(false);
@@ -232,12 +238,24 @@ class ChoresPanel extends VerticalLayout {
         // Highest count first; ties keep the join order (List.sort is stable), so a fresh home
         // with everyone at zero still lists the family in the order it was built.
         ranked.sort((a, b) -> Long.compare(counts.get(b.getId()), counts.get(a.getId())));
+        // Four or more members is where the chips stopped fitting: on a phone each named chip took
+        // a row of its own, and a family of five spent 200px on the board's ranking before a single
+        // chore. Compact chips keep the face (avatar or initials), the count and the credits, and
+        // move the name into the tooltip and accessible name — the name Span stays in the DOM,
+        // hidden by CSS, so nothing reading the chip changes.
+        boolean compact = ranked.size() >= COMPACT_LEADERBOARD_FROM;
+        if (compact) {
+            leaderboard.addClassName("compact");
+        } else {
+            leaderboard.removeClassName("compact");
+        }
         for (Member m : ranked) {
             long count = counts.get(m.getId());
 
             Div dot = MemberAvatar.dot(m);
 
             Span nameEl = new Span(m.getName());
+            nameEl.addClassName("name");
             if (m.isAdmin()) {
                 Span crown = new Span("👑");
                 crown.addClassName("crown");
@@ -254,6 +272,10 @@ class ChoresPanel extends VerticalLayout {
                 chip.add(creditEl);
             }
             chip.addClassName("member-chip");
+            if (compact) {
+                chip.setTitle(m.getName());
+                chip.getElement().setAttribute("aria-label", m.getName() + " " + count);
+            }
             if (m.getId().equals(memberId)) {
                 chip.addClassName("me");
                 // Your own chip is the door to your avatar — the most discoverable spot
@@ -430,11 +452,13 @@ class ChoresPanel extends VerticalLayout {
         // "All" on its own is not a choice — but "All / Due now" is, so one real alternative
         // beside it is enough to earn the row.
         filterBar.setVisible(chips.size() >= 2);
+        Div selectedChip = null;
         for (Filter f : chips) {
             Div chip = new Div();
             chip.addClassName("filter-chip");
             if (f == filter) {
                 chip.addClassName("selected");
+                selectedChip = chip;
             }
             chip.setText(T.tr(f.key));
             chip.addClickListener(e -> {
@@ -444,6 +468,13 @@ class ChoresPanel extends VerticalLayout {
                 renderTasks(admin);
             });
             filterBar.add(chip);
+        }
+        if (selectedChip != null) {
+            // The row scrolls sideways (.filter-bar.scroll), so bring the chosen lens into view.
+            // scrollLeft on the parent, not scrollIntoView: the latter also scrolls the *page*
+            // vertically, which on first render would yank a phone down to the filter row.
+            selectedChip.getElement().executeJs(
+                    "const p=this.parentElement; if(p){p.scrollLeft=Math.max(0,this.offsetLeft-p.offsetLeft-8);}");
         }
     }
 
@@ -506,12 +537,15 @@ class ChoresPanel extends VerticalLayout {
                     service.cancelBooking(taskId, memberId);
                     refresh();
                 });
-                cancel.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+                // Not LUMO_SMALL: at 30px tall and 6px under the tap-to-complete area, a slightly
+                // low thumb completed the chore instead of booking it. Full height plus the gap
+                // .book-btn adds in styles.css separates the two.
+                cancel.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
                 cancel.addClassName("book-btn");
                 card.add(cancel);
             } else if (view.bookedById() == null && view.lockReason() == LockReason.NONE) {
                 Button book = new Button(T.tr("board.book"), e -> handleBook(taskId));
-                book.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+                book.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
                 book.addClassName("book-btn");
                 card.add(book);
             }
@@ -550,18 +584,43 @@ class ChoresPanel extends VerticalLayout {
                 return T.tr("board.badge.yourTurn");
             }
             return view.assignedMemberName() != null
-                    ? T.tr("board.badge.today", view.assignedMemberName()) : null;
+                    ? T.tr("board.badge.today", shortName(view.assignedMemberName())) : null;
         }
         if (view.bookedById() != null) {
             return view.bookedByMe(memberId)
-                    ? T.tr("board.badge.youBooked") : T.tr("board.badge.bookedBy", view.bookedByName());
+                    ? T.tr("board.badge.youBooked")
+                    : T.tr("board.badge.bookedBy", shortName(view.bookedByName()));
         }
         if (view.streak() > 0 && view.streakHolderName() != null) {
             String who = view.streakHolderId().equals(memberId)
-                    ? T.tr("board.you") : view.streakHolderName();
+                    ? T.tr("board.you") : shortName(view.streakHolderName());
             return who + " ×" + view.streak() + (view.streakAtLimit() ? " 🔒" : " 🔥");
         }
         return null;
+    }
+
+    /** Names longer than this are cut down for the card badges; the leaderboard keeps them whole. */
+    static final int BADGE_NAME_MAX = 10;
+
+    /**
+     * A member's name as it fits a card badge. A badge is a 136px card's top-right corner, so
+     * "Alexander-Sebastian ×3 🔒" used to wrap to three lines and land on the emoji. The first
+     * word (or first half of a double-barrelled name) is what the family calls them anyway; a
+     * single long word gets an ellipsis. Names up to {@link #BADGE_NAME_MAX} are untouched.
+     */
+    static String shortName(String name) {
+        if (name == null) {
+            return null;
+        }
+        String s = name.trim();
+        if (s.length() <= BADGE_NAME_MAX) {
+            return s;
+        }
+        String first = s.split("[\\s\\-–]+", 2)[0];
+        if (!first.isEmpty() && first.length() <= BADGE_NAME_MAX) {
+            return first;
+        }
+        return s.substring(0, BADGE_NAME_MAX - 1) + "…";
     }
 
     /**
@@ -762,7 +821,8 @@ class ChoresPanel extends VerticalLayout {
                 describe(last)));
         text.addClassName("grow");
         Button undo = new Button(T.tr("undo.action"), e -> undoLast());
-        undo.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+        undo.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        undo.addClassName("undo-btn");
 
         Div strip = new Div(text, undo);
         strip.addClassName("undo-strip");

@@ -25,6 +25,7 @@ import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Image;
 import com.vaadin.flow.component.html.Span;
+import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.menubar.MenuBar;
 import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.tabs.Tab;
@@ -84,6 +85,28 @@ class HomeUiTest extends SpringUIUnitTest {
             return text.trim();
         }
         return b.getAriaLabel().orElseGet(() -> b.getElement().getTextRecursively()).trim();
+    }
+
+    /** Every MenuItem in the UI, sub menus included — the header "⋯" and the admin rows' "⋯". */
+    private java.util.stream.Stream<MenuItem> allMenuItems() {
+        return $(MenuBar.class).all().stream()
+                .filter(this::usable)
+                .flatMap(m -> m.getItems().stream())
+                .flatMap(this::withSubItems);
+    }
+
+    private java.util.stream.Stream<MenuItem> withSubItems(MenuItem item) {
+        return java.util.stream.Stream.concat(java.util.stream.Stream.of(item),
+                item.getSubMenu().getItems().stream().flatMap(this::withSubItems));
+    }
+
+    /** Fires a click on a menu row by its visible text — what a tap on the open menu does. */
+    private void clickMenuItem(String text) {
+        MenuItem item = allMenuItems()
+                .filter(i -> text.equals(i.getElement().getTextRecursively().trim()) && i.isEnabled())
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No usable menu item: " + text));
+        ComponentUtil.fireEvent(item, new ClickEvent<>(item));
     }
 
     private void clickButton(String text) {
@@ -374,7 +397,7 @@ class HomeUiTest extends SpringUIUnitTest {
         navigate(HomeView.class);
         assertEquals(3, tabCount());
 
-        clickButton("Admin?");
+        clickMenuItem("Admin?");
         setField("Admin PIN", home.getAdminPin());
         clickButton("Unlock");
 
@@ -447,13 +470,9 @@ class HomeUiTest extends SpringUIUnitTest {
 
         selectTab("Admin");
         openSection("Chores");
-        // Every row carries "Move up"; the first one is disabled, so the second row's is the
-        // first usable one.
-        $(Button.class).all().stream()
-                .filter(b -> "Move up".equals(b.getAriaLabel().orElse("")) && b.isEnabled()
-                        && usable(b))
-                .findFirst().orElseThrow()
-                .click();
+        // Every row's "⋯" menu carries "Move up"; the first row's is disabled, so the second
+        // row's is the first usable one.
+        clickMenuItem("Move up");
 
         assertEquals(second, service.tasksOf(code).get(0).getName());
     }
@@ -721,7 +740,7 @@ class HomeUiTest extends SpringUIUnitTest {
         assertEquals(SessionContext.MEMBER_TIMEOUT_SECONDS, maxInactiveInterval());
 
         // Claiming admin on the same device moves it onto the admin lifetime.
-        clickButton("Admin?");
+        clickMenuItem("Admin?");
         setField("Admin PIN", service.findHome(code).orElseThrow().getAdminPin());
         clickButton("Unlock");
         assertEquals(SessionContext.ADMIN_TIMEOUT_SECONDS, maxInactiveInterval());
@@ -919,11 +938,11 @@ class HomeUiTest extends SpringUIUnitTest {
         SessionContext.signIn(alex.getId(), alex.getHomeCode());
         navigate(HomeView.class);
 
-        MenuBar appearance = $(MenuBar.class).all().stream()
-                .filter(m -> m.getClassNames().contains("appearance-menu") && usable(m))
-                .findFirst().orElseThrow(() -> new AssertionError("No appearance menu"));
+        MenuItem appearance = allMenuItems()
+                .filter(i -> "Appearance".equals(i.getElement().getTextRecursively().trim()))
+                .findFirst().orElseThrow(() -> new AssertionError("No Appearance entry in the header menu"));
 
-        List<String> labels = appearance.getItems().get(0).getSubMenu().getItems().stream()
+        List<String> labels = appearance.getSubMenu().getItems().stream()
                 .map(i -> i.getElement().getTextRecursively().trim())
                 .filter(t -> !t.isEmpty())
                 .toList();
@@ -932,9 +951,11 @@ class HomeUiTest extends SpringUIUnitTest {
             assertTrue(labels.stream().anyMatch(l -> l.contains(palette)),
                     palette + " is offered; had " + labels);
         }
-        assertTrue($(com.vaadin.flow.component.select.Select.class).all().stream()
-                        .filter(this::usable).count() <= 1,
-                "only the language select is left — the theme select gave up its width");
+        assertEquals(0, $(com.vaadin.flow.component.select.Select.class).all().stream()
+                        .filter(this::usable).count(),
+                "no selects in the header at all — language is a menu entry too");
+        assertTrue(allMenuItems().anyMatch(i -> "Suomi".equals(i.getElement().getTextRecursively().trim())),
+                "the languages are offered from the same menu");
     }
 
     @Test
@@ -1093,7 +1114,7 @@ class HomeUiTest extends SpringUIUnitTest {
         navigate(HomeView.class);
         selectTab("Admin");
 
-        for (String title : List.of("Home settings", "Backup", "Danger zone", "Chores",
+        for (String title : List.of("Home settings", "Chore rules", "Backup", "Danger zone", "Chores",
                 "Members", "Rewards", "Recent chores", "Log a chore")) {
             assertFalse(adminSection(title).isOpened(), title + " should start collapsed");
         }

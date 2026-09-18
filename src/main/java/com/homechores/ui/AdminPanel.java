@@ -21,6 +21,7 @@ import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.checkbox.CheckboxGroup;
+import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Anchor;
@@ -28,6 +29,8 @@ import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
+import com.vaadin.flow.component.menubar.MenuBar;
+import com.vaadin.flow.component.menubar.MenuBarVariant;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.FlexComponent;
@@ -44,8 +47,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -72,8 +77,18 @@ class AdminPanel extends VerticalLayout {
      *  changes with the language switcher and now embeds a count. */
     private enum Section {
         REJOINS, HELP, APPROVALS, LOG_FOR, RECENT,
-        MEMBERS, GROUPS, CHORES, REWARDS, SETTINGS, BACKUP, DANGER
+        MEMBERS, GROUPS, CHORES, REWARDS, RULES, SETTINGS, BACKUP, DANGER
     }
+
+    /** Key in {@link #groupOpen} for the chores that belong to no group. */
+    private static final long UNGROUPED = -1L;
+
+    /**
+     * Which per-group sub-cards inside "Chores" the admin has opened, by group id. Same job as
+     * {@link #openState}, one level down: thirty chores in one flat list was 2400px of card, so
+     * each group folds on its own and stays how the admin left it across rebuilds.
+     */
+    private final Map<Long, Boolean> groupOpen = new HashMap<>();
 
     /**
      * Cards the admin has opened or closed by hand; absent means "use the smart default".
@@ -110,6 +125,9 @@ class AdminPanel extends VerticalLayout {
         add(groupsSection());
         add(choresSection());
         add(rewardsSection());
+        // Two cards, not one: the rules of doing chores and the home's own settings are read at
+        // different moments, and together they were a single 1800px card on a phone.
+        add(rulesSection());
         add(settingsSection());
         add(backupSection());
         add(dangerSection());
@@ -520,9 +538,10 @@ class AdminPanel extends VerticalLayout {
 
     // ---- Settings -----------------------------------------------------------
 
-    private Details settingsSection() {
+    /** How chores are done and counted: confirmation, approval, division, limits, target. */
+    private Details rulesSection() {
         Home home = service.findHome(homeCode).orElseThrow();
-        Details s = section(Section.SETTINGS, T.tr("admin.settings"), false);
+        Details s = section(Section.RULES, T.tr("admin.settings.rules"), false);
 
         Checkbox approval = new Checkbox(T.tr("admin.requireApproval"));
         approval.setValue(home.isRequireApproval());
@@ -552,26 +571,6 @@ class AdminPanel extends VerticalLayout {
         Span otherHelpHint = new Span(T.tr("admin.allowOtherHelp.helper"));
         otherHelpHint.addClassName("sub");
 
-        Checkbox rejoinGate = new Checkbox(T.tr("admin.approveRejoin"));
-        rejoinGate.setValue(home.isApproveRejoin());
-        rejoinGate.addValueChangeListener(e -> {
-            Home h = service.findHome(homeCode).orElseThrow();
-            h.setApproveRejoin(e.getValue());
-            service.saveHome(h);
-        });
-        Span rejoinHint = new Span(T.tr("admin.approveRejoin.helper"));
-        rejoinHint.addClassName("sub");
-
-        Checkbox joinGate = new Checkbox(T.tr("admin.approveJoin"));
-        joinGate.setValue(home.isApproveJoin());
-        joinGate.addValueChangeListener(e -> {
-            Home h = service.findHome(homeCode).orElseThrow();
-            h.setApproveJoin(e.getValue());
-            service.saveHome(h);
-        });
-        Span joinHint = new Span(T.tr("admin.approveJoin.helper"));
-        joinHint.addClassName("sub");
-
         Select<Integer> target = new Select<>();
         target.setLabel(T.tr("admin.dailyTarget"));
         target.setWidthFull();
@@ -600,24 +599,6 @@ class AdminPanel extends VerticalLayout {
                 service.saveHome(h);
             }
         });
-
-        Select<CounterReset> counterReset = new Select<>();
-        counterReset.setLabel(T.tr("admin.counterReset"));
-        counterReset.setHelperText(T.tr("admin.counterReset.helper"));
-        counterReset.setWidthFull();
-        counterReset.setItems(CounterReset.values());
-        counterReset.setItemLabelGenerator(cr ->
-                T.tr("admin.counterReset." + cr.name().toLowerCase(java.util.Locale.ROOT)));
-        counterReset.setValue(home.getCounterReset());
-        counterReset.addValueChangeListener(e -> {
-            if (e.getValue() != null) {
-                Home h = service.findHome(homeCode).orElseThrow();
-                h.setCounterReset(e.getValue());
-                service.saveHome(h);
-            }
-        });
-        Button resetNow = new Button(T.tr("admin.resetCounters"), e -> resetCountersDialog());
-        resetNow.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
 
         Select<DivisionStyle> style = new Select<>();
         style.setLabel(T.tr("admin.divisionStyle"));
@@ -660,6 +641,58 @@ class AdminPanel extends VerticalLayout {
             }
         });
 
+        VerticalLayout body = new VerticalLayout(confirmTaps, confirmHint, approval,
+                otherHelp, otherHelpHint, style, enforced, maxRow, bookingHours, target);
+        body.setPadding(false);
+        body.setSpacing(true);
+        body.setWidthFull();
+        s.add(body);
+        return s;
+    }
+
+    /** The home itself: leaderboard counter, who may join or sign back in, name and PIN. */
+    private Details settingsSection() {
+        Home home = service.findHome(homeCode).orElseThrow();
+        Details s = section(Section.SETTINGS, T.tr("admin.settings"), false);
+
+        Select<CounterReset> counterReset = new Select<>();
+        counterReset.setLabel(T.tr("admin.counterReset"));
+        counterReset.setHelperText(T.tr("admin.counterReset.helper"));
+        counterReset.setWidthFull();
+        counterReset.setItems(CounterReset.values());
+        counterReset.setItemLabelGenerator(cr ->
+                T.tr("admin.counterReset." + cr.name().toLowerCase(java.util.Locale.ROOT)));
+        counterReset.setValue(home.getCounterReset());
+        counterReset.addValueChangeListener(e -> {
+            if (e.getValue() != null) {
+                Home h = service.findHome(homeCode).orElseThrow();
+                h.setCounterReset(e.getValue());
+                service.saveHome(h);
+            }
+        });
+        Button resetNow = new Button(T.tr("admin.resetCounters"), e -> resetCountersDialog());
+        resetNow.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+
+        Checkbox joinGate = new Checkbox(T.tr("admin.approveJoin"));
+        joinGate.setValue(home.isApproveJoin());
+        joinGate.addValueChangeListener(e -> {
+            Home h = service.findHome(homeCode).orElseThrow();
+            h.setApproveJoin(e.getValue());
+            service.saveHome(h);
+        });
+        Span joinHint = new Span(T.tr("admin.approveJoin.helper"));
+        joinHint.addClassName("sub");
+
+        Checkbox rejoinGate = new Checkbox(T.tr("admin.approveRejoin"));
+        rejoinGate.setValue(home.isApproveRejoin());
+        rejoinGate.addValueChangeListener(e -> {
+            Home h = service.findHome(homeCode).orElseThrow();
+            h.setApproveRejoin(e.getValue());
+            service.saveHome(h);
+        });
+        Span rejoinHint = new Span(T.tr("admin.approveRejoin.helper"));
+        rejoinHint.addClassName("sub");
+
         TextField homeName = new TextField(T.tr("admin.homeName"));
         homeName.setMaxLength(InputLimits.HOME_NAME);
         homeName.setValue(home.getName());
@@ -687,9 +720,7 @@ class AdminPanel extends VerticalLayout {
         HorizontalLayout pinRow = new HorizontalLayout(pin, changePin);
         pinRow.setAlignItems(FlexComponent.Alignment.CENTER);
 
-        VerticalLayout body = new VerticalLayout(confirmTaps, confirmHint, approval,
-                otherHelp, otherHelpHint, style, enforced, maxRow, bookingHours, target,
-                counterReset, resetNow,
+        VerticalLayout body = new VerticalLayout(counterReset, resetNow,
                 joinGate, joinHint, rejoinGate, rejoinHint, nameRow, pinLabel, pinRow);
         body.setPadding(false);
         body.setSpacing(true);
@@ -742,22 +773,17 @@ class AdminPanel extends VerticalLayout {
             info.add(line, sub);
             info.addClassName("grow");
 
-            Button role = new Button(T.tr(m.isAdmin() ? "admin.demote" : "admin.makeAdmin"), e -> {
-                if (!service.setMemberAdmin(m.getId(), !m.isAdmin())) {
-                    toastError(T.tr("admin.lastAdmin"));
-                }
-                refresh();
-            });
-            role.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+            MenuBar actions = rowMenu(
+                    new RowAction(T.tr(m.isAdmin() ? "admin.demote" : "admin.makeAdmin"), true, () -> {
+                        if (!service.setMemberAdmin(m.getId(), !m.isAdmin())) {
+                            toastError(T.tr("admin.lastAdmin"));
+                        }
+                        refresh();
+                    }),
+                    new RowAction(T.tr("admin.renameMember"), true, () -> renameMemberDialog(m)),
+                    new RowAction(T.tr("admin.removeMember"), true, () -> confirmRemoveMember(m)));
 
-            Button rename = new Button(VaadinIcon.EDIT.create(), e -> renameMemberDialog(m));
-            rename.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
-
-            Button remove = new Button(VaadinIcon.TRASH.create(), e -> confirmRemoveMember(m));
-            remove.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY,
-                    ButtonVariant.LUMO_SMALL);
-
-            Div row = new Div(dot, info, role, rename, remove);
+            Div row = new Div(dot, info, tools(actions));
             row.addClassName("list-row");
             s.add(row);
         }
@@ -809,10 +835,12 @@ class AdminPanel extends VerticalLayout {
     // ---- Chores -------------------------------------------------------------
 
     /**
-     * The home's chores, grouped under their group headings and reorderable within each group.
+     * The home's chores, one collapsible sub-card per group, reorderable within each group.
      *
-     * <p>Sub-headings appear only once the home actually has groups, so a family that never makes
-     * one sees exactly the flat list they saw before.
+     * <p>Sub-cards appear only once the home actually has groups, so a family that never makes
+     * one sees the flat list they always had. With groups, every sub-card starts folded: a home
+     * with thirty chores in four groups then shows four lines, and the admin opens the one they
+     * came to edit instead of scrolling a 2400px list.
      */
     private Details choresSection() {
         List<ChoreTask> chores = service.tasksOf(homeCode);
@@ -825,60 +853,91 @@ class AdminPanel extends VerticalLayout {
         Map<Long, ChoreGroup> byId = new HashMap<>();
         groups.forEach(g -> byId.put(g.getId(), g));
 
-        Long shownHeading = null;
-        boolean first = true;
-        for (int i = 0; i < chores.size(); i++) {
-            ChoreTask t = chores.get(i);
-            ChoreGroup group = t.getGroupId() == null ? null : byId.get(t.getGroupId());
-            Long groupId = group == null ? null : group.getId();
-            if (!groups.isEmpty() && (first || !java.util.Objects.equals(groupId, shownHeading))) {
-                Div head = new Div();
-                head.setText(group == null ? T.tr("board.group.ungrouped") : group.display());
-                head.addClassName("sub");
-                head.getStyle().set("margin-top", "var(--lumo-space-s)");
-                s.add(head);
-                shownHeading = groupId;
+        if (groups.isEmpty()) {
+            for (int i = 0; i < chores.size(); i++) {
+                s.add(choreRow(chores, i, null, byId));
             }
-            first = false;
+            return s;
+        }
 
-            // First and last of a bucket, so the arrows can be disabled rather than offer a tap
-            // that does nothing. Neighbour comparison beats asking the service: the list is
-            // already in board order and already grouped.
-            boolean firstInBucket = i == 0 || !sameBucket(chores.get(i - 1), groupId, byId);
-            boolean lastInBucket = i == chores.size() - 1
-                    || !sameBucket(chores.get(i + 1), groupId, byId);
-
-            Div emoji = new Div();
-            emoji.setText(t.getEmoji());
-            emoji.getStyle().set("font-size", "1.4rem");
-
-            Div name = new Div();
-            name.setText(t.getName());
-            name.getStyle().set("font-weight", "600");
-            name.addClassName("grow");
-
-            Button up = moveButton(VaadinIcon.ARROW_UP, "admin.moveUp", !firstInBucket,
-                    () -> service.moveChore(t.getId(), -1));
-            Button down = moveButton(VaadinIcon.ARROW_DOWN, "admin.moveDown", !lastInBucket,
-                    () -> service.moveChore(t.getId(), 1));
-
-            Button edit = new Button(VaadinIcon.EDIT.create(), e -> choreDialog(t));
-            edit.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
-            edit.setAriaLabel(T.tr("admin.chore.title.edit"));
-            Button del = new Button(VaadinIcon.TRASH.create(), e ->
-                    confirm(T.tr("admin.deleteChore.title", t.getName()),
-                            T.tr("admin.deleteChore.text"), () -> {
-                                service.deleteTask(t.getId());
-                                refresh();
-                            }));
-            del.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY,
-                    ButtonVariant.LUMO_SMALL);
-
-            Div row = new Div(emoji, name, tools(up, down, edit, del));
-            row.addClassName("list-row");
-            s.add(row);
+        // Board order is already grouped (ChoreService.tasksOf), so bucketing by group id keeps
+        // each bucket in its board order and the neighbour checks in choreRow stay valid.
+        Map<Long, List<Integer>> buckets = new LinkedHashMap<>();
+        groups.forEach(g -> buckets.put(g.getId(), new ArrayList<>()));
+        buckets.put(UNGROUPED, new ArrayList<>());
+        for (int i = 0; i < chores.size(); i++) {
+            Long gid = chores.get(i).getGroupId();
+            buckets.get(gid != null && byId.containsKey(gid) ? gid : UNGROUPED).add(i);
+        }
+        for (Map.Entry<Long, List<Integer>> bucket : buckets.entrySet()) {
+            if (bucket.getValue().isEmpty()) {
+                continue; // an empty group is not a card over nothing
+            }
+            ChoreGroup g = byId.get(bucket.getKey());
+            String title = (g == null ? T.tr("board.group.ungrouped") : g.display())
+                    + " (" + bucket.getValue().size() + ")";
+            Details sub = subsection(bucket.getKey(), title);
+            for (int i : bucket.getValue()) {
+                sub.add(choreRow(chores, i, g == null ? null : g.getId(), byId));
+            }
+            s.add(sub);
         }
         return s;
+    }
+
+    /** A folded group inside the Chores card; remembers being opened like the cards do. */
+    private Details subsection(Long key, String title) {
+        Details d = new Details();
+        d.addClassName("admin-subsection");
+        d.setSummaryText(title);
+        d.setOpened(groupOpen.getOrDefault(key, false));
+        d.addOpenedChangeListener(e -> {
+            if (e.isFromClient()) {
+                groupOpen.put(key, e.isOpened());
+            }
+        });
+        return d;
+    }
+
+    /** One chore line: emoji, name, and its actions behind a single "⋯" button. */
+    private Div choreRow(List<ChoreTask> chores, int i, Long groupId, Map<Long, ChoreGroup> byId) {
+        ChoreTask t = chores.get(i);
+        // First and last of a bucket, so the move items can be disabled rather than offer a tap
+        // that does nothing. Neighbour comparison beats asking the service: the list is
+        // already in board order and already grouped.
+        boolean firstInBucket = i == 0 || !sameBucket(chores.get(i - 1), groupId, byId);
+        boolean lastInBucket = i == chores.size() - 1
+                || !sameBucket(chores.get(i + 1), groupId, byId);
+
+        Div emoji = new Div();
+        emoji.setText(t.getEmoji());
+        emoji.getStyle().set("font-size", "1.4rem");
+
+        Div name = new Div();
+        name.setText(t.getName());
+        name.getStyle().set("font-weight", "600");
+        name.addClassName("grow");
+
+        MenuBar actions = rowMenu(
+                new RowAction(T.tr("admin.moveUp"), !firstInBucket, () -> {
+                    service.moveChore(t.getId(), -1);
+                    refresh();
+                }),
+                new RowAction(T.tr("admin.moveDown"), !lastInBucket, () -> {
+                    service.moveChore(t.getId(), 1);
+                    refresh();
+                }),
+                new RowAction(T.tr("admin.chore.title.edit"), true, () -> choreDialog(t)),
+                new RowAction(T.tr("common.delete"), true, () ->
+                        confirm(T.tr("admin.deleteChore.title", t.getName()),
+                                T.tr("admin.deleteChore.text"), () -> {
+                                    service.deleteTask(t.getId());
+                                    refresh();
+                                })));
+
+        Div row = new Div(emoji, name, tools(actions));
+        row.addClassName("list-row");
+        return row;
     }
 
     /** Is this chore in the same bucket as {@code groupId}? A groupId whose group is gone counts
@@ -899,17 +958,27 @@ class AdminPanel extends VerticalLayout {
         return box;
     }
 
-    /** An icon-only reorder button. Disabled at the ends of its bucket rather than hidden, so the
-     *  row does not reflow as things move. Icon-only means the label lives in the aria-label. */
-    private Button moveButton(VaadinIcon icon, String labelKey, boolean enabled, Runnable action) {
-        Button b = new Button(icon.create(), e -> {
-            action.run();
-            refresh();
-        });
-        b.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
-        b.setAriaLabel(T.tr(labelKey));
-        b.setEnabled(enabled);
-        return b;
+    /** One entry of a row's "⋯" menu. A disabled entry stays listed (greyed) rather than vanishing,
+     *  so the menu does not reshuffle as things move. */
+    private record RowAction(String label, boolean enabled, Runnable action) {
+    }
+
+    /**
+     * A row's actions behind one "⋯" button. Four loose icon buttons per row (↑ ↓ ✎ 🗑) made every
+     * chore and member row wrap onto two or three lines on a phone; one finger-sized target keeps a
+     * row to a line, and the labelled entries say what the icons only hinted at.
+     */
+    private MenuBar rowMenu(RowAction... actions) {
+        MenuBar menu = new MenuBar();
+        menu.addThemeVariants(MenuBarVariant.LUMO_TERTIARY);
+        menu.addClassName("row-menu");
+        MenuItem root = menu.addItem(VaadinIcon.ELLIPSIS_DOTS_V.create());
+        root.setAriaLabel(T.tr("admin.rowMenu"));
+        for (RowAction a : actions) {
+            MenuItem item = root.getSubMenu().addItem(a.label(), e -> a.action().run());
+            item.setEnabled(a.enabled());
+        }
+        return menu;
     }
 
     /** Chore groups: the board's headings, created and arranged here. */
@@ -950,24 +1019,24 @@ class AdminPanel extends VerticalLayout {
             name.getStyle().set("font-weight", "600");
             name.addClassName("grow");
 
-            Button up = moveButton(VaadinIcon.ARROW_UP, "admin.moveUp", i > 0,
-                    () -> service.moveGroup(g.getId(), -1));
-            Button down = moveButton(VaadinIcon.ARROW_DOWN, "admin.moveDown", i < groups.size() - 1,
-                    () -> service.moveGroup(g.getId(), 1));
+            MenuBar actions = rowMenu(
+                    new RowAction(T.tr("admin.moveUp"), i > 0, () -> {
+                        service.moveGroup(g.getId(), -1);
+                        refresh();
+                    }),
+                    new RowAction(T.tr("admin.moveDown"), i < groups.size() - 1, () -> {
+                        service.moveGroup(g.getId(), 1);
+                        refresh();
+                    }),
+                    new RowAction(T.tr("admin.group.title.edit"), true, () -> groupDialog(g)),
+                    new RowAction(T.tr("common.delete"), true, () ->
+                            confirm(T.tr("admin.deleteGroup.title", g.getName()),
+                                    T.tr("admin.deleteGroup.text"), () -> {
+                                        service.deleteGroup(g.getId());
+                                        refresh();
+                                    })));
 
-            Button edit = new Button(VaadinIcon.EDIT.create(), e -> groupDialog(g));
-            edit.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
-            edit.setAriaLabel(T.tr("admin.group.title.edit"));
-            Button del = new Button(VaadinIcon.TRASH.create(), e ->
-                    confirm(T.tr("admin.deleteGroup.title", g.getName()),
-                            T.tr("admin.deleteGroup.text"), () -> {
-                                service.deleteGroup(g.getId());
-                                refresh();
-                            }));
-            del.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY,
-                    ButtonVariant.LUMO_SMALL);
-
-            Div row = new Div(emoji, name, tools(up, down, edit, del));
+            Div row = new Div(emoji, name, tools(actions));
             row.addClassName("list-row");
             s.add(row);
         }

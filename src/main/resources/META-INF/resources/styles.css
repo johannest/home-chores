@@ -208,7 +208,10 @@ vaadin-select::part(label) {
 /* Both header groups must be allowed to shrink; without min-width:0 a flex item refuses
    to go below its content width and overflows the row. */
 .header-id {
-    flex: 1 1 auto;
+    /* Basis 0, not auto: the header wraps its two groups, and with `auto` a long family name
+       claimed the whole first line and pushed the two buttons onto a second row. With 0 the
+       title shares the line and ellipsises instead. */
+    flex: 1 1 0;
     min-width: 0;
 }
 
@@ -219,10 +222,16 @@ vaadin-select::part(label) {
     white-space: nowrap;
 }
 
-.header-code,
-.header-actions {
+.header-code {
     flex-wrap: wrap;
     min-width: 0;
+}
+
+/* The action cluster is now at most two 40px buttons (invite, "⋯"), so it never needs a row
+   of its own: it keeps its width and the title gives way. */
+.header-actions {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
 }
 
 .code-chip {
@@ -245,14 +254,33 @@ vaadin-select::part(label) {
     background: rgba(255, 255, 255, 0.18);
     font-size: 0.8rem;
     font-weight: 600;
+    /* One line like the title above it; the pill shares the row with the header buttons now. */
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
 }
 
-/* The collapsed invite menu (multi-member homes): a translucent pill like the header
-   buttons around it. The menu-bar button is a light-DOM child, so this just works. */
-.invite-menu vaadin-menu-bar-button {
+/* Every header menu button (invite, "⋯"): a translucent pill on the gradient. The menu-bar
+   button is a light-DOM child, so this just works. */
+.home-header vaadin-menu-bar-button {
     background: rgba(255, 255, 255, 0.22);
     color: #fff;
     border-radius: 999px;
+}
+
+/* Rows of the header's "⋯" menu: a small muted icon in front of the label, so the list scans
+   as fast as the buttons it replaced. */
+.menu-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+.menu-row-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--lumo-secondary-text-color);
 }
 
 /* The join code inside the invite overlay. Not .code-chip: that one is white-on-gradient,
@@ -298,6 +326,26 @@ vaadin-select::part(label) {
     border-color: var(--lumo-primary-color);
     box-shadow: 0 0 0 2px var(--lumo-primary-color-10pct);
     color: var(--lumo-primary-text-color);
+}
+
+/* The board's lens row: one line that pans sideways instead of wrapping. Nine lenses wrapped
+   three rows deep on a phone (four in Finnish), all of it above the first chore. The element
+   scrolls itself, so the page's overflow-x: hidden is not in play; the 2px vertical padding
+   keeps the selected chip's ring from being clipped by that scroll box. ChoresPanel scrolls
+   the selected chip into view on each render. */
+.filter-bar.scroll {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 2px 0;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+}
+.filter-bar.scroll::-webkit-scrollbar {
+    display: none;
+}
+.filter-bar.scroll .filter-chip {
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 /* Four season labels are wider than a 320px dialog, and with overflow-x hidden the overflow
@@ -416,9 +464,15 @@ vaadin-checkbox-group::part(group-field) {
     color: var(--lumo-primary-text-color);
 }
 .task-card .streak {
-    max-width: 52%;
+    /* Everything but the 40px snooze target on the left plus breathing room, so "Alexander ×3 🔒"
+       fits a 136px card whole instead of being cut to "Alexander …". */
+    max-width: calc(100% - 52px);
     overflow: hidden;
     text-overflow: ellipsis;
+    /* One line, always. A long name used to wrap the badge to three lines and drop it onto the
+       emoji; ChoresPanel.shortName keeps names short, and this is the backstop for the rest
+       ("🕒 8–10, 18–22"). */
+    white-space: nowrap;
 }
 /* Tapping the corner chip must not play the card's own press animation — that animation is the
    board's feedback for "chore logged", and borrowing it here would say the wrong thing. */
@@ -427,11 +481,16 @@ vaadin-checkbox-group::part(group-field) {
 }
 
 @media (pointer: coarse) {
-    /* A 40px target without a 40px pill: the padding grows, the text does not. */
+    /* A 40×40 target without a 40px pill: the box grows, the glyph does not. */
     .snooze-chip {
-        padding: 10px 8px;
-        top: 2px;
-        left: 2px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 40px;
+        min-height: 40px;
+        padding: 0 6px;
+        top: 0;
+        left: 0;
     }
 }
 
@@ -527,14 +586,6 @@ vaadin-checkbox-group::part(group-field) {
 .palette-dot[data-palette="blue"]  { background: linear-gradient(160deg, hsl(212,84%,39%), hsl(190,89%,48%)); }
 .palette-dot[data-palette="gray"]  { background: linear-gradient(160deg, hsl(215,13%,39%), hsl(215,14%,48%)); }
 
-/* The appearance menu shows up white-on-gradient in the board header and on a plain background on
-   the landing card, so the header treatment is scoped rather than shared. */
-.home-header .appearance-menu vaadin-menu-bar-button {
-    background: rgba(255, 255, 255, 0.22);
-    color: #fff;
-    border-radius: 999px;
-}
-
 /* The avatar picker: a wrapping grid of tappable circles. */
 .avatar-grid {
     display: flex;
@@ -573,6 +624,17 @@ vaadin-checkbox-group::part(group-field) {
 .member-chip.me {
     border-color: var(--lumo-primary-color);
     box-shadow: 0 0 0 2px var(--lumo-primary-color-10pct);
+}
+
+/* Four or more members: the name moves into the chip's tooltip and accessible name (the Span
+   stays in the DOM), leaving face + count + credits. Five named chips took a row each on a phone
+   — 200px of ranking before the first chore; compact ones fit three to a row. */
+.leaderboard.compact .member-chip {
+    padding: 4px 10px 4px 4px;
+    gap: 6px;
+}
+.leaderboard.compact .member-chip .name {
+    display: none;
 }
 
 .member-chip .count {
@@ -873,7 +935,7 @@ vaadin-checkbox-group::part(group-field) {
     line-height: 1;
 }
 .stat-label {
-    font-size: 0.62rem;
+    font-size: 0.75rem; /* was 0.62rem = 9.9px, unreadable on a phone */
     color: var(--lumo-secondary-text-color);
     /* "This month" must not push the tile wider than its quarter of the row. */
     overflow-wrap: anywhere;
@@ -911,12 +973,12 @@ vaadin-checkbox-group::part(group-field) {
     width: 82%;
 }
 .trend-wide .trend-day {
-    font-size: 0.55rem;
+    font-size: 0.7rem; /* twelve "29.6"-style labels; every other one hides below 360px */
     white-space: nowrap;
 }
 
 .trend-day {
-    font-size: 0.6rem;
+    font-size: 0.75rem; /* was 0.6rem = 9.6px */
     color: var(--lumo-secondary-text-color);
 }
 
@@ -956,6 +1018,28 @@ vaadin-checkbox-group::part(group-field) {
 .admin-urgent > vaadin-details-summary {
     color: var(--lumo-primary-text-color);
     font-weight: 700;
+}
+
+/* One chore group folded inside the Chores card. Quieter than a card: no border or fill, just
+   a summary row with the group's name and count, and its rows indented under it. */
+.admin-subsection {
+    margin: var(--lumo-space-xs) 0 0;
+}
+.admin-subsection > vaadin-details-summary {
+    color: var(--lumo-body-text-color);
+    font-weight: 600;
+    white-space: normal;
+    min-height: 40px;
+}
+.admin-subsection::part(content) {
+    padding: 0 0 0 var(--lumo-space-s);
+}
+
+/* A row's "⋯" actions button: a real finger target, quiet until pressed. */
+.row-menu vaadin-menu-bar-button {
+    min-width: 40px;
+    min-height: 40px;
+    color: var(--lumo-secondary-text-color);
 }
 
 /* The one irreversible action on the page — visually separated so it isn't tapped
@@ -1094,7 +1178,9 @@ vaadin-checkbox-group::part(group-field) {
     cursor: not-allowed;
 }
 .task-card .book-btn {
-    margin-top: 6px;
+    /* Clear daylight between "I did it" (the area above) and "I'll do it": with 6px a low thumb
+       hit the wrong one. */
+    margin-top: 10px;
 }
 /* Highlight the current member's assigned chore in rotating mode */
 .task-card.mine {
@@ -1148,15 +1234,21 @@ vaadin-checkbox-group::part(group-field) {
     }
     /* The min-height rules below only match vaadin-button, so a plain Div chip needs its own. */
     .filter-chip {
-        min-height: 36px;
+        min-height: 40px;
     }
     /* Small icon buttons are ~32px; a finger needs ~44px. Pad the hit area without
        growing the visual button. */
     .header-actions vaadin-button,
     .header-code vaadin-button,
-    .list-row vaadin-button {
+    .list-row vaadin-button,
+    .list-row vaadin-menu-bar-button {
         min-height: 40px;
         min-width: 40px;
+    }
+    /* The book/cancel button under a chore and every Undo: quiet in colour, not in size. */
+    .book-btn,
+    .undo-btn {
+        min-height: 40px;
     }
     /* Lumo's summary padding lands at ~36px; opening a card is a primary action here. */
     .admin-section > vaadin-details-summary {
@@ -1189,35 +1281,55 @@ vaadin-checkbox-group::part(group-field) {
         padding-bottom: max(var(--lumo-space-s), env(safe-area-inset-bottom));
     }
 
-    /* The header is the first thing on the board and was eating half the screen before a
-       single chore was visible. Tighten it and let the actions sit on their own row. */
+    /* The header is the first thing on the board: title row plus, at most, the chore-master
+       pill. Everything occasional lives behind the "⋯" menu (HeaderMenu). */
     .home-header {
         padding: var(--lumo-space-s) var(--lumo-space-m);
     }
     .home-header h1 {
         font-size: 1.15rem;
     }
-    .header-id {
-        flex: 1 1 100%;
-    }
-    .header-actions {
-        flex: 1 1 100%;
-        justify-content: flex-start;
-    }
-    /* Copy and Share go icon-only: a chain link and a share arrow read on their own, and
-       they sit right next to the code chip that gives them context. The labels remain as
-       aria-labels. "Admin?" and "Leave" keep their text — a bare key or exit glyph is
-       genuinely ambiguous, and shrinking the language select buys back the room. */
+    /* Copy and Share (solo home only) go icon-only: a chain link and a share arrow read on
+       their own, and they sit right next to the code chip that gives them context. The labels
+       remain as aria-labels. */
     .header-code .btn-label {
         display: none;
     }
     .lang-select {
         width: 6.5em;
     }
-    /* A non-admin's row is the tightest: language + "Admin?" + "Leave". Trimming the
-       default layout spacing keeps it on one line instead of spilling onto a third. */
     .header-actions {
         gap: var(--lumo-space-xs);
+    }
+
+    /* The main tabs share the row equally, icon above label, like a phone's bottom nav. Four
+       labelled tabs side by side need ~410px (450 in Finnish); a phone has ~360, and the Admin
+       tab used to scroll off the end behind a chevron nobody noticed. */
+    .main-tabs vaadin-tab {
+        flex: 1 1 0;
+        min-width: 0;
+        flex-direction: column;
+        justify-content: center;
+        gap: 2px;
+        padding: 6px 2px;
+        font-size: 0.72rem;
+        line-height: 1.15;
+        text-align: center;
+    }
+    .main-tabs vaadin-tab vaadin-icon {
+        width: 22px;
+        height: 22px;
+        margin: 0;
+    }
+    .main-tabs vaadin-tab .tab-label {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .main-tabs::part(back-button),
+    .main-tabs::part(forward-button) {
+        display: none;
     }
     .code-chip {
         font-size: 1rem;
@@ -1276,10 +1388,18 @@ vaadin-checkbox-group::part(group-field) {
         flex-wrap: wrap;
     }
 
-    /* Give the bars room by trimming the label gutter. */
+    /* Label above the bar rather than beside it: a 74px gutter turned every chore name into
+       "Recycli…", and a home with thirty chores has thirty of those. */
     .bar-row {
-        grid-template-columns: 74px 1fr 28px;
-        gap: 6px;
+        grid-template-columns: 1fr 28px;
+        gap: 2px 6px;
+        margin: 8px 0;
+    }
+    .bar-row .bar-label {
+        grid-column: 1 / -1;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
     }
     .trend {
         gap: 2px;
@@ -1294,6 +1414,11 @@ vaadin-checkbox-group::part(group-field) {
 @media (max-width: 360px) {
     .brand-title {
         font-size: 1.65rem;
+    }
+    /* Twelve readable week labels do not fit a 270px chart; showing every other one beats
+       shrinking them back to 9px. */
+    .trend-wide .trend-col:nth-child(even) .trend-day {
+        visibility: hidden;
     }
     .task-grid {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));

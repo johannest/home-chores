@@ -155,7 +155,9 @@ final class Celebrations {
             dialog.close();
             onUndo.run();
         });
-        undo.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+        // Tertiary, not small: quiet in colour, but still a finger-sized target (see .undo-btn).
+        undo.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        undo.addClassName("undo-btn");
 
         VerticalLayout layout =
                 new VerticalLayout(emojiEl, titleEl, textEl, hint, feedbackRow, ok, undo);

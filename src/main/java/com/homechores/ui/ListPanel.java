@@ -15,6 +15,9 @@ import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
+import com.vaadin.flow.component.notification.Notification;
+import com.vaadin.flow.component.orderedlayout.FlexComponent;
+import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
@@ -298,6 +301,7 @@ class ListPanel extends VerticalLayout {
 
         Button remove = new Button(VaadinIcon.TRASH.create(), e -> {
             lists.delete(item.getId(), memberId);
+            offerUndo(item);
             refresh();
         });
         remove.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL,
@@ -313,5 +317,29 @@ class ListPanel extends VerticalLayout {
             row.addClassName("done");
         }
         return row;
+    }
+
+    /**
+     * One tap deletes a line, and the trash sits at the row's edge where a thumb lands. Rather
+     * than a confirm dialog in front of every delete, the safety net comes after: "Removed X —
+     * Undo" for a few seconds. Undo adds the line back as a fresh open item (the original row is
+     * gone), which is what someone who deleted by mistake wants.
+     */
+    private void offerUndo(ListItem item) {
+        Notification n = new Notification();
+        n.setPosition(Notification.Position.TOP_CENTER);
+        n.setDuration(6000);
+        Span text = new Span(T.tr("list.deleted", item.getText()));
+        Button undo = new Button(T.tr("undo.action"), e -> {
+            lists.add(homeCode, item.getKind(), memberId, item.getText());
+            n.close();
+            refresh();
+        });
+        undo.addThemeVariants(ButtonVariant.LUMO_TERTIARY_INLINE);
+        undo.addClassName("undo-btn");
+        HorizontalLayout row = new HorizontalLayout(text, undo);
+        row.setAlignItems(FlexComponent.Alignment.CENTER);
+        n.add(row);
+        n.open();
     }
 }
