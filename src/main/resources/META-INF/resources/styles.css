@@ -1114,6 +1114,28 @@ vaadin-checkbox-group::part(group-field) {
     color: var(--lumo-secondary-text-color);
 }
 
+/* A line's reminder: the absolute time under the text, tinted while pending, warning-coloured once
+   it has fired and nobody has answered. The bell in .row-tools turns primary when one is armed. */
+.list-row .list-reminder {
+    color: var(--lumo-primary-text-color);
+    font-weight: 600;
+}
+.list-row .list-reminder.fired {
+    color: var(--lumo-error-text-color);
+}
+.list-reminder-dialog .list-reminder-what {
+    font-weight: 700;
+    font-size: 1.1rem;
+    overflow-wrap: anywhere;
+    margin: 0;
+}
+.list-reminder-pick {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lumo-space-s);
+    width: 100%;
+}
+
 /* The dinner week: seven stacked day slots, today lifted out with the primary tint. */
 .dinner-row {
     flex-direction: column;

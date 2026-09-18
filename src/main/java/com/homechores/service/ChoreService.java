@@ -14,6 +14,7 @@ import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
 import com.homechores.domain.InputLimits;
 import com.homechores.domain.ListItemRepository;
+import com.homechores.domain.ListReminderRepository;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
 import com.homechores.domain.PushSubscriptionRepository;
@@ -80,6 +81,7 @@ public class ChoreService {
     private final ChoreGroupRepository groups;
     private final ChoreReminderRepository choreReminders;
     private final ListItemRepository listItems;
+    private final ListReminderRepository listReminders;
     private final HomeState homeState;
     private final CreditService creditService;
     private final Translations translations;
@@ -90,7 +92,7 @@ public class ChoreService {
                         PushSubscriptionRepository pushSubscriptions,
                         ChoreGroupRepository groups,
                         ChoreReminderRepository choreReminders, ListItemRepository listItems,
-                        HomeState homeState,
+                        ListReminderRepository listReminders, HomeState homeState,
                         CreditService creditService, Translations translations) {
         this.homes = homes;
         this.members = members;
@@ -101,6 +103,7 @@ public class ChoreService {
         this.groups = groups;
         this.choreReminders = choreReminders;
         this.listItems = listItems;
+        this.listReminders = listReminders;
         this.homeState = homeState;
         this.creditService = creditService;
         this.translations = translations;
@@ -331,6 +334,7 @@ public class ChoreService {
         creditService.deleteForHome(norm);
         tasks.deleteByHomeCode(norm);
         groups.deleteByHomeCode(norm);
+        listReminders.deleteByHomeCode(norm);
         listItems.deleteByHomeCode(norm);
         members.deleteByHomeCode(norm);
         homes.deleteById(norm);

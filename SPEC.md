@@ -47,6 +47,7 @@ Terms in **bold** map to concepts in the code.
 | Join a home, complete chores, give feedback | ✅ | ✅ |
 | Book a chore ("I'll do it") / cancel own booking | ✅ | ✅ |
 | Snooze a chore ("remind me later" — a one-shot push about that chore) | ✅ | ✅ |
+| Set, move, snooze or cancel the home's reminder about a to-do / grocery line | ✅ | ✅ |
 | Choose colour scheme and palette (per device) | ✅ | ✅ |
 | Log **other help** the board has no card for | ✅ | ✅ |
 | Log own other help so it counts at once, naming its reward | — | ✅ |
@@ -818,6 +819,48 @@ message and shows a matching badge on the card (`LockReason`):
   widening `WebPushSender.send` to carry a URL, a method the daily reminder shares. Two invariants
   disturbed to save one tap; the notification already names the chore.
 
+### 4.13c List-line reminders (home-wide, answered in-app)
+- A 🔔 on every open to-do and grocery line (never a ticked one, never a dinner slot) opens a
+  dialog with four quick chips — **in 1 hour, tomorrow 9:00, next week 9:00, next month 9:00** —
+  and a fifth that unfolds a date-and-time picker (15-minute step, defaulting to tomorrow 9:00).
+  The wall-clock options land on `ListReminderService.ANCHOR` (09:00) in the *setter's* zone,
+  resolved on the phone via `SessionContext.timeZone()` before the instant is stored: a reminder
+  set at 23:40 that fired at 23:40 the next day would be one nobody wanted. `plusMonths` clamps
+  the 31st to the last day of a shorter month. Bounds in the service: `[now + 1 min, now + 400 d]`.
+- **Home-wide, not per member** — the deliberate difference from §4.13b. A shared list is
+  shared: one `ListReminder` per line, pushed to every subscribed device in the home (each in its
+  own member's language via `Member.reminderLocale`), badged under the line for everyone
+  ("⏰ 9:00", "⏰ 19.9. 9:00", "⏰ in 12d" — absolute, never relative, for the reason the chore
+  badge is), and movable or cancellable by anyone in the home. Because it is the family's
+  business, arming, answering and firing all **bump `HomeState`** — again unlike the chore snooze.
+  Upserted per line in the service, not with a unique index (`ddl-auto=update`, §4.13b).
+- **Fired is not finished.** Vaadin's generated service worker answers a notification tap by
+  opening or focusing the board and nothing else (§4.13b explains why the worker is not ours to
+  rewrite, and iOS shows no notification action buttons at all), so the snooze has to happen on
+  the board. The sweep therefore stamps `firedAt` instead of deleting the row. `HomeView` shows
+  the oldest unanswered reminder as a dialog — "⏰ Reminder", the line, the same chips now meaning
+  *snooze until*, plus **Done** (ticks the line off) and **Dismiss** — from three triggers:
+  every `buildChrome` (the sweep's bump brings it live to an open board), arrival on the view, and
+  a `visibilitychange` listener calling `@ClientCallable onVisible()`, which is what turns a tap on
+  the notification into the dialog when the PWA was already open in the background. One dialog
+  per nudge per screen: a dialog still open for a nudge somebody else has since answered closes
+  itself; one closed with the footer button stays away for that screen and returns on the next visit.
+- **Sweep** (`ListReminderService`, `homechores.list-reminder.sweep-ms`, default 60 s): the third
+  push sweep, a sibling of the other two with the same three-phase transaction discipline and the
+  same 10-send cap as the chore snooze. Working set = due and not yet fired, normally empty. A
+  reminder whose line is gone or already ticked is deleted without sending; one attempted to at
+  least one device (even a device that turned out to be gone, which is pruned) becomes unanswered;
+  one with nobody to send to is dropped quietly — a dialog nobody was notified about is noise.
+- **Retired by**: snoozing (back to pending with the new time), ticking the line off — by
+  anyone, pending or fired; unticking does not revive it — deleting the line, dismissing from the
+  dialog, deleting the home, restoring a backup (line ids are reissued), and, unanswered, the
+  hourly purge after `FIRED_RETENTION` (7 days). **Not** by removing a member (it belongs to the
+  line; `setByMemberId` dangles like `createdByMemberId`) and **not** by a member turning their
+  daily reminder off — the other phones still receive it.
+- Excluded from backups, like every other pending notification. The 🔔 shows only when VAPID keys
+  are configured, and arming runs this device's permission flow first, storing only on `granted`
+  — the member asking to be reminded should be among those who are.
+
 ### 4.14 Live sync
 - `HomeState` keeps a per-home revision **Vaadin Signal**; every mutation bumps it.
 - `HomeView` registers a `Signal.effect` that re-renders when the revision changes,
@@ -1117,6 +1160,20 @@ scales up, not the other way round.
   reminder. Plus `SnoozeUiTest` (push mocked as configured): a chip on every chore card and none on
   the 🙋/＋ tiles, no chips at all without VAPID keys, the dialog offers every offset, and an armed
   reminder badges its own card and only that one.
+- **List-line reminders** (`ListReminderServiceTest`, sender mocked): fires once to every device
+  in the home and is then marked fired rather than deleted, never sent twice; nothing before its
+  time; scheduling twice moves the one reminder and anyone in the home may move it; snoozing a
+  fired one puts it back to pending with the new time; ticking the line off by anyone or deleting
+  it removes it and unticking does not revive it; a line done or gone at fire time is retired
+  without sending; a dead subscription is pruned and the reminder still fires; a home with no
+  devices has it dropped quietly; deleting the home or restoring a backup drops them and the
+  export never holds them; removing a member leaves it; a stranger is refused and a housemate may
+  cancel; absurd times are clamped; unanswered for a week is purged; each device is addressed in
+  its own member's language; and the quick options land on 9:00 (across midnight, from the 31st,
+  across a DST change). Plus `ListReminderUiTest` (push mocked as configured): a bell on every
+  open to-do and grocery line and none on ticked lines or dinner slots, none without VAPID keys,
+  the dialog offers every quick option plus the picker, an armed reminder badges its line only,
+  and a fired reminder opens the dialog on arrival with **Dismiss** clearing it for the home.
 - **Message-bundle parity** (`MessageParityTest`): the three properties files carry identical key
   sets, and no parameterized value hides a lone apostrophe. A missing key fails nothing at
   runtime — it simply renders as the key — so it needs a test rather than a reviewer.

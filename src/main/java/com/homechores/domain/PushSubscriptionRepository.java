@@ -9,6 +9,9 @@ public interface PushSubscriptionRepository extends JpaRepository<PushSubscripti
 
     List<PushSubscription> findByMemberId(Long memberId);
 
+    /** Every device in a home — the audience of a home-wide list reminder. */
+    List<PushSubscription> findByHomeCode(String homeCode);
+
     Optional<PushSubscription> findByEndpoint(String endpoint);
 
     @Transactional

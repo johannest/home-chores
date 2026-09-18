@@ -3,9 +3,13 @@ package com.homechores.ui;
 import com.homechores.domain.InputLimits;
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListKind;
+import com.homechores.domain.ListReminder;
 import com.homechores.domain.Member;
 import com.homechores.service.ChoreService;
 import com.homechores.service.ListItemService;
+import com.homechores.service.ListReminderService;
+import com.homechores.service.PushReminderService;
+import com.homechores.service.WebPushSender;
 import com.vaadin.flow.component.Key;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
@@ -41,6 +45,9 @@ class ListPanel extends VerticalLayout {
 
     private final ListItemService lists;
     private final ChoreService service;
+    private final ListReminderService reminders;
+    private final PushReminderService push;
+    private final WebPushSender pushSender;
     private final String homeCode;
     private final Long memberId;
 
@@ -68,9 +75,13 @@ class ListPanel extends VerticalLayout {
      *  yank the keyboard up on a phone that was only reading the list. */
     private boolean focusOnRender = true;
 
-    ListPanel(ListItemService lists, ChoreService service, String homeCode, Long memberId) {
+    ListPanel(ListItemService lists, ChoreService service, ListReminderService reminders,
+              PushReminderService push, WebPushSender pushSender, String homeCode, Long memberId) {
         this.lists = lists;
         this.service = service;
+        this.reminders = reminders;
+        this.push = push;
+        this.pushSender = pushSender;
         this.homeCode = homeCode;
         this.memberId = memberId;
         setPadding(false);
@@ -109,6 +120,9 @@ class ListPanel extends VerticalLayout {
         Map<Long, String> names = memberNames();
         List<ListItem> open = lists.openItems(homeCode, kind);
         List<ListItem> done = lists.doneItems(homeCode, kind);
+        // One query for the home's reminders, never one per line — and none at all when push is
+        // not configured, in which case the ⏰ is not offered either (see ChoresPanel for why).
+        Map<Long, ListReminder> armed = pushSender.isEnabled() ? reminders.forHome(homeCode) : Map.of();
 
         if (open.isEmpty() && done.isEmpty()) {
             Paragraph empty = new Paragraph(
@@ -121,7 +135,7 @@ class ListPanel extends VerticalLayout {
         Div openList = new Div();
         openList.addClassName("shared-list");
         for (ListItem item : open) {
-            openList.add(itemRow(item, names));
+            openList.add(itemRow(item, names, armed.get(item.getId())));
         }
         body.add(openList);
 
@@ -141,7 +155,7 @@ class ListPanel extends VerticalLayout {
             doneList.addClassName("shared-list");
             doneList.addClassName("done");
             for (ListItem item : done) {
-                doneList.add(itemRow(item, names));
+                doneList.add(itemRow(item, names, null));
             }
             body.add(doneList);
 
@@ -274,7 +288,7 @@ class ListPanel extends VerticalLayout {
         return row;
     }
 
-    private Div itemRow(ListItem item, Map<Long, String> names) {
+    private Div itemRow(ListItem item, Map<Long, String> names, ListReminder reminder) {
         Checkbox tick = new Checkbox();
         tick.setValue(item.isDone());
         tick.setAriaLabel(item.getText());
@@ -298,6 +312,34 @@ class ListPanel extends VerticalLayout {
             sub.addClassName("sub");
             info.add(sub);
         }
+        if (reminder != null) {
+            // Absolute, never "in 2h": the list only redraws when something in the home changes.
+            Span when = new Span(ListReminderDialog.badge(reminder));
+            when.addClassName("sub");
+            when.addClassName("list-reminder");
+            if (reminder.isFired()) {
+                when.addClassName("fired");
+            }
+            info.add(when);
+        }
+
+        Div tools = new Div();
+        tools.addClassName("row-tools");
+        // Only on open lines and only when push is configured, matching the chore card's ⏰.
+        if (!item.isDone() && pushSender.isEnabled()) {
+            Button remind = new Button(VaadinIcon.BELL_O.create(), e -> new ListReminderDialog(
+                    reminders, lists, push, pushSender, memberId, homeCode, item, reminder, names,
+                    this::refresh).open());
+            remind.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL,
+                    ButtonVariant.LUMO_ICON);
+            remind.addClassName("list-remind-btn");
+            if (reminder != null) {
+                remind.addClassName("armed");
+                remind.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+            }
+            remind.setAriaLabel(T.tr("listReminder.aria"));
+            tools.add(remind);
+        }
 
         Button remove = new Button(VaadinIcon.TRASH.create(), e -> {
             lists.delete(item.getId(), memberId);
@@ -307,8 +349,7 @@ class ListPanel extends VerticalLayout {
         remove.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL,
                 ButtonVariant.LUMO_ICON, ButtonVariant.LUMO_ERROR);
         remove.setAriaLabel(T.tr("list.delete"));
-        Div tools = new Div(remove);
-        tools.addClassName("row-tools");
+        tools.add(remove);
 
         Div row = new Div(tick, info, tools);
         row.addClassName("list-row");

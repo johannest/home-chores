@@ -38,6 +38,7 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Admin CRUD** | Under the **Admin** tab: add/edit/delete chores (name, emoji, group, interval, credits, hours), rename/remove members, promote/demote admins, rename the home, change the PIN. |
 | **Optional approval** | Admins can require approval. Completions then wait as **pending** until an admin **approves** (counts) or **rejects** (discarded). A badge shows the pending count. |
 | **Shared lists** | A **Lists** tab with **Groceries**, **To-do** and **Dinner** for the whole family. Anyone adds a line, whoever is at the store ticks it off — nothing here is a chore, so ticking earns no credits and starts no streak. Ticked lines show struck through with who ticked them, can be unticked, and vanish after 24 h (or on **Clear done**). **Dinner** is a sliding window of today plus a full week: one free-text slot per day, labelled with the weekday, today highlighted; as days pass a new empty slot appears at the far end, and a Sunday plan still reaches next Sunday. Included in backups. |
+| **List reminders** | Tap 🔔 on a to-do or grocery line and pick *in 1 hour / tomorrow 9:00 / next week / next month*, or a date and time — one push notification naming the line goes to **everyone in the home**, and the line shows when it will fire. When it does, opening the app (or tapping the notification) shows the reminder with the same choices to **snooze** it, plus **Done** and **Dismiss** — so it works on iPhone too, where notifications have no buttons. Anyone can move or cancel it; ticking the line off clears it. Needs the same VAPID keys as the other reminders. |
 | **Statistics & charts** | The **Stats** tab opens on four counts side by side — **today, this week, this month, all time** — and tapping a count picks that period for the charts below. Personal charts (chores by type, feedback split, 7-day trend) plus **12-week and 12-month trends** for the longer view. Admins also get **Home stats**: per-member totals, chore popularity, feedback per chore, 14-day activity, daily-goal adherence. Charts are dependency-free (no licensed add-on). |
 | **Delete the home** | A **Danger zone** at the bottom of the Admin tab wipes the whole family — members, chores, completions, credits, settings. Confirmed by typing the home code, and it prompts for a backup first. Everyone still on the board is signed out live. |
 | **Retention (opt-in)** | Tracks when each home was last *used* (a chore, a review, opening the board — not background traffic). Three windows: `empty-home-hours` (72h in prod config) and `abandoned-home-days` purge homes that were never used (**no chore history and at most one member**); `inactive-home-days` (30 in prod config) additionally deletes **any** home nobody has used that long — after writing a full JSON safety export to `retention.export-dir` (the operator's undo; export failure keeps the home). `/terms` and `/privacy` state the windows automatically. Off when all are 0. |
@@ -202,6 +203,8 @@ src/main/java/com/homechores/
 ├── domain/                       # JPA entities + repositories
 │   ├── Home / Member / ChoreTask / ChoreGroup / Completion
 │   ├── ChoreReminder.java        # one-shot "remind me about this chore later"
+│   ├── ListItem.java             # a grocery / to-do line or a dinner slot
+│   ├── ListReminder.java         # the home's reminder about one list line (fired = unanswered)
 │   ├── CreditEntry / SpreeTier   # credit rewards
 │   ├── RejoinRequest.java        # a device asking to sign back in as an existing member
 │   ├── TimeWindows.java          # availability-hours parsing & evaluation
@@ -212,6 +215,8 @@ src/main/java/com/homechores/
 │   ├── CreditService.java        # chore credits, spree bonuses, balances, redemption
 │   ├── StatsService.java         # chart aggregations, period lenses, week/month trends
 │   ├── ChoreReminderService.java # the one-shot snooze sweep (sibling of PushReminderService)
+│   ├── ListItemService.java      # the shared lists: add, tick, delete, dinner slots, purge
+│   ├── ListReminderService.java  # the list-line reminder sweep; fired rows wait for an answer
 │   ├── BackupService.java        # per-home JSON export / restore
 │   └── HomeState.java            # per-home revision Signal (live sync)
 ├── i18n/
@@ -229,6 +234,8 @@ src/main/java/com/homechores/
     ├── Charts.java               # dependency-free bar / segment / trend charts
     ├── AppearanceMenu.java       # colour scheme + brand palette, per device
     ├── SnoozeDialog.java         # "remind me about this chore in 2h"
+    ├── ListPanel.java            # Groceries / To-do / Dinner
+    ├── ListReminderDialog.java   # "remind us about this line tomorrow 9:00" + snooze on fire
     ├── Celebrations.java         # confetti + congratulation + feedback dialogs
     ├── PrivacyView.java          # /privacy notice
     ├── LanguageSwitcher.java     # en/fi/sv select, persisted in a cookie

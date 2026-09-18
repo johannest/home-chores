@@ -1,6 +1,8 @@
 package com.homechores.ui;
 
 import com.homechores.domain.Home;
+import com.homechores.domain.ListItem;
+import com.homechores.domain.ListReminder;
 import com.homechores.domain.Member;
 import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
@@ -8,10 +10,12 @@ import com.homechores.service.CreditService;
 import com.homechores.service.HomeState;
 import com.homechores.service.ChoreReminderService;
 import com.homechores.service.ListItemService;
+import com.homechores.service.ListReminderService;
 import com.homechores.service.PushReminderService;
 import com.homechores.service.StatsService;
 import com.homechores.service.WebPushSender;
 import com.vaadin.flow.component.AttachEvent;
+import com.vaadin.flow.component.ClientCallable;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
@@ -39,6 +43,7 @@ import com.vaadin.flow.router.BeforeEnterObserver;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.signals.Signal;
+import java.util.List;
 import java.util.Optional;
 
 /** The signed-in home experience: header + tabbed Chores / List / Stats / Admin panels. */
@@ -55,6 +60,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     private final CreditService creditService;
     private final HomeState homeState;
     private final ListItemService listService;
+    private final ListReminderService listReminderService;
     private final PushReminderService reminderService;
     private final ChoreReminderService snoozeService;
     private final WebPushSender pushSender;
@@ -72,14 +78,15 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
 
     public HomeView(ChoreService service, StatsService statsService, BackupService backupService,
                     CreditService creditService, HomeState homeState, ListItemService listService,
-                    PushReminderService reminderService, ChoreReminderService snoozeService,
-                    WebPushSender pushSender) {
+                    ListReminderService listReminderService, PushReminderService reminderService,
+                    ChoreReminderService snoozeService, WebPushSender pushSender) {
         this.service = service;
         this.statsService = statsService;
         this.backupService = backupService;
         this.creditService = creditService;
         this.homeState = homeState;
         this.listService = listService;
+        this.listReminderService = listReminderService;
         this.reminderService = reminderService;
         this.snoozeService = snoozeService;
         this.pushSender = pushSender;
@@ -113,7 +120,8 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
 
         choresPanel = new ChoresPanel(service, creditService, snoozeService, reminderService,
                 pushSender, homeCode, memberId);
-        listPanel = new ListPanel(listService, service, homeCode, memberId);
+        listPanel = new ListPanel(listService, service, listReminderService, reminderService,
+                pushSender, homeCode, memberId);
         statsPanel = new StatsPanel(statsService, service, homeCode, memberId);
         adminPanel = new AdminPanel(service, creditService, backupService, homeCode, memberId);
         // Initial render happens from the Signal.effect registered in onAttach.
@@ -161,6 +169,68 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         add(page);
 
         showSelected();
+        // After the board, so the dialog lands on top of a drawn page. The sweep bumps HomeState
+        // when a list reminder fires, which is what brings this here live on an open board.
+        showFiredReminders();
+    }
+
+    // ---- Unanswered list reminders -----------------------------------------
+
+    /** The dialog currently answering a fired list reminder on this screen, if any. */
+    private ListReminderDialog firedDialog;
+
+    /** Fired reminders this screen has already shown and the member closed without answering.
+     *  They come back on the next visit, not on the next redraw. */
+    private final java.util.Set<Long> firedSeen = new java.util.HashSet<>();
+
+    /**
+     * Shows the oldest unanswered list reminder as a dialog, once per nudge per screen. Idempotent
+     * across HomeState rebuilds: a dialog already open for a still-unanswered nudge stays; one
+     * whose nudge somebody else has since answered closes.
+     */
+    private void showFiredReminders() {
+        if (!pushSender.isEnabled()) {
+            return;
+        }
+        List<ListReminder> fired = listReminderService.firedForHome(homeCode);
+        if (firedDialog != null && firedDialog.isOpened()) {
+            Long showing = firedDialog.reminderId();
+            if (fired.stream().anyMatch(r -> r.getId().equals(showing))) {
+                return;
+            }
+            firedDialog.close();
+        }
+        for (ListReminder r : fired) {
+            if (firedSeen.contains(r.getId())) {
+                continue;
+            }
+            Optional<ListItem> item = listService.find(r.getItemId());
+            if (item.isEmpty()) {
+                continue; // retired by the sweep on its next pass
+            }
+            java.util.Map<Long, String> names = new java.util.HashMap<>();
+            for (Member m : service.membersOf(homeCode)) {
+                names.put(m.getId(), m.getName());
+            }
+            firedSeen.add(r.getId());
+            firedDialog = new ListReminderDialog(listReminderService, listService, reminderService,
+                    pushSender, memberId, homeCode, item.get(), r, names, () -> { });
+            firedDialog.open();
+            return;
+        }
+    }
+
+    /**
+     * Called from the browser whenever this page becomes visible again. Vaadin's generated
+     * service worker answers a notification tap by focusing the board if it is already open —
+     * no navigation, no redraw — so this is the hook that turns that tap into the snooze dialog.
+     * One query, and nothing else: the board itself is not rebuilt.
+     */
+    @ClientCallable
+    private void onVisible() {
+        if (homeCode != null && service.findMember(memberId).isPresent()) {
+            showFiredReminders();
+        }
     }
 
     /**
@@ -438,6 +508,15 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
                 }
             }
         });
+        // See onVisible. Kept on window so a re-navigation replaces the listener instead of
+        // stacking another; the isConnected check covers a listener that outlives its view.
+        event.getUI().getPage().executeJs(
+                "const el = $0;"
+                + " if (window.__fcVisible) document.removeEventListener('visibilitychange', window.__fcVisible);"
+                + " window.__fcVisible = () => { if (document.visibilityState === 'visible' && el.isConnected)"
+                + "   el.$server.onVisible(); };"
+                + " document.addEventListener('visibilitychange', window.__fcVisible);",
+                getElement());
         // Read this home's shared revision signal inside an effect: the effect re-runs
         // (and rebuilds the UI) whenever the revision changes — from this member or any
         // other member's device, pushed live. This replaces the old broadcaster +

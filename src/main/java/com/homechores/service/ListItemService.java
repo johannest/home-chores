@@ -4,6 +4,7 @@ import com.homechores.domain.InputLimits;
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListItemRepository;
 import com.homechores.domain.ListKind;
+import com.homechores.domain.ListReminderRepository;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
 import java.time.Duration;
@@ -49,16 +50,23 @@ public class ListItemService {
     public static final int DINNER_RETENTION_DAYS = 7;
 
     private final ListItemRepository items;
+    private final ListReminderRepository reminders;
     private final MemberRepository members;
     private final ChoreService chores;
     private final HomeState homeState;
 
-    public ListItemService(ListItemRepository items, MemberRepository members,
-                           ChoreService chores, HomeState homeState) {
+    public ListItemService(ListItemRepository items, ListReminderRepository reminders,
+                           MemberRepository members, ChoreService chores, HomeState homeState) {
         this.items = items;
+        this.reminders = reminders;
         this.members = members;
         this.chores = chores;
         this.homeState = homeState;
+    }
+
+    /** One line by id, whichever list it is on. */
+    public Optional<ListItem> find(Long itemId) {
+        return items.findById(itemId);
     }
 
     /** Open lines of one list, in the order they were written. */
@@ -175,6 +183,11 @@ public class ListItemService {
         item.setDoneAt(done ? Instant.now() : null);
         item.setDoneByMemberId(done ? memberId : null);
         items.save(item);
+        if (done) {
+            // Doing it settles it: a reminder about a ticked line — pending or already fired and
+            // waiting for an answer — has nothing left to say. Unticking does not bring it back.
+            reminders.deleteByItemId(item.getId());
+        }
         touchAndBump(item.getHomeCode());
         return true;
     }
@@ -193,6 +206,7 @@ public class ListItemService {
         }
         ListItem item = found.get();
         memberOf(item.getHomeCode(), memberId);
+        reminders.deleteByItemId(item.getId());
         items.delete(item);
         touchAndBump(item.getHomeCode());
         return true;

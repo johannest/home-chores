@@ -24,6 +24,7 @@ import com.homechores.domain.HomeRepository;
 import com.homechores.domain.InputLimits;
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListItemRepository;
+import com.homechores.domain.ListReminderRepository;
 import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
@@ -56,6 +57,7 @@ public class BackupService {
     private final ChoreGroupRepository groups;
     private final ChoreReminderRepository choreReminders;
     private final ListItemRepository listItems;
+    private final ListReminderRepository listReminders;
     private final CompletionRepository completions;
     private final CreditEntryRepository creditEntries;
     private final SpreeTierRepository spreeTiers;
@@ -73,7 +75,7 @@ public class BackupService {
     public BackupService(HomeRepository homes, MemberRepository members,
                         ChoreTaskRepository tasks, ChoreGroupRepository groups,
                         ChoreReminderRepository choreReminders, ListItemRepository listItems,
-                        CompletionRepository completions,
+                        ListReminderRepository listReminders, CompletionRepository completions,
                         CreditEntryRepository creditEntries, SpreeTierRepository spreeTiers,
                         RejoinRequestRepository rejoins, HomeState homeState) {
         this.homes = homes;
@@ -82,6 +84,7 @@ public class BackupService {
         this.groups = groups;
         this.choreReminders = choreReminders;
         this.listItems = listItems;
+        this.listReminders = listReminders;
         this.completions = completions;
         this.creditEntries = creditEntries;
         this.spreeTiers = spreeTiers;
@@ -242,6 +245,9 @@ public class BackupService {
         // wrong chore. They are excluded from the export for the same reason PushSubscription is
         // — a pending, device-targeted notification is not family history.
         choreReminders.deleteByHomeCode(code);
+        // List reminders too: their line ids are about to be reissued, and they are excluded from
+        // the export like every other pending notification.
+        listReminders.deleteByHomeCode(code);
         completions.deleteByHomeCode(code);
         creditEntries.deleteByHomeCode(code);
         spreeTiers.deleteByHomeCode(code);
