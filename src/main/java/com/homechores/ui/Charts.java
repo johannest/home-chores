@@ -133,6 +133,14 @@ final class Charts {
         Span caption = new Span(label);
         caption.addClassName("trend-day");
 
+        // The tooltip is hover-only, and a phone has no hover: without a printed count the
+        // "past 7 days" card shows bars and nothing else. Zero stays blank so the quiet days do
+        // not read as a row of noughts.
+        if (value > 0) {
+            Span count = new Span(String.valueOf(value));
+            count.addClassName("trend-count");
+            col.add(count);
+        }
         col.add(bar, caption);
         return col;
     }

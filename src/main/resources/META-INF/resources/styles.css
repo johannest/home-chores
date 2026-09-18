@@ -945,7 +945,7 @@ vaadin-checkbox-group::part(group-field) {
     display: flex;
     align-items: flex-end;
     gap: 4px;
-    height: 90px;
+    height: 104px; /* 90px + room for the count printed above each bar */
     padding-top: 6px;
 }
 .trend-col {
@@ -980,6 +980,19 @@ vaadin-checkbox-group::part(group-field) {
 .trend-day {
     font-size: 0.75rem; /* was 0.6rem = 9.6px */
     color: var(--lumo-secondary-text-color);
+}
+/* The count above a bar, so the number is readable without a hover tooltip. It never shrinks:
+   the bar gives up height instead, since a bar is only ever read relative to its neighbours. */
+.trend-count {
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--lumo-secondary-text-color);
+    font-variant-numeric: tabular-nums;
+}
+.trend-wide .trend-count {
+    font-size: 0.62rem;
 }
 
 /* ---- Admin cards ----
