@@ -46,6 +46,7 @@ public class TermsView extends VerticalLayout implements HasDynamicTitle {
 
         card.add(sectionList(T.tr("terms.s2.title"), new String[]{
                 T.tr("terms.s2.item1"), T.tr("terms.s2.item2"), T.tr("terms.s2.item3"),
+                T.tr("terms.s2.item4"),
         }));
         card.add(section(T.tr("terms.s3.title"), T.tr("terms.s3.body")));
         card.add(section(T.tr("terms.s4.title"), T.tr("terms.s4.body")));

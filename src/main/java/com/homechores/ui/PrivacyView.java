@@ -65,6 +65,14 @@ public class PrivacyView extends VerticalLayout {
                         + "deleted or you turn notifications off. It is never included in backup "
                         + "exports either.",
         }));
+        card.add(section("Who can see it",
+                "Everything in a home is shared with every member of that home. The grocery and "
+                        + "to-do lists are household lists, not personal ones: every line you add, "
+                        + "who added it and who ticked it off is visible to the whole family, as "
+                        + "are chores, feedback and history. Nothing inside the app is private to "
+                        + "one member, so please be mindful of what you write there. Nobody "
+                        + "outside your home can see any of it."));
+
         card.add(section("What we do NOT store",
                 "No email addresses, phone numbers, passwords, home addresses, location, or payment "
                         + "details. No analytics or advertising cookies, and no third-party trackers."));
@@ -147,7 +155,7 @@ public class PrivacyView extends VerticalLayout {
                         + "lightweight household conveniences, not strong secrets — share them only with "
                         + "your own household."));
 
-        Paragraph updated = new Paragraph("Last updated: August 2026");
+        Paragraph updated = new Paragraph("Last updated: September 2026");
         updated.addClassName("feedback-hint");
         card.add(updated);
 
