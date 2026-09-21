@@ -13,7 +13,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.0</version>
+        <version>4.1.1</version>
         <relativePath/>
     </parent>
 
@@ -21,7 +21,7 @@
         <java.version>21</java.version>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <vaadin.version>25.2.6</vaadin.version>
+        <vaadin.version>25.3.0-rc1</vaadin.version>
         <archunit.version>1.5.0</archunit.version>
     </properties>
 
@@ -60,6 +60,27 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- Observability (see README, "Observability"). Vaadin Observability Kit 5 is agentless:
+             it records Vaadin-aware meters (sessions, UIs, UI state size, navigation, RPC timing,
+             errors, browser timing) into the app's Micrometer registry and serves failed / slow
+             interactions from /actuator/vaadin/observability. Version comes from the Vaadin BOM.
+             Commercial: validates the subscription in dev mode, logs a warning and records nothing
+             if that fails. -->
+        <dependency>
+            <groupId>com.vaadin</groupId>
+            <artifactId>observability-kit-starter</artifactId>
+        </dependency>
+        <!-- The kit only records; Actuator + the Prometheus registry export the meters. Both
+             endpoints are served on a loopback-only management port (application.properties). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
         <dependency>
