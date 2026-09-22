@@ -183,6 +183,82 @@ payload — fine because the endpoint is loopback-only). Database row counts per
 (`vaadin.observability.database`) are left off. In development mode the kit also adds an
 **Observability** panel to Vaadin Copilot with the same findings and live meters.
 
+### Production runbook: Apache 2 in front, fat jar on 8080
+
+Nothing here changes how 8080 is served. The only new thing on the host is a loopback-only
+listener on 8090 for Actuator.
+
+**Before you deploy**
+
+1. **Check the thread headroom.** The management connector costs 5 threads, so expect about
+   34 instead of 29. On the host, with the current jar still running:
+   ```bash
+   cat /sys/fs/cgroup/pids.current; cat /sys/fs/cgroup/pids.max
+   ```
+   If the current value is already above about 90, delete the two `management.server.*` lines
+   from `application.properties` before building. `/actuator` is then served on 8080 at zero
+   extra threads, and the Apache rule in step 4 is what protects it. In that case also set
+   `vaadin.observability.insights-details=false` — see step 12.
+2. **Make sure 8090 is free:** `ss -ltnp | grep ':8090' || echo "8090 free"`. If something owns
+   it, pass `--management.server.port=8091` on the java command line and use 8091 below.
+3. **Build and ship the jar** with `mvn clean package -Pproduction` as above, keeping the
+   previous jar next to it as the rollback. The run command is unchanged.
+
+**Lock down Apache**
+
+4. **Deny `/actuator` at the proxy anyway.** Nothing on 8080 serves metrics, but a future
+   config change must not be able to expose them either. In the vhost that proxies to the
+   app, above the existing `ProxyPass /` line:
+   ```apache
+   ProxyPass "/actuator" !
+   <Location "/actuator">
+       Require all denied
+   </Location>
+   ```
+   then `sudo apachectl configtest && sudo systemctl reload apache2`.
+5. **Never open 8090.** The app binds it to 127.0.0.1, so no firewall rule is needed. Just
+   never add a `ProxyPass` for it and never bind it to a public address.
+
+**After the restart**
+
+6. **Both listeners on loopback only:** `ss -ltnp | grep java` must show 8080 and 8090 on
+   127.0.0.1.
+7. **The kit is recording.** All three succeed and the last prints a non-zero count:
+   ```bash
+   curl -s http://127.0.0.1:8090/actuator/health
+   curl -s http://127.0.0.1:8090/actuator/vaadin/observability | head -c 200
+   curl -s http://127.0.0.1:8090/actuator/prometheus | grep -c '^vaadin_'
+   ```
+   A count of 0 together with `"instrumentation":"inactive"` means the kit registered
+   nothing; look for a license warning at startup in the app log.
+8. **Nothing leaks publicly.** From a laptop, not the host: `curl -sI https://flashchores.com/actuator/prometheus | head -1`
+   must be a 403 from Apache, and `nc -zv flashchores.com 8090` must be refused.
+9. **Re-check the thread count** once a few pages have been served:
+   `ls /proc/$(pgrep -f flashchores-1.0.0.jar)/task | wc -l`.
+
+**Reading the data safely**
+
+10. **Use an SSH tunnel, never a public URL:** `ssh -N -L 8090:127.0.0.1:8090 user@host`, then
+    open http://localhost:8090/actuator/prometheus, or list what went wrong for users:
+    ```bash
+    curl -s http://localhost:8090/actuator/vaadin/observability | jq -r '.insights[] | "\(.severity)  \(.summary)"'
+    ```
+11. **Do not run Prometheus or Grafana on the host.** Each is a multi-threaded process that
+    would eat the process budget. Run Prometheus elsewhere and scrape `localhost:8090`
+    through the tunnel above. For a history with no extra service at all, a cron job can
+    snapshot the endpoint every 5 minutes:
+    ```bash
+    */5 * * * * curl -s http://127.0.0.1:8090/actuator/prometheus | gzip > /var/lib/flashchores/metrics/$(date +\%Y\%m\%d-\%H\%M).prom.gz
+    ```
+    Prune the directory weekly with `find ... -mtime +30 -delete`.
+12. **Know what is in the payload.** Metrics carry route names and exception class names,
+    never member names, IPs or home codes. The insights endpoint carries exception messages
+    and the raw session ID because `insights-details` is on; that is acceptable only while
+    the endpoint stays loopback-only.
+
+**Rollback:** stop the app and start the previous jar with the same command; it ignores the
+new properties. The Apache deny rule is harmless on the old version and can stay.
+
 ### Behind Cloudflare (free tier)
 
 The app is Cloudflare-ready (the repo side is `vaadin.pushLongPollingSuspendTimeout=80000`
