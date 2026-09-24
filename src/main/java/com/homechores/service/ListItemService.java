@@ -2,6 +2,8 @@ package com.homechores.service;
 
 import com.homechores.domain.CustomList;
 import com.homechores.domain.CustomListRepository;
+import com.homechores.domain.Home;
+import com.homechores.domain.HomeRepository;
 import com.homechores.domain.InputLimits;
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListItemRepository;
@@ -13,10 +15,16 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.TreeMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,16 +65,18 @@ public class ListItemService {
 
     private final ListItemRepository items;
     private final CustomListRepository customLists;
+    private final HomeRepository homes;
     private final ListReminderRepository reminders;
     private final MemberRepository members;
     private final ChoreService chores;
     private final HomeState homeState;
 
     public ListItemService(ListItemRepository items, CustomListRepository customLists,
-                           ListReminderRepository reminders, MemberRepository members,
-                           ChoreService chores, HomeState homeState) {
+                           HomeRepository homes, ListReminderRepository reminders,
+                           MemberRepository members, ChoreService chores, HomeState homeState) {
         this.items = items;
         this.customLists = customLists;
+        this.homes = homes;
         this.reminders = reminders;
         this.members = members;
         this.chores = chores;
@@ -399,6 +409,165 @@ public class ListItemService {
         customLists.delete(found.get());
         touchAndBump(homeCode);
         return true;
+    }
+
+    // ---- Order and visibility of the Lists tab -------------------------------
+
+    /** The built-in lists in their default order, which is also where a missing one goes back to. */
+    public static final List<ListKind> BUILT_INS = List.of(ListKind.GROCERY, ListKind.TODO, ListKind.DINNER);
+
+    /**
+     * One tab on the Lists panel: a built-in list ({@code custom == null}) or one of the home's
+     * own. {@link #token()} is how it is written into {@link Home#getListOrder()}.
+     */
+    public record ListSlot(ListKind kind, CustomList custom) {
+
+        public static ListSlot builtIn(ListKind kind) {
+            return new ListSlot(kind, null);
+        }
+
+        public static ListSlot of(CustomList list) {
+            return new ListSlot(ListKind.TODO, list);
+        }
+
+        public boolean isBuiltIn() {
+            return custom == null;
+        }
+
+        public Long listId() {
+            return custom == null ? null : custom.getId();
+        }
+
+        public String token() {
+            return custom == null ? kind.name() : "L:" + custom.getId();
+        }
+    }
+
+    /**
+     * Every list of the home, switched off or not, in the order its admin set. Self-healing:
+     * tokens of deleted lists are dropped, a built-in missing from the stored order goes back to
+     * its default place, and a custom list missing from it (every new one) goes last.
+     */
+    public List<ListSlot> listSlots(String homeCode) {
+        Map<String, ListSlot> all = new LinkedHashMap<>();
+        for (ListKind k : BUILT_INS) {
+            all.put(k.name(), ListSlot.builtIn(k));
+        }
+        for (CustomList l : customLists(homeCode)) {
+            ListSlot slot = ListSlot.of(l);
+            all.put(slot.token(), slot);
+        }
+        String stored = homes.findById(homeCode).map(Home::getListOrder).orElse(null);
+        List<ListSlot> ordered = new ArrayList<>();
+        for (String token : split(stored)) {
+            ListSlot slot = all.remove(token);
+            if (slot != null) {
+                ordered.add(slot);
+            }
+        }
+        for (ListSlot missing : all.values()) {
+            if (missing.isBuiltIn()) {
+                // Back where it was by default: before the first slot that follows it there.
+                int at = ordered.size();
+                for (int i = 0; i < ordered.size(); i++) {
+                    ListSlot o = ordered.get(i);
+                    if (!o.isBuiltIn() || BUILT_INS.indexOf(o.kind()) > BUILT_INS.indexOf(missing.kind())) {
+                        at = i;
+                        break;
+                    }
+                }
+                ordered.add(at, missing);
+            } else {
+                ordered.add(missing);
+            }
+        }
+        return ordered;
+    }
+
+    /** The lists the Lists tab shows: {@link #listSlots} without the built-ins switched off. */
+    public List<ListSlot> visibleSlots(String homeCode) {
+        Set<ListKind> hidden = hiddenLists(homeCode);
+        return listSlots(homeCode).stream()
+                .filter(slot -> !slot.isBuiltIn() || !hidden.contains(slot.kind())).toList();
+    }
+
+    /** The built-in lists an admin switched off. */
+    public Set<ListKind> hiddenLists(String homeCode) {
+        Set<ListKind> out = EnumSet.noneOf(ListKind.class);
+        String stored = homes.findById(homeCode).map(Home::getHiddenLists).orElse(null);
+        for (String token : split(stored)) {
+            BUILT_INS.stream().filter(k -> k.name().equals(token)).findFirst().ifPresent(out::add);
+        }
+        return out;
+    }
+
+    /**
+     * Moves one list a place earlier ({@code -1}) or later ({@code +1}) on the Lists tab.
+     * Switched-off lists keep their place in the order, so turning one back on puts it where it was.
+     *
+     * @return false if there is no such list or it is already at that end
+     * @throws IllegalArgumentException unless the member is an admin of the home
+     */
+    @Transactional
+    public boolean moveList(String homeCode, Long memberId, String token, int direction) {
+        adminOf(homeCode, memberId);
+        List<ListSlot> slots = new ArrayList<>(listSlots(homeCode));
+        int i = -1;
+        for (int k = 0; k < slots.size(); k++) {
+            if (slots.get(k).token().equals(token)) {
+                i = k;
+            }
+        }
+        int j = i + Integer.signum(direction);
+        if (i < 0 || direction == 0 || j < 0 || j >= slots.size()) {
+            return false;
+        }
+        slots.set(i, slots.set(j, slots.get(i)));
+        Home home = homes.findById(homeCode).orElseThrow();
+        home.setListOrder(slots.stream().map(ListSlot::token).collect(Collectors.joining(",")));
+        homes.save(home);
+        touchAndBump(homeCode);
+        return true;
+    }
+
+    /**
+     * Switches a built-in list on or off. Off hides its tab and cancels pending reminders on its
+     * lines — nobody should be nudged about a list they cannot see — but keeps the lines, so
+     * switching it back on brings them back. The usual sweeps still run on them.
+     *
+     * @throws IllegalArgumentException unless the member is an admin of the home
+     */
+    @Transactional
+    public void setListEnabled(String homeCode, Long memberId, ListKind kind, boolean enabled) {
+        adminOf(homeCode, memberId);
+        Set<ListKind> hidden = hiddenLists(homeCode);
+        if (enabled ? !hidden.remove(kind) : !hidden.add(kind)) {
+            return; // already so
+        }
+        if (!enabled) {
+            for (ListItem line : openItems(homeCode, kind)) {
+                reminders.deleteByItemId(line.getId());
+            }
+        }
+        Home home = homes.findById(homeCode).orElseThrow();
+        home.setHiddenLists(hidden.isEmpty() ? null
+                : BUILT_INS.stream().filter(hidden::contains).map(ListKind::name)
+                        .collect(Collectors.joining(",")));
+        homes.save(home);
+        touchAndBump(homeCode);
+    }
+
+    private static List<String> split(String csv) {
+        return csv == null || csv.isBlank() ? List.of()
+                : Arrays.stream(csv.split(",")).map(String::trim).filter(t -> !t.isEmpty()).toList();
+    }
+
+    private Member adminOf(String homeCode, Long memberId) {
+        Member member = memberOf(homeCode, memberId);
+        if (!member.isAdmin()) {
+            throw new IllegalArgumentException("Only an admin changes the home's lists");
+        }
+        return member;
     }
 
     @Scheduled(fixedDelayString = "${homechores.list.purge-ms:3600000}",

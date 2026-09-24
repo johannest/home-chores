@@ -7,6 +7,7 @@ import com.homechores.domain.CounterReset;
 import com.homechores.domain.DivisionStyle;
 import com.homechores.domain.Home;
 import com.homechores.domain.InputLimits;
+import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import com.homechores.domain.RejoinRequest;
 import com.homechores.domain.Season;
@@ -16,6 +17,8 @@ import com.homechores.domain.TimeWindows;
 import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
+import com.homechores.service.ListItemService;
+import com.homechores.service.ListItemService.ListSlot;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
@@ -55,6 +58,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /** Admin-only tools: approvals, settings, members, chores CRUD, backup/restore. */
 class AdminPanel extends VerticalLayout {
@@ -77,7 +81,7 @@ class AdminPanel extends VerticalLayout {
      *  changes with the language switcher and now embeds a count. */
     private enum Section {
         REJOINS, HELP, APPROVALS, LOG_FOR, RECENT,
-        MEMBERS, GROUPS, CHORES, REWARDS, RULES, SETTINGS, BACKUP, DANGER
+        MEMBERS, GROUPS, CHORES, REWARDS, LISTS, RULES, SETTINGS, BACKUP, DANGER
     }
 
     /** Key in {@link #groupOpen} for the chores that belong to no group. */
@@ -97,11 +101,14 @@ class AdminPanel extends VerticalLayout {
      * immediately, which bumps HomeState and rebuilds all twelve sections from scratch — without a
      * remembered choice, a card would slam shut under the admin's finger on every tap.
      */
+    private final ListItemService lists;
+
     private final EnumMap<Section, Boolean> openState = new EnumMap<>(Section.class);
 
     AdminPanel(ChoreService service, CreditService creditService, BackupService backup,
-               String homeCode, Long memberId) {
+               ListItemService lists, String homeCode, Long memberId) {
         this.service = service;
+        this.lists = lists;
         this.creditService = creditService;
         this.backup = backup;
         this.homeCode = homeCode;
@@ -125,6 +132,7 @@ class AdminPanel extends VerticalLayout {
         add(groupsSection());
         add(choresSection());
         add(rewardsSection());
+        add(listsSection());
         // Two cards, not one: the rules of doing chores and the home's own settings are read at
         // different moments, and together they were a single 1800px card on a phone.
         add(rulesSection());
@@ -979,6 +987,69 @@ class AdminPanel extends VerticalLayout {
             item.setEnabled(a.enabled());
         }
         return menu;
+    }
+
+    /**
+     * The Lists tab's order and which built-in lists it shows. Custom lists are made and deleted
+     * by members on the Lists tab itself; here they can only be moved. Switching a built-in off
+     * hides it and cancels its reminders but keeps its lines (see ListItemService.setListEnabled).
+     */
+    private Details listsSection() {
+        List<ListSlot> slots = lists.listSlots(homeCode);
+        Set<ListKind> hidden = lists.hiddenLists(homeCode);
+        Details s = section(Section.LISTS, T.tr("admin.lists"), false);
+
+        Div info = new Div();
+        info.setText(T.tr("admin.lists.info"));
+        info.addClassName("sub");
+        info.getStyle().set("margin-bottom", "var(--lumo-space-s)");
+        s.add(info);
+
+        for (int i = 0; i < slots.size(); i++) {
+            ListSlot slot = slots.get(i);
+            Div name = new Div();
+            name.setText(ListPanel.slotLabel(slot));
+            name.getStyle().set("font-weight", "600");
+            Div info2 = new Div(name);
+            info2.addClassName("grow");
+            if (!slot.isBuiltIn()) {
+                Span sub = new Span(T.tr("admin.lists.custom"));
+                sub.addClassName("sub");
+                info2.add(sub);
+            }
+
+            MenuBar actions = rowMenu(
+                    new RowAction(T.tr("admin.moveUp"), i > 0, () -> {
+                        lists.moveList(homeCode, memberId, slot.token(), -1);
+                        refresh();
+                    }),
+                    new RowAction(T.tr("admin.moveDown"), i < slots.size() - 1, () -> {
+                        lists.moveList(homeCode, memberId, slot.token(), 1);
+                        refresh();
+                    }));
+
+            Div row;
+            if (slot.isBuiltIn()) {
+                Switch shown = new Switch(!hidden.contains(slot.kind()));
+                shown.addClassName("list-shown-switch");
+                shown.setAriaLabel(T.tr("admin.lists.shown", ListPanel.slotLabel(slot)));
+                shown.setTooltipText(T.tr("admin.lists.shownTip"));
+                shown.addValueChangeListener(e -> {
+                    lists.setListEnabled(homeCode, memberId, slot.kind(), e.getValue());
+                    refresh();
+                });
+                row = new Div(info2, tools(shown, actions));
+                if (hidden.contains(slot.kind())) {
+                    row.addClassName("list-off");
+                }
+            } else {
+                row = new Div(info2, tools(actions));
+            }
+            row.addClassName("list-row");
+            row.addClassName("admin-list-row");
+            s.add(row);
+        }
+        return s;
     }
 
     /** Chore groups: the board's headings, created and arranged here. */

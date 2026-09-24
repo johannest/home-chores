@@ -108,7 +108,7 @@ public class BackupService {
                 home.isRotationEnforced(), home.getBookingTimeoutHours(), home.isApproveRejoin(),
                 home.isApproveJoin(), home.isConfirmCompletion(), home.isAllowOtherHelp(),
                 home.getCreatedAt(), home.getMaxInARow(), home.getCounterReset(),
-                home.getCounterResetAt());
+                home.getCounterResetAt(), home.getListOrder(), home.getHiddenLists());
         for (Member m : members.findByHomeCodeOrderByJoinedAtAsc(homeCode)) {
             b.members.add(new MemberDto(m.getId(), m.getName(), m.getColor(), m.isAdmin(),
                     m.getJoinedAt(), m.getAvatar()));
@@ -332,6 +332,12 @@ public class BackupService {
             }
             listIdMap.put(cl.id, customLists.save(entity).getId());
         }
+        // The home was saved before its lists existed; now their new ids are known, the order can
+        // point at them. Tokens are re-validated here like any other hand-editable string: only
+        // built-in names and lists this restore created survive.
+        home.setListOrder(remapListOrder(b.home.listOrder, listIdMap));
+        home.setHiddenLists(cleanHiddenLists(b.home.hiddenLists));
+        homes.save(home);
         for (ListItemDto li : b.listItems) {
             String text = InputLimits.clip(li.text, InputLimits.LIST_ITEM);
             if (text == null || text.isBlank()) {
@@ -429,6 +435,42 @@ public class BackupService {
     public record RestoreResult(String homeCode, int members, int tasks, int completions) {
     }
 
+    private static String remapListOrder(String order, Map<Long, Long> listIdMap) {
+        if (order == null || order.isBlank()) {
+            return null;
+        }
+        List<String> out = new ArrayList<>();
+        for (String raw : order.split(",")) {
+            String token = raw.trim();
+            if (token.startsWith("L:")) {
+                try {
+                    Long mapped = listIdMap.get(Long.valueOf(token.substring(2)));
+                    if (mapped != null) {
+                        out.add("L:" + mapped);
+                    }
+                } catch (NumberFormatException ignored) {
+                    // hand-edited garbage: dropped, the list still shows at the end
+                }
+            } else if (ListItemService.BUILT_INS.stream().anyMatch(k -> k.name().equals(token))) {
+                out.add(token);
+            }
+        }
+        return out.isEmpty() ? null : String.join(",", out);
+    }
+
+    private static String cleanHiddenLists(String hidden) {
+        if (hidden == null || hidden.isBlank()) {
+            return null;
+        }
+        List<String> out = new ArrayList<>();
+        for (ListKind k : ListItemService.BUILT_INS) {
+            if (java.util.Arrays.stream(hidden.split(",")).map(String::trim).anyMatch(k.name()::equals)) {
+                out.add(k.name());
+            }
+        }
+        return out.isEmpty() ? null : String.join(",", out);
+    }
+
     // ---- JSON shapes (public, mutable for Jackson) --------------------------
     //
     // Deliberately excluded from export: Member.deviceSecretHash and termsAcceptedAt
@@ -462,7 +504,11 @@ public class BackupService {
                           /** Boxed for the same reason: pre-setting backups restore as 3. */
                           Integer maxInARow,
                           /** Null in older files → MONTHLY; the reset stamp is simply absent. */
-                          CounterReset counterReset, Instant counterResetAt) {
+                          CounterReset counterReset, Instant counterResetAt,
+                          /** The Lists tab's order and switched-off built-ins; null in older
+                           *  files, which means the defaults. Custom-list ids in the order are
+                           *  the file's own and are remapped on restore. */
+                          String listOrder, String hiddenLists) {
     }
 
     /** {@code avatar} is absent in pre-avatar backups and deserializes to null — fine. */

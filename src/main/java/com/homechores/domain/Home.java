@@ -65,6 +65,18 @@ public class Home {
      */
     private Instant counterResetAt;
 
+    /**
+     * The Lists tab's order, as comma-separated tokens: a built-in {@link ListKind} name or
+     * {@code L:<CustomList id>}. Null means the default order. Read through
+     * {@code ListItemService.listSlots}, which drops tokens of deleted lists and appends lists
+     * missing from it — so creating or deleting a custom list never has to touch this.
+     * Nullable, so {@code ddl-auto=update} can add it to a populated table.
+     */
+    private String listOrder;
+
+    /** Built-in lists an admin switched off, as comma-separated {@link ListKind} names. Null: all on. */
+    private String hiddenLists;
+
     /** How chores are divided among members. */
     @Enumerated(EnumType.STRING)
     private DivisionStyle divisionStyle = DivisionStyle.DEFAULT;
@@ -189,6 +201,22 @@ public class Home {
 
     public void setCounterReset(CounterReset counterReset) {
         this.counterReset = counterReset;
+    }
+
+    public String getListOrder() {
+        return listOrder;
+    }
+
+    public void setListOrder(String listOrder) {
+        this.listOrder = listOrder;
+    }
+
+    public String getHiddenLists() {
+        return hiddenLists;
+    }
+
+    public void setHiddenLists(String hiddenLists) {
+        this.hiddenLists = hiddenLists;
     }
 
     public Instant getCounterResetAt() {
