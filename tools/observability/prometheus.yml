@@ -1,0 +1,11 @@
+# Prometheus scrape config for FlashChores, run on a laptop or home machine — never on the
+# production host (Prometheus is its own multi-threaded process and the host counts threads).
+# Open the tunnel first:  ssh -N -L 8090:127.0.0.1:8090 flashchores
+# Homebrew: copy over /opt/homebrew/etc/prometheus.yml, then  brew services restart prometheus
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: flashchores
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["localhost:8090"]

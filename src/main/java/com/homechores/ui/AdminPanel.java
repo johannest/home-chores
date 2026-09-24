@@ -19,8 +19,8 @@ import com.homechores.service.CreditService;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
-import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.checkbox.CheckboxGroup;
+import com.vaadin.flow.component.checkbox.Switch;
 import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.dialog.Dialog;
@@ -543,7 +543,7 @@ class AdminPanel extends VerticalLayout {
         Home home = service.findHome(homeCode).orElseThrow();
         Details s = section(Section.RULES, T.tr("admin.settings.rules"), false);
 
-        Checkbox approval = new Checkbox(T.tr("admin.requireApproval"));
+        Switch approval = new Switch(T.tr("admin.requireApproval"));
         approval.setValue(home.isRequireApproval());
         approval.addValueChangeListener(e -> {
             Home h = service.findHome(homeCode).orElseThrow();
@@ -551,7 +551,7 @@ class AdminPanel extends VerticalLayout {
             service.saveHome(h);
         });
 
-        Checkbox confirmTaps = new Checkbox(T.tr("admin.confirmCompletion"));
+        Switch confirmTaps = new Switch(T.tr("admin.confirmCompletion"));
         confirmTaps.setValue(home.isConfirmCompletion());
         confirmTaps.addValueChangeListener(e -> {
             Home h = service.findHome(homeCode).orElseThrow();
@@ -561,7 +561,7 @@ class AdminPanel extends VerticalLayout {
         Span confirmHint = new Span(T.tr("admin.confirmCompletion.helper"));
         confirmHint.addClassName("sub");
 
-        Checkbox otherHelp = new Checkbox(T.tr("admin.allowOtherHelp"));
+        Switch otherHelp = new Switch(T.tr("admin.allowOtherHelp"));
         otherHelp.setValue(home.isAllowOtherHelp());
         otherHelp.addValueChangeListener(e -> {
             Home h = service.findHome(homeCode).orElseThrow();
@@ -619,7 +619,7 @@ class AdminPanel extends VerticalLayout {
             }
         });
 
-        Checkbox enforced = new Checkbox(T.tr("admin.rotationEnforced"));
+        Switch enforced = new Switch(T.tr("admin.rotationEnforced"));
         enforced.setValue(home.isRotationEnforced());
         enforced.addValueChangeListener(e -> {
             Home h = service.findHome(homeCode).orElseThrow();
@@ -673,7 +673,7 @@ class AdminPanel extends VerticalLayout {
         Button resetNow = new Button(T.tr("admin.resetCounters"), e -> resetCountersDialog());
         resetNow.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
 
-        Checkbox joinGate = new Checkbox(T.tr("admin.approveJoin"));
+        Switch joinGate = new Switch(T.tr("admin.approveJoin"));
         joinGate.setValue(home.isApproveJoin());
         joinGate.addValueChangeListener(e -> {
             Home h = service.findHome(homeCode).orElseThrow();
@@ -683,7 +683,7 @@ class AdminPanel extends VerticalLayout {
         Span joinHint = new Span(T.tr("admin.approveJoin.helper"));
         joinHint.addClassName("sub");
 
-        Checkbox rejoinGate = new Checkbox(T.tr("admin.approveRejoin"));
+        Switch rejoinGate = new Switch(T.tr("admin.approveRejoin"));
         rejoinGate.setValue(home.isApproveRejoin());
         rejoinGate.addValueChangeListener(e -> {
             Home h = service.findHome(homeCode).orElseThrow();

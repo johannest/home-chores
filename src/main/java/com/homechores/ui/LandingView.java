@@ -34,6 +34,7 @@ import com.vaadin.flow.router.BeforeEnterObserver;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.router.RouterLink;
+import com.vaadin.flow.shared.Registration;
 import com.vaadin.flow.signals.Signal;
 import com.vaadin.flow.signals.local.ValueSignal;
 import java.util.Optional;
@@ -70,6 +71,8 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
     private final ValueSignal<String> joinCode = new ValueSignal<>("");
     private Tabs tabs;
     private Tab joinTab;
+    /** Which landing form shows: create (false) or join (true). */
+    private final ValueSignal<Boolean> joining = new ValueSignal<>(false);
 
     private final Div card = new Div();
     private final Div restoring = new Div();
@@ -77,6 +80,8 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
 
     /** Token of the rejoin request this device is waiting on, while the waiting card shows. */
     private String waitingToken;
+    /** The effect watching that request; one at a time, so a second wait replaces the first. */
+    private Registration waitingEffect;
 
     public LandingView(ChoreService service, HomeState homeState, RateLimiter rateLimiter) {
         this.service = service;
@@ -104,13 +109,10 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
 
         Div createForm = buildCreateForm();
         Div joinForm = buildJoinForm();
-        joinForm.setVisible(false);
-
-        tabs.addSelectedChangeListener(e -> {
-            boolean create = e.getSelectedTab() == createTab;
-            createForm.setVisible(create);
-            joinForm.setVisible(!create);
-        });
+        // Tabs has no signal binding of its own, so its listener feeds one; both forms follow it.
+        tabs.addSelectedChangeListener(e -> joining.set(e.getSelectedTab() == joinTab));
+        createForm.bindVisible(Signal.computed(() -> !joining.get()));
+        joinForm.bindVisible(joining);
 
         card.add(langRow, title, sub, tabs, createForm, joinForm);
 
@@ -400,7 +402,10 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         cancel.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         waiting.add(emoji, title, text, bar, cancel);
 
-        Signal.effect(this, () -> {
+        if (waitingEffect != null) {
+            waitingEffect.remove(); // an earlier wait (cancelled, then asked again) stops watching
+        }
+        waitingEffect = Signal.effect(this, () -> {
             homeState.revision(homeCode).get(); // re-run whenever anything in the home changes
             if (waitingToken == null) {
                 return;
@@ -533,7 +538,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         Span label = new Span(new Span(T.tr("landing.agree.prefix") + " "),
                 new RouterLink(T.tr("landing.agree.link"), TermsView.class));
         agree.setLabelComponent(label);
-        agree.addValueChangeListener(e -> agreed.set(Boolean.TRUE.equals(e.getValue())));
+        agree.bindValue(agreed, agreed::set);
         return agree;
     }
 

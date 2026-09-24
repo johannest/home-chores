@@ -1,5 +1,7 @@
 package com.homechores.service;
 
+import com.homechores.domain.CustomList;
+import com.homechores.domain.CustomListRepository;
 import com.homechores.domain.InputLimits;
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListItemRepository;
@@ -37,6 +39,10 @@ import org.springframework.transaction.annotation.Transactional;
  * rather than added and ticked (see {@link #setDinner}). The panel shows a sliding week from
  * today; a day that has passed drops off the view and its row is reclaimed by the same sweep
  * {@link #DINNER_RETENTION_DAYS} later, so a backup still holds last week's meals.
+ *
+ * <p>A home can also name lists of its own ({@link CustomList}). Their lines are to-dos that
+ * carry a {@code listId}; every read and write here takes that id, null meaning the built-in list
+ * of the given kind, so the built-in To-do never shows a custom list's lines or the other way round.
  */
 @Service
 public class ListItemService {
@@ -50,14 +56,17 @@ public class ListItemService {
     public static final int DINNER_RETENTION_DAYS = 7;
 
     private final ListItemRepository items;
+    private final CustomListRepository customLists;
     private final ListReminderRepository reminders;
     private final MemberRepository members;
     private final ChoreService chores;
     private final HomeState homeState;
 
-    public ListItemService(ListItemRepository items, ListReminderRepository reminders,
-                           MemberRepository members, ChoreService chores, HomeState homeState) {
+    public ListItemService(ListItemRepository items, CustomListRepository customLists,
+                           ListReminderRepository reminders, MemberRepository members,
+                           ChoreService chores, HomeState homeState) {
         this.items = items;
+        this.customLists = customLists;
         this.reminders = reminders;
         this.members = members;
         this.chores = chores;
@@ -71,13 +80,33 @@ public class ListItemService {
 
     /** Open lines of one list, in the order they were written. */
     public List<ListItem> openItems(String homeCode, ListKind kind) {
-        return items.findByHomeCodeAndKindAndDoneAtIsNullOrderByCreatedAtAscIdAsc(homeCode, kind);
+        return openItems(homeCode, kind, null);
+    }
+
+    /** Open lines of one list: a custom list when {@code listId} is set, else the built-in {@code kind}. */
+    public List<ListItem> openItems(String homeCode, ListKind kind, Long listId) {
+        return listId == null
+                ? items.findByHomeCodeAndKindAndListIdIsNullAndDoneAtIsNullOrderByCreatedAtAscIdAsc(homeCode, kind)
+                : inHome(homeCode, items.findByListIdAndDoneAtIsNullOrderByCreatedAtAscIdAsc(listId));
     }
 
     /** Lines ticked within the retention window, most recently ticked first. */
     public List<ListItem> doneItems(String homeCode, ListKind kind) {
-        return items.findByHomeCodeAndKindAndDoneAtAfterOrderByDoneAtDescIdDesc(
-                homeCode, kind, Instant.now().minus(DONE_RETENTION));
+        return doneItems(homeCode, kind, null);
+    }
+
+    /** {@link #doneItems(String, ListKind)} for a custom list when {@code listId} is set. */
+    public List<ListItem> doneItems(String homeCode, ListKind kind, Long listId) {
+        Instant cutoff = Instant.now().minus(DONE_RETENTION);
+        return listId == null
+                ? items.findByHomeCodeAndKindAndListIdIsNullAndDoneAtAfterOrderByDoneAtDescIdDesc(
+                        homeCode, kind, cutoff)
+                : inHome(homeCode, items.findByListIdAndDoneAtAfterOrderByDoneAtDescIdDesc(listId, cutoff));
+    }
+
+    /** Belt and braces: a list id from another home reads as an empty list, never as its lines. */
+    private static List<ListItem> inHome(String homeCode, List<ListItem> lines) {
+        return lines.stream().filter(i -> homeCode.equals(i.getHomeCode())).toList();
     }
 
     /** Dinner slots per day in {@code [from, to]}, calendar-ordered; days with nothing set are absent. */
@@ -152,14 +181,57 @@ public class ListItemService {
      */
     @Transactional
     public Optional<ListItem> add(String homeCode, ListKind kind, Long memberId, String text) {
+        return add(homeCode, kind, null, memberId, text);
+    }
+
+    /**
+     * {@link #add(String, ListKind, Long, String)} onto a custom list when {@code listId} is set;
+     * the line is then a to-do whatever {@code kind} says. Returns empty if that list is gone —
+     * another phone may have deleted it a moment ago.
+     */
+    @Transactional
+    public Optional<ListItem> add(String homeCode, ListKind kind, Long listId, Long memberId, String text) {
         Member member = memberOf(homeCode, memberId);
         String clean = InputLimits.clip(text == null ? null : text.trim(), InputLimits.LIST_ITEM);
         if (clean == null || clean.isBlank()) {
             return Optional.empty();
         }
-        ListItem saved = items.save(new ListItem(homeCode, kind, clean, member.getId()));
+        if (listId != null && findList(homeCode, listId).isEmpty()) {
+            return Optional.empty();
+        }
+        ListItem line = new ListItem(homeCode, listId == null ? kind : ListKind.TODO, clean, member.getId());
+        line.setListId(listId);
+        ListItem saved = items.save(line);
         touchAndBump(homeCode);
         return Optional.of(saved);
+    }
+
+    /**
+     * Rewrites a line's text. Blank text changes nothing (delete is the way to empty a line);
+     * oversized text is clipped. Dinner slots are edited through {@link #setDinner} instead.
+     * Ticked state, author and reminder are kept: fixing a typo is not a new line.
+     *
+     * @return false if there is no such line, it is a dinner slot, or the text is blank
+     * @throws IllegalArgumentException if the member is not in the line's home
+     */
+    @Transactional
+    public boolean rename(Long itemId, Long memberId, String text) {
+        Optional<ListItem> found = items.findById(itemId);
+        if (found.isEmpty()) {
+            return false;
+        }
+        ListItem item = found.get();
+        memberOf(item.getHomeCode(), memberId);
+        String clean = InputLimits.clip(text == null ? null : text.trim(), InputLimits.LIST_ITEM);
+        if (item.getKind() == ListKind.DINNER || clean == null || clean.isBlank()) {
+            return false;
+        }
+        if (!clean.equals(item.getText())) {
+            item.setText(clean);
+            items.save(item);
+            touchAndBump(item.getHomeCode());
+        }
+        return true;
     }
 
     /**
@@ -215,7 +287,18 @@ public class ListItemService {
     /** Removes every ticked line from one list. Returns how many went. */
     @Transactional
     public long clearDone(String homeCode, ListKind kind) {
-        long removed = items.deleteByHomeCodeAndKindAndDoneAtIsNotNull(homeCode, kind);
+        return clearDone(homeCode, kind, null);
+    }
+
+    /** {@link #clearDone(String, ListKind)} on a custom list when {@code listId} is set. */
+    @Transactional
+    public long clearDone(String homeCode, ListKind kind, Long listId) {
+        if (listId != null && findList(homeCode, listId).isEmpty()) {
+            return 0;
+        }
+        long removed = listId == null
+                ? items.deleteByHomeCodeAndKindAndListIdIsNullAndDoneAtIsNotNull(homeCode, kind)
+                : items.deleteByListIdAndDoneAtIsNotNull(listId);
         if (removed > 0) {
             touchAndBump(homeCode);
         }
@@ -238,6 +321,84 @@ public class ListItemService {
             log.debug("Purged {} stale list row(s)", removed);
         }
         return removed;
+    }
+
+    // ---- The home's own lists ------------------------------------------------
+
+    /** The home's own lists, in the order they were made. */
+    public List<CustomList> customLists(String homeCode) {
+        return customLists.findByHomeCodeOrderByCreatedAtAscIdAsc(homeCode);
+    }
+
+    /** One of the home's own lists; empty if it is gone or belongs to another home. */
+    public Optional<CustomList> findList(String homeCode, Long listId) {
+        return listId == null ? Optional.empty()
+                : customLists.findById(listId).filter(l -> l.getHomeCode().equals(homeCode));
+    }
+
+    /**
+     * Makes a new named list. Any member may: lists are shared like everything else in a home.
+     *
+     * @return the list, or empty for a blank name or once the home has {@link InputLimits#CUSTOM_LISTS}
+     * @throws IllegalArgumentException if the member is not in that home
+     */
+    @Transactional
+    public Optional<CustomList> createList(String homeCode, Long memberId, String name) {
+        Member member = memberOf(homeCode, memberId);
+        String clean = InputLimits.clip(name == null ? null : name.trim(), InputLimits.LIST_NAME);
+        if (clean == null || clean.isBlank()
+                || customLists.countByHomeCode(homeCode) >= InputLimits.CUSTOM_LISTS) {
+            return Optional.empty();
+        }
+        CustomList saved = customLists.save(new CustomList(homeCode, clean, member.getId()));
+        touchAndBump(homeCode);
+        return Optional.of(saved);
+    }
+
+    /**
+     * Renames one of the home's own lists. Blank names change nothing.
+     *
+     * @return false if the list is gone or the name is blank
+     * @throws IllegalArgumentException if the member is not in that home
+     */
+    @Transactional
+    public boolean renameList(String homeCode, Long listId, Long memberId, String name) {
+        memberOf(homeCode, memberId);
+        Optional<CustomList> found = findList(homeCode, listId);
+        String clean = InputLimits.clip(name == null ? null : name.trim(), InputLimits.LIST_NAME);
+        if (found.isEmpty() || clean == null || clean.isBlank()) {
+            return false;
+        }
+        if (!clean.equals(found.get().getName())) {
+            found.get().setName(clean);
+            customLists.save(found.get());
+            touchAndBump(homeCode);
+        }
+        return true;
+    }
+
+    /**
+     * Deletes one of the home's own lists with every line on it and their reminders. There is
+     * no undo; the UI asks first.
+     *
+     * @return false if the list is already gone
+     * @throws IllegalArgumentException if the member is not in that home
+     */
+    @Transactional
+    public boolean deleteList(String homeCode, Long listId, Long memberId) {
+        memberOf(homeCode, memberId);
+        Optional<CustomList> found = findList(homeCode, listId);
+        if (found.isEmpty()) {
+            return false;
+        }
+        List<ListItem> lines = items.findByListId(listId);
+        for (ListItem line : lines) {
+            reminders.deleteByItemId(line.getId());
+        }
+        items.deleteAll(lines);
+        customLists.delete(found.get());
+        touchAndBump(homeCode);
+        return true;
     }
 
     @Scheduled(fixedDelayString = "${homechores.list.purge-ms:3600000}",

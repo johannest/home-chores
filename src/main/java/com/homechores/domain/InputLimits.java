@@ -45,6 +45,12 @@ public final class InputLimits {
      */
     public static final int LIST_ITEM = 160;
 
+    /** The name of a home's own list — a tab label, so as short as a group name. */
+    public static final int LIST_NAME = 30;
+
+    /** How many lists of its own a home may make; each is a tab, and tabs must stay findable. */
+    public static final int CUSTOM_LISTS = 10;
+
     /**
      * Chore emoji, server-side cap. The UI caps at 4 UTF-16 units, but a single emoji
      * grapheme (skin tones, family sequences) can be longer — 16 leaves room for one

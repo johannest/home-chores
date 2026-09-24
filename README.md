@@ -5,7 +5,7 @@ join link) with your family, and tap a button whenever you do a chore. The app k
 things **fair** (no one can hog the easy chore forever), rewards effort with
 **credits**, and celebrates every win.
 
-Built with **Vaadin 25 Flow + Spring Boot 4** (Java 21), an **H2** file database,
+Built with **Vaadin 25.3 Flow + Spring Boot 4** (Java 21), an **H2** file database,
 **Vaadin Signals + server push** for live sync, and installable as a **PWA** on
 iPhone and Android. Available in **English, Finnish and Swedish**.
 
@@ -139,7 +139,9 @@ java -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx512m -jar target/flashchore
 ```
 
 Measured on this jar: **29 threads whether idle or serving 600 concurrent requests**, of
-which 12 are the bare JVM floor. What each part buys:
+which 12 are the bare JVM floor. (Re-measured on macOS after the Observability Kit and the
+loopback management connector were added: 28 threads with Actuator on the app port, **33 with
+the separate management port** — the extra connector costs 5.) What each part buys:
 
 | Setting | Effect |
 |---|---|
@@ -147,6 +149,7 @@ which 12 are the bare JVM floor. What each part buys:
 | `-XX:+UseSerialGC` | Drops G1's six threads (`GC Thread`×2, `G1 Service`, `G1 Refine`, `G1 Main Marker`, `G1 Conc`). The live set is tens of MB, so serial pauses stay trivial. |
 | `-Xmx512m` | Comfortable under the host's 2 GB limit: ~76 MB RSS idle, ~290 MB after a 600-request burst (SerialGC is not eager about returning it). Lower it if you want a tighter ceiling. |
 | `spring.threads.virtual.enabled=true` (in `application.properties`) | Removes Tomcat's growable exec pool, so thread count no longer tracks traffic. |
+| `management.server.port=8090` + `management.server.address=127.0.0.1` (in `application.properties`) | A second Tomcat connector for Actuator: +5 threads (acceptor, poller, handler) in exchange for metrics that can never be reached through the public port or the proxy. Delete both lines to serve `/actuator` on 8080 instead and firewall it at the proxy. |
 
 Verify on the host with `ls /proc/<pid>/task | wc -l` (JVM threads) and
 `cat /sys/fs/cgroup/pids.current` (what the limit actually counts).
@@ -154,6 +157,106 @@ Verify on the host with `ls /proc/<pid>/task | wc -l` (JVM threads) and
 Two things deliberately **not** done: `-XX:TieredStopAtLevel=1 -XX:CICompilerCount=1` saves
 one thread but disables C2 and made startup slower (2.5 s → 3.6 s), and a GraalVM native
 image trades away JIT peak throughput for startup and memory wins this host does not need.
+
+### Observability
+
+The app ships with the [Vaadin Observability Kit 5](https://vaadin.com/docs/latest/tools/observability)
+(commercial; the dev-mode license check logs a warning and records nothing if it fails) plus
+Spring Boot Actuator and the Prometheus registry. No JVM agent, no `-javaagent` flag: the kit
+records straight into the app's Micrometer registry.
+
+Everything is served on a **loopback-only management port, 8090**, never on the public 8080,
+so nothing needs to change at the reverse proxy or in Cloudflare. Scrape it from the host, or
+over an SSH tunnel (`ssh -L 8090:127.0.0.1:8090 host`):
+
+| Endpoint | What it gives you |
+|---|---|
+| `GET http://127.0.0.1:8090/actuator/prometheus` | JVM memory, GC and thread meters plus every `vaadin_*` meter: active sessions and UIs, **UI state size** (`vaadin_ui_state_nodes`, per-tab and per-session maxima — the number that predicts when the server has to scale), navigation and RPC timing per route, session-lock wait/hold, error counters, browser Web Vitals and client errors. |
+| `GET http://127.0.0.1:8090/actuator/vaadin/observability` | **Interaction insights**: failed and slow (>1 s) user interactions with route, component, root-cause exception and the first application stack frame, slow data-provider queries, and uncaught browser errors — grouped, with replay steps. In-memory ring buffers of 100 per kind; nothing hits disk. |
+| `GET http://127.0.0.1:8090/actuator/health` | Liveness. |
+
+Configuration lives under `vaadin.observability.*` in `application.properties`. Two opt-ins are
+switched on here: `ui-state` (one component-tree walk per UI at most every 10 s, under the
+session lock) and `insights-details` (exception messages and stack frames in the insights
+payload — fine because the endpoint is loopback-only). Database row counts per route
+(`vaadin.observability.database`) are left off. In development mode the kit also adds an
+**Observability** panel to Vaadin Copilot with the same findings and live meters.
+
+### Production runbook: Apache 2 in front, fat jar on 8080
+
+Nothing here changes how 8080 is served. The only new thing on the host is a loopback-only
+listener on 8090 for Actuator.
+
+**Before you deploy**
+
+1. **Check the thread headroom.** The management connector costs 5 threads, so expect about
+   34 instead of 29. On the host, with the current jar still running:
+   ```bash
+   cat /sys/fs/cgroup/pids.current; cat /sys/fs/cgroup/pids.max
+   ```
+   If the current value is already above about 90, delete the two `management.server.*` lines
+   from `application.properties` before building. `/actuator` is then served on 8080 at zero
+   extra threads, and the Apache rule in step 4 is what protects it. In that case also set
+   `vaadin.observability.insights-details=false` — see step 12.
+2. **Make sure 8090 is free:** `ss -ltnp | grep ':8090' || echo "8090 free"`. If something owns
+   it, pass `--management.server.port=8091` on the java command line and use 8091 below.
+3. **Build and ship the jar** with `mvn clean package -Pproduction` as above, keeping the
+   previous jar next to it as the rollback. The run command is unchanged.
+
+**Lock down Apache**
+
+4. **Deny `/actuator` at the proxy anyway.** Nothing on 8080 serves metrics, but a future
+   config change must not be able to expose them either. In the vhost that proxies to the
+   app, above the existing `ProxyPass /` line:
+   ```apache
+   ProxyPass "/actuator" !
+   <Location "/actuator">
+       Require all denied
+   </Location>
+   ```
+   then `sudo apachectl configtest && sudo systemctl reload apache2`.
+5. **Never open 8090.** The app binds it to 127.0.0.1, so no firewall rule is needed. Just
+   never add a `ProxyPass` for it and never bind it to a public address.
+
+**After the restart**
+
+6. **Both listeners on loopback only:** `ss -ltnp | grep java` must show 8080 and 8090 on
+   127.0.0.1.
+7. **The kit is recording.** All three succeed and the last prints a non-zero count:
+   ```bash
+   curl -s http://127.0.0.1:8090/actuator/health
+   curl -s http://127.0.0.1:8090/actuator/vaadin/observability | head -c 200
+   curl -s http://127.0.0.1:8090/actuator/prometheus | grep -c '^vaadin_'
+   ```
+   A count of 0 together with `"instrumentation":"inactive"` means the kit registered
+   nothing; look for a license warning at startup in the app log.
+8. **Nothing leaks publicly.** From a laptop, not the host: `curl -sI https://flashchores.com/actuator/prometheus | head -1`
+   must be a 403 from Apache, and `nc -zv flashchores.com 8090` must be refused.
+9. **Re-check the thread count** once a few pages have been served:
+   `ls /proc/$(pgrep -f flashchores-1.0.0.jar)/task | wc -l`.
+
+**Reading the data safely**
+
+10. **Use an SSH tunnel, never a public URL:** `ssh -N -L 8090:127.0.0.1:8090 user@host`, then
+    open http://localhost:8090/actuator/prometheus, or list what went wrong for users:
+    ```bash
+    curl -s http://localhost:8090/actuator/vaadin/observability | jq -r '.insights[] | "\(.severity)  \(.summary)"'
+    ```
+11. **Do not run Prometheus or Grafana on the host.** Each is a multi-threaded process that
+    would eat the process budget. Run Prometheus elsewhere and scrape `localhost:8090`
+    through the tunnel above. For a history with no extra service at all, a cron job can
+    snapshot the endpoint every 5 minutes:
+    ```bash
+    */5 * * * * curl -s http://127.0.0.1:8090/actuator/prometheus | gzip > /var/lib/flashchores/metrics/$(date +\%Y\%m\%d-\%H\%M).prom.gz
+    ```
+    Prune the directory weekly with `find ... -mtime +30 -delete`.
+12. **Know what is in the payload.** Metrics carry route names and exception class names,
+    never member names, IPs or home codes. The insights endpoint carries exception messages
+    and the raw session ID because `insights-details` is on; that is acceptable only while
+    the endpoint stays loopback-only.
+
+**Rollback:** stop the app and start the previous jar with the same command; it ignores the
+new properties. The Apache deny rule is harmless on the old version and can stay.
 
 ### Behind Cloudflare (free tier)
 

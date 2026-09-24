@@ -50,6 +50,7 @@ import java.util.Optional;
 @Route("home")
 @PageTitle("FlashChores")
 @JsModule("./confetti.js")
+@JsModule("./list-swipe.js")
 public class HomeView extends VerticalLayout implements BeforeEnterObserver {
 
     private enum PanelTab { CHORES, LIST, STATS, ADMIN }
@@ -278,6 +279,10 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         statsService.lastWeekChoreMaster(homeCode).ifPresent(cm -> {
             Span master = new Span(T.tr("home.choreMaster", cm.member().getName()));
             master.addClassName("chore-master");
+            // The pill says just "Chore master" so it fits a phone header; the full wording —
+            // that it is last week's — rides along as the tooltip.
+            master.getElement().setAttribute("title",
+                    T.tr("home.choreMaster.title", cm.member().getName()));
             left.add(master);
         });
 
