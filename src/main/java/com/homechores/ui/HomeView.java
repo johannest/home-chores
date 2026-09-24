@@ -124,7 +124,8 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         listPanel = new ListPanel(listService, service, listReminderService, reminderService,
                 pushSender, homeCode, memberId);
         statsPanel = new StatsPanel(statsService, service, homeCode, memberId);
-        adminPanel = new AdminPanel(service, creditService, backupService, homeCode, memberId);
+        adminPanel = new AdminPanel(service, creditService, backupService, listService, homeCode,
+                memberId);
         // Initial render happens from the Signal.effect registered in onAttach.
     }
 

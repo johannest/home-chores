@@ -8,6 +8,7 @@ import com.homechores.domain.ListReminder;
 import com.homechores.domain.Member;
 import com.homechores.service.ChoreService;
 import com.homechores.service.ListItemService;
+import com.homechores.service.ListItemService.ListSlot;
 import com.homechores.service.ListReminderService;
 import com.homechores.service.PushReminderService;
 import com.homechores.service.WebPushSender;
@@ -68,7 +69,8 @@ class ListPanel extends VerticalLayout {
      * {@code HomeState} rebuild, so another phone adding "milk" mid-word does not lose this one's
      * "brea". Neither is the family's business, so neither ever bumps {@code HomeState}.
      */
-    private ListKind kind = ListKind.GROCERY;
+    /** Null until the first render, which opens the first list in the admin's order. */
+    private ListKind kind;
     /** The custom list showing, or null for the built-in {@link #kind}. Its lines are to-dos. */
     private Long listId;
     private String draft = "";
@@ -78,8 +80,8 @@ class ListPanel extends VerticalLayout {
     /** Dinner slots shown: today plus a full week, so a Sunday plan reaches next Sunday. */
     static final int WINDOW_DAYS = 8;
 
-    /** Sub-tab order; the tabs and the kinds are matched by index. */
-    private static final List<ListKind> KINDS = List.of(ListKind.GROCERY, ListKind.TODO, ListKind.DINNER);
+    /** Whether the panel has drawn once — a list vanishing is only news after that. */
+    private boolean rendered;
 
     /** Focus the add box the first time the panel shows — not on every live update, which would
      *  yank the keyboard up on a phone that was only reading the list. */
@@ -104,20 +106,30 @@ class ListPanel extends VerticalLayout {
 
     void refresh() {
         content.removeAll();
-        List<CustomList> custom = lists.customLists(homeCode);
-        if (listId != null && custom.stream().noneMatch(l -> l.getId().equals(listId))) {
-            // Another phone deleted the list this one was showing: land on To-do, and say why.
-            listId = null;
-            kind = ListKind.TODO;
+        boolean hadCustom = listId != null;
+        // The admin's order, without the built-ins switched off (see ListItemService.listSlots).
+        List<ListSlot> slots = lists.visibleSlots(homeCode);
+        int selected = indexOfSelection(slots);
+        if (selected < 0 && !slots.isEmpty()) {
+            // What this phone was showing is gone: another phone deleted the list, or an admin
+            // switched it off. Land on To-do (or the first list, if To-do is off), and say why — unless this is the
+            // very first render, where there was nothing to lose.
+            if (rendered) {
+                toast(T.tr(hadCustom ? "list.custom.gone" : "list.hidden"), false);
+            }
+            ListSlot to = rendered ? fallback(slots) : slots.get(0);
+            select(to);
             draft = "";
-            toast(T.tr("list.custom.gone"), false);
+            selected = slots.indexOf(to);
         }
+        rendered = true;
 
-        List<Tab> all = new ArrayList<>(List.of(new Tab(T.tr("list.tab.groceries")),
-                new Tab(T.tr("list.tab.todo")), new Tab(T.tr("list.tab.dinner"))));
-        for (CustomList l : custom) {
-            Tab t = new Tab(l.getName());
-            t.addClassName("custom-list-tab");
+        List<Tab> all = new ArrayList<>();
+        for (ListSlot slot : slots) {
+            Tab t = new Tab(slotLabel(slot));
+            if (!slot.isBuiltIn()) {
+                t.addClassName("custom-list-tab");
+            }
             all.add(t);
         }
         Tab plus = new Tab(VaadinIcon.PLUS.create());
@@ -129,30 +141,77 @@ class ListPanel extends VerticalLayout {
         Tabs tabs = new Tabs(all.toArray(Tab[]::new));
         tabs.addClassName("list-kind-tabs");
         tabs.setWidthFull();
-        int selected = listId == null ? KINDS.indexOf(kind)
-                : KINDS.size() + custom.stream().map(CustomList::getId).toList().indexOf(listId);
-        tabs.setSelectedIndex(selected);
+        int initial = selected;
+        if (initial >= 0) {
+            tabs.setSelectedIndex(initial);
+        } else {
+            tabs.setSelectedTab(null); // nothing to show; "+" is not a place to stay on either
+        }
         tabs.addSelectedChangeListener(e -> {
             int i = tabs.getSelectedIndex();
             if (i == all.size() - 1) {
                 // "+" is an action, not a place: go back to where we were and ask for a name.
-                tabs.setSelectedIndex(e.getPreviousTab() == null ? selected : all.indexOf(e.getPreviousTab()));
+                if (e.getPreviousTab() != null) {
+                    tabs.setSelectedTab(e.getPreviousTab());
+                } else if (initial >= 0) {
+                    tabs.setSelectedIndex(initial);
+                } else {
+                    tabs.setSelectedTab(null);
+                }
                 newListDialog();
                 return;
             }
-            if (i < KINDS.size()) {
-                kind = KINDS.get(i);
-                listId = null;
-            } else if (i >= 0) {
-                kind = ListKind.TODO;
-                listId = custom.get(i - KINDS.size()).getId();
+            if (i >= 0) {
+                select(slots.get(i));
             }
             draft = "";
             dinnerDrafts.clear();
             renderBody();
         });
         content.add(tabs, body);
+        if (slots.isEmpty()) {
+            body.removeAll();
+            Paragraph none = new Paragraph(T.tr("list.noneShown"));
+            none.addClassName("feedback-hint");
+            body.add(none);
+            return;
+        }
         renderBody();
+    }
+
+    /** A built-in list's tab label, or a custom list's own name. Shared with the admin card. */
+    static String slotLabel(ListSlot slot) {
+        if (!slot.isBuiltIn()) {
+            return slot.custom().getName();
+        }
+        return T.tr(switch (slot.kind()) {
+            case GROCERY -> "list.tab.groceries";
+            case TODO -> "list.tab.todo";
+            case DINNER -> "list.tab.dinner";
+        });
+    }
+
+    private int indexOfSelection(List<ListSlot> slots) {
+        for (int i = 0; i < slots.size(); i++) {
+            ListSlot slot = slots.get(i);
+            if (listId == null ? slot.isBuiltIn() && kind != null && slot.kind() == kind
+                    : listId.equals(slot.listId())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** Where to land when the shown list goes: To-do — custom lists are to-do lists too — or,
+     *  if an admin switched To-do off, the first list there is. {@code slots} is non-empty. */
+    private static ListSlot fallback(List<ListSlot> slots) {
+        return slots.stream().filter(sl -> sl.isBuiltIn() && sl.kind() == ListKind.TODO)
+                .findFirst().orElse(slots.get(0));
+    }
+
+    private void select(ListSlot slot) {
+        kind = slot.kind();
+        listId = slot.listId();
     }
 
     /** Selects the given custom list (null: built-in {@code kind}) and redraws. For tests too. */
@@ -216,7 +275,9 @@ class ListPanel extends VerticalLayout {
         Button delete = new Button(T.tr("common.delete"), e -> {
             lists.deleteList(homeCode, list.getId(), memberId);
             d.close();
-            show(ListKind.TODO, null);
+            List<ListSlot> left = lists.visibleSlots(homeCode);
+            ListSlot to = left.isEmpty() ? ListSlot.builtIn(ListKind.TODO) : fallback(left);
+            show(to.kind(), to.listId());
         });
         delete.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_ERROR);
         d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), delete);
