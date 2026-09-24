@@ -17,6 +17,7 @@ import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
+import com.vaadin.flow.signals.local.ValueSignal;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -57,6 +58,7 @@ class ListReminderDialog extends Dialog {
     private final Long reminderId;
 
     private final Div pickRow = new Div();
+    private final ValueSignal<Boolean> picking = new ValueSignal<>(false);
     private final DateTimePicker picker = new DateTimePicker();
 
     ListReminderDialog(ListReminderService reminders, ListItemService lists, PushReminderService push,
@@ -111,10 +113,8 @@ class ListReminderDialog extends Dialog {
         pick.addClassName("pick");
         pick.setText(T.tr("listReminder.pick"));
         pick.addClickListener(e -> {
-            boolean show = !pickRow.isVisible();
-            pickRow.setVisible(show);
-            pick.getClassNames().set("selected", show);
-            if (show) {
+            picking.update(open -> !open);
+            if (picking.peek()) {
                 picker.focus();
             }
         });
@@ -148,8 +148,10 @@ class ListReminderDialog extends Dialog {
         pickRow.addClassName("list-reminder-pick");
         pickRow.add(picker, set);
         // Editing an armed reminder opens straight onto its time: that is what the tap was for.
-        pickRow.setVisible(editing);
-        pick.getClassNames().set("selected", editing);
+        // One signal drives both the unfolded row and the chip's selected look.
+        picking.set(editing);
+        pickRow.bindVisible(picking);
+        pick.bindClassName("selected", picking);
         body.add(pickRow);
 
         if (fired) {

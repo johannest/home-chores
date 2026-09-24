@@ -1,6 +1,8 @@
 package com.homechores.ui;
 
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
+import com.vaadin.flow.signals.Signal;
+import com.vaadin.flow.signals.local.ValueSignal;
 import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.textfield.IntegerField;
 
@@ -41,6 +43,8 @@ class FrequencyField extends VerticalLayout {
     /** Seeded into the day count when the user picks "Custom…" with nothing typed yet. */
     private static final int CUSTOM_SEED = 3;
 
+    /** The chosen cadence; the day count shows exactly while it is CUSTOM. */
+    private final ValueSignal<Preset> choice = new ValueSignal<>(Preset.ANYTIME);
     private final Select<Preset> preset = new Select<>();
     private final IntegerField custom = new IntegerField();
 
@@ -50,7 +54,12 @@ class FrequencyField extends VerticalLayout {
         preset.setItemLabelGenerator(p -> T.tr(p.key));
         preset.setHelperText(T.tr("admin.freq.helper"));
         preset.setWidthFull();
-        preset.setValue(Preset.ANYTIME);
+        preset.bindValue(choice, p -> {
+            if (p == Preset.CUSTOM && custom.getValue() == null) {
+                custom.setValue(CUSTOM_SEED);
+            }
+            choice.set(p);
+        });
 
         // Reuses the keys the old bare day-count field used, so no translation is thrown away.
         custom.setLabel(T.tr("admin.chore.interval"));
@@ -59,15 +68,7 @@ class FrequencyField extends VerticalLayout {
         custom.setMax(com.homechores.domain.InputLimits.MAX_DAYS);
         custom.setStepButtonsVisible(true);
         custom.setWidthFull();
-        custom.setVisible(false);
-
-        preset.addValueChangeListener(e -> {
-            boolean isCustom = e.getValue() == Preset.CUSTOM;
-            if (isCustom && custom.getValue() == null) {
-                custom.setValue(CUSTOM_SEED);
-            }
-            custom.setVisible(isCustom);
-        });
+        custom.bindVisible(Signal.computed(() -> choice.get() == Preset.CUSTOM));
 
         setPadding(false);
         setSpacing(false);
@@ -77,7 +78,7 @@ class FrequencyField extends VerticalLayout {
 
     /** The interval in days, as the service wants it. Never negative. */
     int getIntervalDays() {
-        Preset p = preset.getValue();
+        Preset p = choice.peek();
         if (p == null) {
             return 0;
         }
@@ -99,7 +100,6 @@ class FrequencyField extends VerticalLayout {
         }
         // Pre-fill the day count even while hidden, so switching to Custom shows the real value.
         custom.setValue(d <= 0 ? null : d);
-        preset.setValue(match != null ? match : Preset.CUSTOM);
-        custom.setVisible(match == null);
+        choice.set(match != null ? match : Preset.CUSTOM);
     }
 }
