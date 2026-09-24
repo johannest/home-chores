@@ -94,6 +94,8 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         setPadding(false);
         setSpacing(false);
         setSizeFull();
+        // See .board-view in styles.css: no scroll anchoring on a view rebuilt on every change.
+        addClassName("board-view");
     }
 
     @Override

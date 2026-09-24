@@ -105,6 +105,15 @@ vaadin-select::part(label) {
     white-space: normal;
 }
 
+/* The board is rebuilt from scratch on every change in the home (HomeView.buildChrome), so the
+   element Chrome's scroll anchoring holds on to is destroyed and a copy inserted. Chrome then
+   "corrects" the scroll by a wrong amount, which made the admin page jump ~150px on every
+   toggle. The rebuilt page has the same layout, so leaving the scroll alone is what keeps it
+   still. */
+.board-view {
+    overflow-anchor: none;
+}
+
 /* ---- Centered auth / landing card ---- */
 /* The layout grows with its content (no fixed height) so long pages scroll all the
    way to the top; min-height keeps short content vertically centered. */
