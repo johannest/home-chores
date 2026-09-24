@@ -215,6 +215,7 @@ class ListEditUiTest extends SpringUIUnitTest {
         Member sam = service.joinHome(code, "Sam").orElseThrow();
 
         lists.deleteList(code, gifts.getId(), sam.getId()); // bumps the home: the board redraws
+        runPendingSignalsTasks(); // another session's change arrives through a queued effect
 
         assertEquals(1, kindTabs().getSelectedIndex());
     }

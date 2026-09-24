@@ -94,6 +94,8 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         setPadding(false);
         setSpacing(false);
         setSizeFull();
+        // See .board-view in styles.css: no scroll anchoring on a view rebuilt on every change.
+        addClassName("board-view");
     }
 
     @Override
@@ -124,7 +126,8 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         listPanel = new ListPanel(listService, service, listReminderService, reminderService,
                 pushSender, homeCode, memberId);
         statsPanel = new StatsPanel(statsService, service, homeCode, memberId);
-        adminPanel = new AdminPanel(service, creditService, backupService, homeCode, memberId);
+        adminPanel = new AdminPanel(service, creditService, backupService, listService, homeCode,
+                memberId);
         // Initial render happens from the Signal.effect registered in onAttach.
     }
 
