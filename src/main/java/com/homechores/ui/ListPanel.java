@@ -1,5 +1,6 @@
 package com.homechores.ui;
 
+import com.homechores.domain.CustomList;
 import com.homechores.domain.InputLimits;
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListKind;
@@ -15,11 +16,16 @@ import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.checkbox.Checkbox;
+import com.vaadin.flow.component.contextmenu.MenuItem;
+import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
+import com.vaadin.flow.component.menubar.MenuBar;
+import com.vaadin.flow.component.menubar.MenuBarVariant;
 import com.vaadin.flow.component.notification.Notification;
+import com.vaadin.flow.component.notification.NotificationVariant;
 import com.vaadin.flow.component.orderedlayout.FlexComponent;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
@@ -31,14 +37,16 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * The shared family lists: groceries, to-dos and the week's dinners. Anyone adds, anyone ticks,
- * anyone plans. Nothing here is a chore — ticking a line records no completion and earns nothing
+ * The shared family lists: groceries, to-dos, the week's dinners and any lists the home named
+ * itself (one tab each, after the built-in three, then a "+" tab). Anyone adds, anyone ticks,
+ * anyone plans, anyone makes or deletes a list. Nothing here is a chore — ticking a line records no completion and earns nothing
  * (see {@link ListItemService}).
  */
 class ListPanel extends VerticalLayout {
@@ -61,6 +69,8 @@ class ListPanel extends VerticalLayout {
      * "brea". Neither is the family's business, so neither ever bumps {@code HomeState}.
      */
     private ListKind kind = ListKind.GROCERY;
+    /** The custom list showing, or null for the built-in {@link #kind}. Its lines are to-dos. */
+    private Long listId;
     private String draft = "";
     /** Half-typed dinner slots, by day — the same survival trick as {@link #draft}. */
     private final Map<LocalDate, String> dinnerDrafts = new HashMap<>();
@@ -94,13 +104,49 @@ class ListPanel extends VerticalLayout {
 
     void refresh() {
         content.removeAll();
-        Tabs tabs = new Tabs(new Tab(T.tr("list.tab.groceries")), new Tab(T.tr("list.tab.todo")),
-                new Tab(T.tr("list.tab.dinner")));
+        List<CustomList> custom = lists.customLists(homeCode);
+        if (listId != null && custom.stream().noneMatch(l -> l.getId().equals(listId))) {
+            // Another phone deleted the list this one was showing: land on To-do, and say why.
+            listId = null;
+            kind = ListKind.TODO;
+            draft = "";
+            toast(T.tr("list.custom.gone"), false);
+        }
+
+        List<Tab> all = new ArrayList<>(List.of(new Tab(T.tr("list.tab.groceries")),
+                new Tab(T.tr("list.tab.todo")), new Tab(T.tr("list.tab.dinner"))));
+        for (CustomList l : custom) {
+            Tab t = new Tab(l.getName());
+            t.addClassName("custom-list-tab");
+            all.add(t);
+        }
+        Tab plus = new Tab(VaadinIcon.PLUS.create());
+        plus.addClassName("list-new-tab");
+        plus.setAriaLabel(T.tr("list.custom.newAria"));
+        plus.setTooltipText(T.tr("list.custom.new"));
+        all.add(plus);
+
+        Tabs tabs = new Tabs(all.toArray(Tab[]::new));
         tabs.addClassName("list-kind-tabs");
         tabs.setWidthFull();
-        tabs.setSelectedIndex(KINDS.indexOf(kind));
+        int selected = listId == null ? KINDS.indexOf(kind)
+                : KINDS.size() + custom.stream().map(CustomList::getId).toList().indexOf(listId);
+        tabs.setSelectedIndex(selected);
         tabs.addSelectedChangeListener(e -> {
-            kind = KINDS.get(tabs.getSelectedIndex());
+            int i = tabs.getSelectedIndex();
+            if (i == all.size() - 1) {
+                // "+" is an action, not a place: go back to where we were and ask for a name.
+                tabs.setSelectedIndex(e.getPreviousTab() == null ? selected : all.indexOf(e.getPreviousTab()));
+                newListDialog();
+                return;
+            }
+            if (i < KINDS.size()) {
+                kind = KINDS.get(i);
+                listId = null;
+            } else if (i >= 0) {
+                kind = ListKind.TODO;
+                listId = custom.get(i - KINDS.size()).getId();
+            }
             draft = "";
             dinnerDrafts.clear();
             renderBody();
@@ -109,24 +155,103 @@ class ListPanel extends VerticalLayout {
         renderBody();
     }
 
+    /** Selects the given custom list (null: built-in {@code kind}) and redraws. For tests too. */
+    void show(ListKind kind, Long listId) {
+        this.kind = listId == null ? kind : ListKind.TODO;
+        this.listId = listId;
+        draft = "";
+        refresh();
+    }
+
+    private void newListDialog() {
+        if (lists.customLists(homeCode).size() >= InputLimits.CUSTOM_LISTS) {
+            toast(T.tr("list.custom.limit", InputLimits.CUSTOM_LISTS), true);
+            return;
+        }
+        new TextPromptDialog(T.tr("list.custom.new"), T.tr("list.custom.name"), "",
+                InputLimits.LIST_NAME, T.tr("list.custom.create"), name -> {
+                    var made = lists.createList(homeCode, memberId, name);
+                    made.ifPresent(l -> {
+                        focusOnRender = true;
+                        show(ListKind.TODO, l.getId());
+                    });
+                    return made.isPresent();
+                }).open();
+    }
+
+    /** The custom list's own strip: its name and a ⋯ with Rename and Delete. */
+    private Div customListHead(CustomList list) {
+        Span name = new Span(list.getName());
+        name.addClassName("custom-list-name");
+
+        MenuBar menu = new MenuBar();
+        menu.addClassName("custom-list-menu");
+        menu.addThemeVariants(MenuBarVariant.LUMO_SMALL, MenuBarVariant.LUMO_TERTIARY_INLINE);
+        MenuItem root = menu.addItem(VaadinIcon.ELLIPSIS_DOTS_V.create());
+        root.setAriaLabel(T.tr("list.custom.menu"));
+        root.getSubMenu().addItem(T.tr("list.custom.rename"), e ->
+                new TextPromptDialog(T.tr("list.custom.rename"), T.tr("list.custom.name"),
+                        list.getName(), InputLimits.LIST_NAME, T.tr("common.save"), text -> {
+                            boolean ok = lists.renameList(homeCode, list.getId(), memberId, text);
+                            if (ok) {
+                                refresh();
+                            }
+                            return ok;
+                        }).open());
+        root.getSubMenu().addItem(T.tr("list.custom.delete"), e -> confirmDeleteList(list))
+                .addClassName("danger-item");
+
+        Div head = new Div(name, menu);
+        head.addClassName("custom-list-head");
+        return head;
+    }
+
+    /** No undo for a whole list, so this one does ask first — unlike deleting a single line. */
+    private void confirmDeleteList(CustomList list) {
+        Dialog d = new Dialog();
+        d.setHeaderTitle(T.tr("list.custom.delete"));
+        d.setWidth("min(90vw, 24em)");
+        d.addClassName("delete-list-dialog");
+        d.add(new Paragraph(T.tr("list.custom.deleteConfirm", list.getName())));
+        Button delete = new Button(T.tr("common.delete"), e -> {
+            lists.deleteList(homeCode, list.getId(), memberId);
+            d.close();
+            show(ListKind.TODO, null);
+        });
+        delete.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_ERROR);
+        d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), delete);
+        d.open();
+    }
+
+    private static void toast(String text, boolean warn) {
+        Notification n = Notification.show(text, 3500, Notification.Position.TOP_CENTER);
+        if (warn) {
+            n.addThemeVariants(NotificationVariant.LUMO_WARNING);
+        }
+    }
+
     private void renderBody() {
         body.removeAll();
         if (kind == ListKind.DINNER) {
             renderDinnerWeek();
             return;
         }
+        if (listId != null) {
+            lists.findList(homeCode, listId).ifPresent(l -> body.add(customListHead(l)));
+        }
         body.add(addRow());
 
         Map<Long, String> names = memberNames();
-        List<ListItem> open = lists.openItems(homeCode, kind);
-        List<ListItem> done = lists.doneItems(homeCode, kind);
+        List<ListItem> open = lists.openItems(homeCode, kind, listId);
+        List<ListItem> done = lists.doneItems(homeCode, kind, listId);
         // One query for the home's reminders, never one per line — and none at all when push is
         // not configured, in which case the ⏰ is not offered either (see ChoresPanel for why).
         Map<Long, ListReminder> armed = pushSender.isEnabled() ? reminders.forHome(homeCode) : Map.of();
 
         if (open.isEmpty() && done.isEmpty()) {
             Paragraph empty = new Paragraph(
-                    T.tr("list.empty." + kind.name().toLowerCase(Locale.ROOT)));
+                    T.tr(listId != null ? "list.empty.custom"
+                            : "list.empty." + kind.name().toLowerCase(Locale.ROOT)));
             empty.addClassName("feedback-hint");
             body.add(empty);
             return;
@@ -143,7 +268,7 @@ class ListPanel extends VerticalLayout {
             Span title = new Span(T.tr("list.done", done.size()));
             title.addClassName("list-done-title");
             Button clear = new Button(T.tr("list.clearDone"), e -> {
-                lists.clearDone(homeCode, kind);
+                lists.clearDone(homeCode, kind, listId);
                 refresh();
             });
             clear.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
@@ -265,7 +390,7 @@ class ListPanel extends VerticalLayout {
         input.addValueChangeListener(e -> draft = e.getValue());
 
         Runnable submit = () -> {
-            if (lists.add(homeCode, kind, memberId, input.getValue()).isPresent()) {
+            if (lists.add(homeCode, kind, listId, memberId, input.getValue()).isPresent()) {
                 draft = "";
                 focusOnRender = true;
                 refresh();
@@ -303,6 +428,8 @@ class ListPanel extends VerticalLayout {
         Div text = new Div();
         text.setText(item.getText());
         text.addClassName("list-text");
+        // Tapping the words edits them — the one place a thumb already lands on a line.
+        text.addClickListener(e -> editDialog(item));
         Div info = new Div(text);
         info.addClassName("grow");
         if (item.isDone()) {
@@ -312,6 +439,8 @@ class ListPanel extends VerticalLayout {
             sub.addClassName("sub");
             info.add(sub);
         }
+        Runnable openReminder = () -> new ListReminderDialog(reminders, lists, push, pushSender,
+                memberId, homeCode, item, reminder, names, this::refresh).open();
         if (reminder != null) {
             // Absolute, never "in 2h": the list only redraws when something in the home changes.
             Span when = new Span(ListReminderDialog.badge(reminder));
@@ -320,6 +449,8 @@ class ListPanel extends VerticalLayout {
             if (reminder.isFired()) {
                 when.addClassName("fired");
             }
+            // The badge is the reminder: tapping it changes or cancels it, same as the bell.
+            when.addClickListener(e -> openReminder.run());
             info.add(when);
         }
 
@@ -327,9 +458,7 @@ class ListPanel extends VerticalLayout {
         tools.addClassName("row-tools");
         // Only on open lines and only when push is configured, matching the chore card's ⏰.
         if (!item.isDone() && pushSender.isEnabled()) {
-            Button remind = new Button(VaadinIcon.BELL_O.create(), e -> new ListReminderDialog(
-                    reminders, lists, push, pushSender, memberId, homeCode, item, reminder, names,
-                    this::refresh).open());
+            Button remind = new Button(VaadinIcon.BELL_O.create(), e -> openReminder.run());
             remind.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL,
                     ButtonVariant.LUMO_ICON);
             remind.addClassName("list-remind-btn");
@@ -341,23 +470,55 @@ class ListPanel extends VerticalLayout {
             tools.add(remind);
         }
 
-        Button remove = new Button(VaadinIcon.TRASH.create(), e -> {
+        Runnable delete = () -> {
             lists.delete(item.getId(), memberId);
             offerUndo(item);
             refresh();
-        });
+        };
+        Button remove = new Button(VaadinIcon.TRASH.create(), e -> delete.run());
         remove.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL,
                 ButtonVariant.LUMO_ICON, ButtonVariant.LUMO_ERROR);
         remove.setAriaLabel(T.tr("list.delete"));
         tools.add(remove);
 
-        Div row = new Div(tick, info, tools);
+        // The row is two layers: the face people see, and behind it a tray that a left swipe
+        // uncovers (list-swipe.js moves the face; these are ordinary server-side buttons). The
+        // tray repeats actions the face already offers, so it is hidden from assistive tech and
+        // the tab order — a duplicate, not a second way that only fingers can reach.
+        Button swipeEdit = new Button(VaadinIcon.PENCIL.create(), e -> editDialog(item));
+        swipeEdit.addClassName("swipe-edit");
+        swipeEdit.setText(T.tr("list.edit"));
+        Button swipeDelete = new Button(VaadinIcon.TRASH.create(), e -> delete.run());
+        swipeDelete.addClassName("swipe-delete");
+        swipeDelete.setText(T.tr("list.delete"));
+        for (Button b : List.of(swipeEdit, swipeDelete)) {
+            b.setTabIndex(-1);
+        }
+        Div tray = new Div(swipeEdit, swipeDelete);
+        tray.addClassName("swipe-actions");
+        tray.getElement().setAttribute("aria-hidden", "true");
+
+        Div face = new Div(tick, info, tools);
+        face.addClassName("swipe-face");
+
+        Div row = new Div(tray, face);
         row.addClassName("list-row");
         row.addClassName("list-item");
         if (item.isDone()) {
             row.addClassName("done");
         }
         return row;
+    }
+
+    private void editDialog(ListItem item) {
+        new TextPromptDialog(T.tr("list.edit.title"), null, item.getText(),
+                InputLimits.LIST_ITEM, T.tr("common.save"), text -> {
+                    boolean ok = lists.rename(item.getId(), memberId, text);
+                    if (ok) {
+                        refresh();
+                    }
+                    return ok;
+                }).open();
     }
 
     /**
@@ -372,7 +533,7 @@ class ListPanel extends VerticalLayout {
         n.setDuration(6000);
         Span text = new Span(T.tr("list.deleted", item.getText()));
         Button undo = new Button(T.tr("undo.action"), e -> {
-            lists.add(homeCode, item.getKind(), memberId, item.getText());
+            lists.add(homeCode, item.getKind(), item.getListId(), memberId, item.getText());
             n.close();
             refresh();
         });

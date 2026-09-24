@@ -1110,6 +1110,76 @@ vaadin-checkbox-group::part(group-field) {
 .list-row .list-text {
     font-weight: 600;
     overflow-wrap: anywhere;
+    cursor: pointer; /* tapping the words edits them */
+}
+
+/* A custom list's own strip above its add row: the name, and a ⋯ for rename / delete. */
+.custom-list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--lumo-space-s);
+    margin-bottom: var(--lumo-space-xs);
+}
+.custom-list-name {
+    font-weight: 700;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.list-reminder { cursor: pointer; }
+
+/* Swipe-to-reveal (list-swipe.js). A line is two layers: .swipe-face carries what the row always
+   showed, and .swipe-actions sits behind it on the right. The face is transparent at rest so the
+   page gradient shows through as before; it only turns opaque, and the tray only appears, while
+   a finger is moving it or it is held open — nothing changes for someone who never swipes. */
+.list-row.list-item {
+    display: block;
+    position: relative;
+    overflow: hidden;
+    padding: 0;
+}
+.list-item .swipe-face {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--lumo-space-s);
+    padding: 8px 0;
+    touch-action: pan-y; /* vertical scrolling stays the browser's; sideways is ours */
+    transition: transform 180ms ease-out;
+}
+.list-item.swiping .swipe-face { transition: none; }
+.list-item.swiping .swipe-face,
+.list-item.swipe-open .swipe-face {
+    background: var(--lumo-base-color);
+}
+.list-item .swipe-actions {
+    position: absolute;
+    inset: 0 0 0 auto;
+    display: flex;
+    align-items: stretch;
+    visibility: hidden;
+}
+.list-item.swiping .swipe-actions,
+.list-item.swipe-open .swipe-actions {
+    visibility: visible;
+}
+.swipe-actions vaadin-button {
+    height: 100%;
+    margin: 0;
+    border-radius: 0;
+    min-width: 72px;
+    padding: 0 10px;
+    font-size: 0.75rem;
+    color: #fff;
+    --vaadin-button-gap: 4px;
+}
+.swipe-actions .swipe-edit { background: var(--lumo-primary-color); }
+.swipe-actions .swipe-delete { background: var(--lumo-error-color); }
+@media (prefers-reduced-motion: reduce) {
+    .list-item .swipe-face { transition: none; }
 }
 .list-row .list-text.done {
     text-decoration: line-through;
@@ -1399,7 +1469,8 @@ vaadin-checkbox-group::part(group-field) {
     }
 
     /* Admin rows carry up to four controls — let them wrap rather than overflow. */
-    .list-row {
+    .list-row,
+    .list-item .swipe-face {
         flex-wrap: wrap;
     }
     .list-row .grow {

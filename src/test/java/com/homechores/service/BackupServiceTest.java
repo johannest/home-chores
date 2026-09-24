@@ -30,6 +30,34 @@ class BackupServiceTest {
     @Autowired
     ListItemService lists;
 
+    /** A home's own lists ride along too, their lines landing back on them rather than on To-do. */
+    @Test
+    void customLists_surviveTheRoundTrip_withTheirLines() {
+        Member alex = chores.createHome("Listful", "Alex");
+        String code = alex.getHomeCode();
+        var gifts = lists.createList(code, alex.getId(), "Gifts").orElseThrow();
+        lists.add(code, ListKind.TODO, gifts.getId(), alex.getId(), "Book");
+        lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber");
+
+        String json = backup.export(code);
+        assertTrue(json.contains("\"customLists\""));
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+
+        var restored = lists.customLists(code);
+        assertEquals(List.of("Gifts"), restored.stream().map(com.homechores.domain.CustomList::getName).toList());
+        assertEquals(List.of("Book"), lists.openItems(code, ListKind.TODO, restored.get(0).getId())
+                .stream().map(ListItem::getText).toList(), "the line is back on its list");
+        assertEquals(List.of("Call the plumber"), lists.openItems(code, ListKind.TODO)
+                .stream().map(ListItem::getText).toList(), "and not on the built-in To-do");
+
+        // A file whose list vanished (hand-edited): the line falls back to the built-in To-do.
+        String orphaned = json.replaceAll(",\\s*\"customLists\"\\s*:\\s*\\[[^\\]]*\\]", "");
+        assertFalse(orphaned.contains("customLists"), "precondition: key stripped");
+        backup.restore(orphaned.getBytes(StandardCharsets.UTF_8), code);
+        assertTrue(lists.customLists(code).isEmpty());
+        assertEquals(2, lists.openItems(code, ListKind.TODO).size(), "Book lands on To-do");
+    }
+
     /** The shared lists are family data, so they ride along — ticked state and ticker included. */
     @Test
     void sharedLists_surviveTheRoundTrip_withTheTickerRemapped() {

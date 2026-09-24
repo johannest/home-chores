@@ -9,13 +9,22 @@ import org.springframework.transaction.annotation.Transactional;
 public interface ListItemRepository extends JpaRepository<ListItem, Long> {
 
     /** Open lines of one list, oldest first — the order people wrote them in. */
-    List<ListItem> findByHomeCodeAndKindAndDoneAtIsNullOrderByCreatedAtAscIdAsc(
+    List<ListItem> findByHomeCodeAndKindAndListIdIsNullAndDoneAtIsNullOrderByCreatedAtAscIdAsc(
             String homeCode, ListKind kind);
+
+    /** Open lines of one of the home's own lists. */
+    List<ListItem> findByListIdAndDoneAtIsNullOrderByCreatedAtAscIdAsc(Long listId);
 
     /** Recently ticked lines of one list, most recently ticked first. The cutoff is how the
      *  24-hour retention is applied at read time; the sweep only deletes what this already hides. */
-    List<ListItem> findByHomeCodeAndKindAndDoneAtAfterOrderByDoneAtDescIdDesc(
+    List<ListItem> findByHomeCodeAndKindAndListIdIsNullAndDoneAtAfterOrderByDoneAtDescIdDesc(
             String homeCode, ListKind kind, Instant cutoff);
+
+    /** Recently ticked lines of one of the home's own lists. */
+    List<ListItem> findByListIdAndDoneAtAfterOrderByDoneAtDescIdDesc(Long listId, Instant cutoff);
+
+    /** Every line of one of the home's own lists — for deleting it with its reminders. */
+    List<ListItem> findByListId(Long listId);
 
     /** One home's dinner slots inside a window, both ends inclusive, in calendar order. */
     List<ListItem> findByHomeCodeAndKindAndDayBetweenOrderByDayAscIdAsc(
@@ -30,7 +39,11 @@ public interface ListItemRepository extends JpaRepository<ListItem, Long> {
 
     /** "Clear done" on one list. */
     @Transactional
-    long deleteByHomeCodeAndKindAndDoneAtIsNotNull(String homeCode, ListKind kind);
+    long deleteByHomeCodeAndKindAndListIdIsNullAndDoneAtIsNotNull(String homeCode, ListKind kind);
+
+    /** "Clear done" on one of the home's own lists. */
+    @Transactional
+    long deleteByListIdAndDoneAtIsNotNull(Long listId);
 
     /** The hourly sweep: ticked lines past their retention, across every home. */
     @Transactional

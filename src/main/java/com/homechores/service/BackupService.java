@@ -23,6 +23,8 @@ import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
 import com.homechores.domain.InputLimits;
 import com.homechores.domain.ListItem;
+import com.homechores.domain.CustomList;
+import com.homechores.domain.CustomListRepository;
 import com.homechores.domain.ListItemRepository;
 import com.homechores.domain.ListReminderRepository;
 import com.homechores.domain.ListKind;
@@ -57,6 +59,7 @@ public class BackupService {
     private final ChoreGroupRepository groups;
     private final ChoreReminderRepository choreReminders;
     private final ListItemRepository listItems;
+    private final CustomListRepository customLists;
     private final ListReminderRepository listReminders;
     private final CompletionRepository completions;
     private final CreditEntryRepository creditEntries;
@@ -75,6 +78,7 @@ public class BackupService {
     public BackupService(HomeRepository homes, MemberRepository members,
                         ChoreTaskRepository tasks, ChoreGroupRepository groups,
                         ChoreReminderRepository choreReminders, ListItemRepository listItems,
+                        CustomListRepository customLists,
                         ListReminderRepository listReminders, CompletionRepository completions,
                         CreditEntryRepository creditEntries, SpreeTierRepository spreeTiers,
                         RejoinRequestRepository rejoins, HomeState homeState) {
@@ -84,6 +88,7 @@ public class BackupService {
         this.groups = groups;
         this.choreReminders = choreReminders;
         this.listItems = listItems;
+        this.customLists = customLists;
         this.listReminders = listReminders;
         this.completions = completions;
         this.creditEntries = creditEntries;
@@ -132,9 +137,14 @@ public class BackupService {
         }
         // The shared lists are family data (unlike reminders and push subscriptions), so a
         // restore brings back the half-finished shopping list too.
+        for (CustomList cl : customLists.findByHomeCodeOrderByCreatedAtAscIdAsc(homeCode)) {
+            b.customLists.add(new CustomListDto(cl.getId(), cl.getName(), cl.getCreatedAt(),
+                    cl.getCreatedByMemberId()));
+        }
         for (ListItem li : listItems.findByHomeCodeOrderByCreatedAtAscIdAsc(homeCode)) {
             b.listItems.add(new ListItemDto(li.getKind(), li.getText(), li.getCreatedAt(),
-                    li.getCreatedByMemberId(), li.getDoneAt(), li.getDoneByMemberId(), li.getDay()));
+                    li.getCreatedByMemberId(), li.getDoneAt(), li.getDoneByMemberId(), li.getDay(),
+                    li.getListId()));
         }
         try {
             return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(b);
@@ -254,6 +264,7 @@ public class BackupService {
         tasks.deleteByHomeCode(code);
         groups.deleteByHomeCode(code);
         listItems.deleteByHomeCode(code);
+        customLists.deleteByHomeCode(code);
         members.deleteByHomeCode(code);
 
         // Recreate members and tasks, remapping their (identity-generated) ids.
@@ -307,6 +318,20 @@ public class BackupService {
             ChoreTask saved = tasks.save(entity);
             taskIdMap.put(t.id, saved.getId());
         }
+        // Lists before their lines, ids remapped as groups are for tasks.
+        Map<Long, Long> listIdMap = new HashMap<>();
+        for (CustomListDto cl : b.customLists) {
+            String name = InputLimits.clip(cl.name, InputLimits.LIST_NAME);
+            if (name == null || name.isBlank() || listIdMap.size() >= InputLimits.CUSTOM_LISTS) {
+                continue;
+            }
+            CustomList entity = new CustomList(code, name,
+                    cl.createdByMemberId == null ? null : memberIdMap.get(cl.createdByMemberId));
+            if (cl.createdAt != null) {
+                entity.setCreatedAt(cl.createdAt);
+            }
+            listIdMap.put(cl.id, customLists.save(entity).getId());
+        }
         for (ListItemDto li : b.listItems) {
             String text = InputLimits.clip(li.text, InputLimits.LIST_ITEM);
             if (text == null || text.isBlank()) {
@@ -328,6 +353,12 @@ public class BackupService {
                         li.doneByMemberId == null ? null : memberIdMap.get(li.doneByMemberId));
             }
             entity.setDay(li.day);
+            // A listId that doesn't resolve lands the line on the built-in To-do, like an
+            // unresolved groupId makes a chore ungrouped: the line is what the family needs.
+            Long listId = li.listId == null ? null : listIdMap.get(li.listId);
+            if (listId != null && entity.getKind() == ListKind.TODO) {
+                entity.setListId(listId);
+            }
             listItems.save(entity);
         }
         for (SpreeTierDto st : b.spreeTiers) {
@@ -417,6 +448,8 @@ public class BackupService {
         public List<CreditDto> credits = new ArrayList<>();
         /** Absent in backups written before the shared lists existed: Jackson leaves it empty. */
         public List<ListItemDto> listItems = new ArrayList<>();
+        /** Absent in backups written before custom lists existed: Jackson leaves it empty. */
+        public List<CustomListDto> customLists = new ArrayList<>();
     }
 
     /** The boxed booleans are boxed so backups written before those settings existed
@@ -462,7 +495,13 @@ public class BackupService {
      *  {@code day} is set only for DINNER slots (absent in files written before dinners existed). */
     public record ListItemDto(ListKind kind, String text, Instant createdAt,
                               Long createdByMemberId, Instant doneAt, Long doneByMemberId,
-                              java.time.LocalDate day) {
+                              java.time.LocalDate day,
+                              /** The custom list it is on; null for the built-in lists and in
+                               *  files written before custom lists existed. */
+                              Long listId) {
+    }
+
+    public record CustomListDto(Long id, String name, Instant createdAt, Long createdByMemberId) {
     }
 
     /** {@code taskId} is null (and {@code note} set) for an "other help" entry. */

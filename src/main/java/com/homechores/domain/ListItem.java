@@ -57,6 +57,10 @@ public class ListItem {
     @Column(name = "plan_day")
     private LocalDate day;
 
+    /** The {@link CustomList} this line is on; null for the built-in lists. Set only on TODO
+     *  lines. Nullable, so adding it to an existing table needs no default. */
+    private Long listId;
+
     protected ListItem() {
     }
 
@@ -125,6 +129,14 @@ public class ListItem {
 
     public void setDay(LocalDate day) {
         this.day = day;
+    }
+
+    public Long getListId() {
+        return listId;
+    }
+
+    public void setListId(Long listId) {
+        this.listId = listId;
     }
 
     public boolean isDone() {

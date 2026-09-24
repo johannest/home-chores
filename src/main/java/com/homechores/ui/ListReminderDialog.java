@@ -121,17 +121,21 @@ class ListReminderDialog extends Dialog {
         chips.add(pick);
         body.add(chips);
 
-        // The picker starts on tomorrow 9:00 in the member's own zone — a real, plausible value
-        // rather than an empty field, so one tap on "Set" after unfolding it is never a mistake.
+        // The picker starts on the reminder's current time when there is one, so changing it is
+        // a nudge of the time rather than typing it all again; otherwise tomorrow 9:00 in the
+        // member's own zone — a real, plausible value, so one tap on "Set" is never a mistake.
         ZoneId zone = SessionContext.timeZone();
+        boolean editing = existing != null && !fired && existing.getDueAt().isAfter(Instant.now());
         UI ui = UI.getCurrent();
         picker.setLabel(T.tr("listReminder.pickLabel"));
         picker.setLocale(ui == null ? Locale.ENGLISH : ui.getLocale());
         picker.setStep(Duration.ofMinutes(15));
         picker.setMin(LocalDateTime.now(zone));
-        picker.setValue(LocalDate.now(zone).plusDays(1).atTime(ListReminderService.ANCHOR));
+        picker.setValue(editing
+                ? LocalDateTime.ofInstant(existing.getDueAt(), zone).truncatedTo(ChronoUnit.MINUTES)
+                : LocalDate.now(zone).plusDays(1).atTime(ListReminderService.ANCHOR));
         picker.setWidthFull();
-        Button set = new Button(T.tr("listReminder.setButton"), e -> {
+        Button set = new Button(T.tr(editing ? "listReminder.updateButton" : "listReminder.setButton"), e -> {
             LocalDateTime chosen = picker.getValue();
             if (chosen == null) {
                 picker.setInvalid(true);
@@ -143,7 +147,9 @@ class ListReminderDialog extends Dialog {
         set.setWidthFull();
         pickRow.addClassName("list-reminder-pick");
         pickRow.add(picker, set);
-        pickRow.setVisible(false);
+        // Editing an armed reminder opens straight onto its time: that is what the tap was for.
+        pickRow.setVisible(editing);
+        pick.getClassNames().set("selected", editing);
         body.add(pickRow);
 
         if (fired) {
