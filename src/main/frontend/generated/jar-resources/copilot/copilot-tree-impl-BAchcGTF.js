@@ -1,8 +1,8 @@
 import { n as e } from "./chunk-DiqZc92J.js";
 import { $ as t, B as n, G as r, H as i, I as a, J as o, K as s, P as c, R as l, U as ee, V as u, X as d, Y as f, at as p, et as m, it as h, nt as g, q as _, tt as v } from "./icons-wGoYEurg.js";
-import { h as y, l as b, m as x, o as S, s as C, u as w } from "./dom-utils-B1FBQ-qG.js";
+import { h as y, l as b, m as x, o as S, s as C, u as w } from "./dom-utils-ChZR4WGk.js";
 import { a as T, i as E } from "./copilot-ui-state-Dc6l_5DA.js";
-import { i as D, o as O, r as k } from "./copilot-error-handler-BcNCQDnH.js";
+import { i as D, o as O, r as k } from "./copilot-error-handler-B8dKSldg.js";
 import { n as A, r as j } from "./copilot-notification-B9WA4gMj.js";
 //#region frontend/copilot/shared/copilot-storage.ts
 var M, N, P = e((() => {

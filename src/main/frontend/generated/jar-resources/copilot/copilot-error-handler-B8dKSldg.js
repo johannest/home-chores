@@ -1,6 +1,6 @@
 import { n as e } from "./chunk-DiqZc92J.js";
 import { A as t, C as n, D as r, H as i, U as a, at as o, it as s, l as c, mt as l, n as u, o as d, r as f, s as ee, t as te, u as p, ut as m } from "./icons-wGoYEurg.js";
-import { l as ne, o as re } from "./consts-DLyL2h6i.js";
+import { l as ne, o as re } from "./consts-B_BO2mll.js";
 import { a as h, i as g, n as _, r as v } from "./copilot-ui-state-Dc6l_5DA.js";
 import { n as ie } from "./stats-rEPv3bOZ.js";
 import { i as ae, n as y, r as oe, t as se } from "./directive-CZ105jp5.js";

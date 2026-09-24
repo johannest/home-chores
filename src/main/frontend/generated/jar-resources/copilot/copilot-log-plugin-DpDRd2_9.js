@@ -4,8 +4,8 @@ import { a as p, d as m, i as h, l as g, n as _, o as v, r as y, s as b, t as x 
 import { a as S, i as C, n as w, r as T } from "./copilot-ui-state-Dc6l_5DA.js";
 import { n as E, t as D } from "./copilot-message-box-krJnoslR.js";
 import { a as O, n as k } from "./stats-rEPv3bOZ.js";
-import { n as A, o as j, t as M } from "./copilot-error-handler-BcNCQDnH.js";
-import { n as N, t as P } from "./base-panel-DcZrefqb.js";
+import { n as A, o as j, t as M } from "./copilot-error-handler-B8dKSldg.js";
+import { n as N, t as P } from "./base-panel-B2biyt0G.js";
 //#region frontend/copilot/copilot-time-formatter.ts
 var F, I, L = e((() => {
 	F = () => {

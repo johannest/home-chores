@@ -5,8 +5,7 @@ join link) with your family, and tap a button whenever you do a chore. The app k
 things **fair** (no one can hog the easy chore forever), rewards effort with
 **credits**, and celebrates every win.
 
-Built with **Vaadin 25.3 Flow + Spring Boot 4** (Java 21; 25.3.0-rc1 is a pre-release, bump to
-25.3.0 when it ships), an **H2** file database,
+Built with **Vaadin 25.3 Flow + Spring Boot 4** (Java 21), an **H2** file database,
 **Vaadin Signals + server push** for live sync, and installable as a **PWA** on
 iPhone and Android. Available in **English, Finnish and Swedish**.
 

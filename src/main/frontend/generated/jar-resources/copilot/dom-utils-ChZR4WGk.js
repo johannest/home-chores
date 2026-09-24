@@ -1,5 +1,5 @@
 import { n as e } from "./chunk-DiqZc92J.js";
-import { l as t, o as n } from "./consts-DLyL2h6i.js";
+import { l as t, o as n } from "./consts-B_BO2mll.js";
 //#region frontend/copilot/shared/dom-utils.ts
 function r(e) {
 	return e.parentElement ?? e.parentNode?.host;

@@ -6,7 +6,7 @@ import { a as w, n as T } from "./stats-rEPv3bOZ.js";
 import { n as E, t as D } from "./copilot-stored-machine-state-DS3t0BPl.js";
 import { n as O, r as k } from "./copilot-notification-B9WA4gMj.js";
 import { n as A, t as j } from "./early-project-state-D-4_8bD-.js";
-import { a as M, i as N, s as P, t as F } from "./copilot-development-setup-user-guide-utils-Djq51OyR.js";
+import { a as M, i as N, s as P, t as F } from "./copilot-development-setup-user-guide-utils-DXNVXaMQ.js";
 import { n as I, r as L } from "./copilot-experimental-features-Cu_zexjO.js";
 import { n as R, t as z } from "./copilot-all-components-state-CwAB5tjq.js";
 //#region frontend/copilot/copilot-devtools/copilot-devtools.ts

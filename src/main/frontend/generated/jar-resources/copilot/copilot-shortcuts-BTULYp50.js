@@ -1,7 +1,7 @@
 import { n as e } from "./chunk-DiqZc92J.js";
-import { a as t, d as n, i as r, s as i, t as a } from "./dom-utils-B1FBQ-qG.js";
+import { a as t, d as n, i as r, s as i, t as a } from "./dom-utils-ChZR4WGk.js";
 import { a as o, i as s, n as c, r as l } from "./copilot-ui-state-Dc6l_5DA.js";
-import { l as u, n as d, r as f, s as p, t as m } from "./copilot-unsaved-operation-coordinator-B2_EP6ak.js";
+import { l as u, n as d, r as f, s as p, t as m } from "./copilot-unsaved-operation-coordinator-DrLU6uYL.js";
 import { n as h, t as g } from "./copilot-stored-machine-state-DS3t0BPl.js";
 import { n as _, t as v } from "./track-active-mode-event-800lPe3C.js";
 //#region frontend/copilot/shared/os-utils.ts

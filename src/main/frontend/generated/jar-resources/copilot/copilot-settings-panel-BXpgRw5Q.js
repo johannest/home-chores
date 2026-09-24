@@ -1,14 +1,14 @@
 import { n as e } from "./chunk-DiqZc92J.js";
 import { H as t, U as n, at as r, n as i, o as a, r as o, rt as s, t as c, u as l } from "./icons-wGoYEurg.js";
-import { l as u, o as d } from "./consts-DLyL2h6i.js";
+import { l as u, o as d } from "./consts-B_BO2mll.js";
 import { a as f, d as p, l as m, o as h, s as g } from "./section-panel-ui-state-Dbt9i-HL.js";
 import { a as _, n as v, r as y } from "./copilot-ui-state-Dc6l_5DA.js";
 import { a as b, n as x } from "./stats-rEPv3bOZ.js";
 import { t as S } from "./directive-CZ105jp5.js";
-import { a as C, f as w, o as T, p as E } from "./copilot-error-handler-BcNCQDnH.js";
+import { a as C, f as w, o as T, p as E } from "./copilot-error-handler-B8dKSldg.js";
 import { n as D, t as O } from "./copilot-stored-machine-state-DS3t0BPl.js";
-import { a as k, i as A } from "./copilot-shortcuts-DM87yGiB.js";
-import { n as j, t as M } from "./base-panel-DcZrefqb.js";
+import { a as k, i as A } from "./copilot-shortcuts-BTULYp50.js";
+import { n as j, t as M } from "./base-panel-B2biyt0G.js";
 import { n as N, r as P, t as F } from "./lit-renderer-CALYLbWL.js";
 //#region node_modules/@vaadin/select/src/lit/renderer-directives.js
 var I, L, R = e((() => {

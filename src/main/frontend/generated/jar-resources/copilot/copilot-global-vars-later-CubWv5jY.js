@@ -1,12 +1,12 @@
 import { n as e } from "./chunk-DiqZc92J.js";
 import { $ as t, F as n, H as r, Q as i, R as a, U as ee, Z as o, _ as s, a as c, dt as l, ft as u, g as d, n as f, o as p, r as m, t as h, u as g, ut as _, z as v } from "./icons-wGoYEurg.js";
-import { l as y, o as b } from "./consts-DLyL2h6i.js";
-import { g as x, s as S } from "./dom-utils-B1FBQ-qG.js";
-import { a as C, n as w, o as T, t as te } from "./copilot-tree-impl-CGN2qLin.js";
+import { l as y, o as b } from "./consts-B_BO2mll.js";
+import { g as x, s as S } from "./dom-utils-ChZR4WGk.js";
+import { a as C, n as w, o as T, t as te } from "./copilot-tree-impl-BAchcGTF.js";
 import { a as E, i as D } from "./copilot-ui-state-Dc6l_5DA.js";
-import { i as O, n as k } from "./copilot-server-communicator-impl-DmSHyZxg.js";
+import { i as O, n as k } from "./copilot-server-communicator-impl-CVhpQMVG.js";
 import { n as A, o as j, s as M } from "./stats-rEPv3bOZ.js";
-import { i as N, o as P } from "./copilot-error-handler-BcNCQDnH.js";
+import { i as N, o as P } from "./copilot-error-handler-B8dKSldg.js";
 //#region frontend/copilot/show-in-ide.ts
 function F(e, t) {
 	I(e) ? (j("show-in-ide", {

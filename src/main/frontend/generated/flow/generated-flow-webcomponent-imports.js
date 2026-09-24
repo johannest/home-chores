@@ -50,13 +50,13 @@ import 'react';
 
 const loadOnDemand = (key) => {
   const pending = [];
-  if (key === '95e10ba2625104a148eb9b32fd196fec3a4ebc3d9ecec9dca85ad66729d0e28f') {
-    pending.push(import('./chunks/chunk-52318af722ea309cb0a82c0c6a072c8de93835cf8fbfe25b8c9db112b2e56ca3.js'));
-  }
   if (key === '27547d7f28bcd4c82a4641797d1d8bdb4e1629374a736e6284343300afa8a8a7') {
     pending.push(import('./chunks/chunk-f6eba299fc8d8d80c560066d68fa0addaeb6b852699fd7a60130c5546ad8adf7.js'));
   }
   if (key === '375552b76618f51390aa985cfa7a0311d9cc23d2907cc8d5836f42c415ac2113') {
+    pending.push(import('./chunks/chunk-52318af722ea309cb0a82c0c6a072c8de93835cf8fbfe25b8c9db112b2e56ca3.js'));
+  }
+  if (key === '95e10ba2625104a148eb9b32fd196fec3a4ebc3d9ecec9dca85ad66729d0e28f') {
     pending.push(import('./chunks/chunk-52318af722ea309cb0a82c0c6a072c8de93835cf8fbfe25b8c9db112b2e56ca3.js'));
   }
   return Promise.all(pending);

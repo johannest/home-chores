@@ -3,10 +3,10 @@ import { at as t, it as n, n as r, o as i, r as a, t as o, u as s } from "./icon
 import { a as c, d as l, i as u, l as d, o as f, r as p, s as m } from "./section-panel-ui-state-Dbt9i-HL.js";
 import { n as h, r as g } from "./copilot-ui-state-Dc6l_5DA.js";
 import { a as _, n as v } from "./stats-rEPv3bOZ.js";
-import { c as y, l as b, o as x, r as S, u as C } from "./copilot-error-handler-BcNCQDnH.js";
+import { c as y, l as b, o as x, r as S, u as C } from "./copilot-error-handler-B8dKSldg.js";
 import { n as w, t as T } from "./copilot-stored-machine-state-DS3t0BPl.js";
 import { n as E, r as D } from "./copilot-notification-B9WA4gMj.js";
-import { n as O, t as k } from "./base-panel-DcZrefqb.js";
+import { n as O, t as k } from "./base-panel-B2biyt0G.js";
 import { r as A, t as j } from "./copilot-experimental-features-Cu_zexjO.js";
 //#region frontend/copilot/plugins/copilot-features/copilot-features-plugin.ts
 var M, N, P, F, I;

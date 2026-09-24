@@ -1,8 +1,8 @@
 import { n as e } from "./chunk-DiqZc92J.js";
-import { s as t, t as n } from "./dom-utils-B1FBQ-qG.js";
+import { s as t, t as n } from "./dom-utils-ChZR4WGk.js";
 import { i as r, n as i, r as a, t as o } from "./section-panel-ui-state-Dbt9i-HL.js";
 import { a as s, i as c } from "./copilot-ui-state-Dc6l_5DA.js";
-import { l, r as u, s as d, t as f } from "./copilot-unsaved-operation-coordinator-B2_EP6ak.js";
+import { l, r as u, s as d, t as f } from "./copilot-unsaved-operation-coordinator-DrLU6uYL.js";
 //#region frontend/copilot/shared/section-panels/base-panel.ts
 var p, m = e((() => {
 	r(), s(), o(), t(), l(), u(), p = class extends a {
