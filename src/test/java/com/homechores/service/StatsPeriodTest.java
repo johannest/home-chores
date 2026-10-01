@@ -65,9 +65,12 @@ class StatsPeriodTest {
     void yesterdayCountsInTheWeekButNotInToday() {
         Member alex = chores.createHome("Periods", "Alex");
         String code = alex.getHomeCode();
-        // Monday would make "yesterday" fall in last week, which is a different assertion.
+        // On a Monday "yesterday" falls in last week, and on the first of a month in last
+        // month: either would turn this into a different assertion, so log today instead.
         LocalDate today = LocalDate.now();
-        int back = today.getDayOfWeek() == DayOfWeek.MONDAY ? 0 : 1;
+        boolean yesterdayOutsideThisWeekOrMonth = today.getDayOfWeek() == DayOfWeek.MONDAY
+                || today.getDayOfMonth() == 1;
+        int back = yesterdayOutsideThisWeekOrMonth ? 0 : 1;
 
         logOn(code, alex.getId(), 0, back);
 
