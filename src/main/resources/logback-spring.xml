@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logging: a weekly-rolling file the app manages itself, plus the console outside production.
+
+  The host keeps one jar running for weeks, and a single ever-growing stdout redirect is
+  what the production log used to be. This appender starts a fresh file at the start of each
+  week (ISO week in the file name, e.g. flashchores.log.2026-W40.0.gz), gzips the old one,
+  and keeps half a year of them within a size cap. A file is also split when it passes
+  maxFileSize, which is where the %i comes from.
+
+  Where the file goes is `logging.file.name` (default logs/flashchores.log, relative to the
+  working directory — the same logs/ that tools/release.sh points at). The host's startup
+  script can override it as a command-line argument and, with the `prod` profile active,
+  silence the console so stdout no longer needs a redirect of its own. Without the profile
+  both outputs are written, which is also fine.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <springProperty scope="context" name="APP_LOG_FILE" source="logging.file.name"
+                    defaultValue="logs/flashchores.log"/>
+
+    <appender name="WEEKLY_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${APP_LOG_FILE}</file>
+        <encoder>
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>${FILE_LOG_CHARSET}</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!-- ww is the week of the year; the week starts on the JVM locale's first day. -->
+            <fileNamePattern>${APP_LOG_FILE}.%d{yyyy-'W'ww}.%i.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>26</maxHistory>
+            <totalSizeCap>500MB</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+    </appender>
+
+    <springProfile name="!prod">
+        <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+        <root level="INFO">
+            <appender-ref ref="WEEKLY_FILE"/>
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="prod">
+        <root level="INFO">
+            <appender-ref ref="WEEKLY_FILE"/>
+        </root>
+    </springProfile>
+</configuration>

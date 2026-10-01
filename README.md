@@ -5,7 +5,7 @@ join link) with your family, and tap a button whenever you do a chore. The app k
 things **fair** (no one can hog the easy chore forever), rewards effort with
 **credits**, and celebrates every win.
 
-Built with **Vaadin 25.3 Flow + Spring Boot 4** (Java 21), an **H2** file database,
+Built with **Vaadin 25.3 Flow + Spring Boot 4** (Java 25), an **H2** file database,
 **Vaadin Signals + server push** for live sync, and installable as a **PWA** on
 iPhone and Android. Available in **English, Finnish and Swedish**.
 
@@ -54,10 +54,10 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 
 ## Running it
 
-Requires **Java 21** and Maven.
+Requires **Java 25** and Maven.
 
 ```bash
-JAVA_HOME=/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home mvn spring-boot:run
+JAVA_HOME=$(/usr/libexec/java_home -v 25) mvn spring-boot:run
 ```
 
 Then open http://localhost:8080. On your phone, use your computer's LAN IP
@@ -122,7 +122,7 @@ build the frontend.
 **Production build (optimized frontend, executable jar):**
 
 ```bash
-JAVA_HOME=/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home mvn clean package -Pproduction
+JAVA_HOME=$(/usr/libexec/java_home -v 25) mvn clean package -Pproduction
 java -jar target/flashchores-1.0.0.jar
 ```
 
@@ -135,7 +135,8 @@ The target host allows 100 processes, and on Linux that limit counts **threads**
 Java thread is a task against `RLIMIT_NPROC` / cgroup `pids.max`. Run the jar with:
 
 ```bash
-java -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx512m -jar target/flashchores-1.0.0.jar
+java -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx512m \
+     -Djdk.virtualThreadScheduler.maxPoolSize=4 -jar target/flashchores-1.0.0.jar
 ```
 
 Measured on this jar: **29 threads whether idle or serving 600 concurrent requests**, of
@@ -149,6 +150,9 @@ the separate management port** — the extra connector costs 5.) What each part 
 | `-XX:+UseSerialGC` | Drops G1's six threads (`GC Thread`×2, `G1 Service`, `G1 Refine`, `G1 Main Marker`, `G1 Conc`). The live set is tens of MB, so serial pauses stay trivial. |
 | `-Xmx512m` | Comfortable under the host's 2 GB limit: ~76 MB RSS idle, ~290 MB after a 600-request burst (SerialGC is not eager about returning it). Lower it if you want a tighter ceiling. |
 | `spring.threads.virtual.enabled=true` (in `application.properties`) | Removes Tomcat's growable exec pool, so thread count no longer tracks traffic. |
+| Java 25 | Up to Java 23 a virtual thread that blocked inside `synchronized` (H2 does this a lot) pinned its carrier, and the scheduler compensated by adding carrier threads, by default up to 256. Java 24 removed that pinning (JEP 491), so on 25 the carrier count stays at the parallelism, 2 here. The app compiles for 25 (`maven.compiler.release`), so the host needs a Java 25 runtime. |
+| `-Djdk.virtualThreadScheduler.maxPoolSize=4` | Belt and braces for the row above: a hard cap on the carrier pool for whatever compensation remains (`Object.wait`, file I/O), so it can add two threads at most. |
+| `homechores.atmosphere.dispatch-threads=4` + `write-threads=8` (in `application.properties`, applied by `PushThreadBudget`) | Caps Atmosphere's push pools. Vaadin leaves them at Atmosphere's defaults — an unbounded dispatcher and up to 200 writers, platform threads with a 30 s idle timeout — so a change fanning out to many boards at once could add tens of threads in a burst. The caps bound that at 12. |
 | `management.server.port=8090` + `management.server.address=127.0.0.1` (in `application.properties`) | A second Tomcat connector for Actuator: +5 threads (acceptor, poller, handler) in exchange for metrics that can never be reached through the public port or the proxy. Delete both lines to serve `/actuator` on 8080 instead and firewall it at the proxy. |
 
 Verify on the host with `ls /proc/<pid>/task | wc -l` (JVM threads) and
@@ -157,6 +161,13 @@ Verify on the host with `ls /proc/<pid>/task | wc -l` (JVM threads) and
 Two things deliberately **not** done: `-XX:TieredStopAtLevel=1 -XX:CICompilerCount=1` saves
 one thread but disables C2 and made startup slower (2.5 s → 3.6 s), and a GraalVM native
 image trades away JIT peak throughput for startup and memory wins this host does not need.
+(`-XX:CICompilerCount=2` would change nothing: with two processors the JIT already runs
+on the tiered minimum of two threads.)
+
+The 29-thread figure above was measured under plain HTTP load. Push fan-out is the other
+load shape, and the one the Atmosphere caps are for: to re-measure it, attach several
+boards to one home, make a change on one of them, and sample `ls /proc/<pid>/task | wc -l`
+while the others redraw.
 
 ### Observability
 
@@ -201,7 +212,9 @@ listener on 8090 for Actuator.
 2. **Make sure 8090 is free:** `ss -ltnp | grep ':8090' || echo "8090 free"`. If something owns
    it, pass `--management.server.port=8091` on the java command line and use 8091 below.
 3. **Build and ship the jar** with `mvn clean package -Pproduction` as above, keeping the
-   previous jar next to it as the rollback. The run command is unchanged.
+   previous jar next to it as the rollback. The jar is compiled for Java 25, so the host's
+   runtime must be 25 too: `java -version` on the host must print 25 before the first
+   deploy of this build, or the jar fails at startup with an unsupported class version.
 
 **Lock down Apache**
 
@@ -217,6 +230,17 @@ listener on 8090 for Actuator.
    then `sudo apachectl configtest && sudo systemctl reload apache2`.
 5. **Never open 8090.** The app binds it to 127.0.0.1, so no firewall rule is needed. Just
    never add a `ProxyPass` for it and never bind it to a public address.
+
+**Logs**
+
+The app writes its own log: `logs/flashchores.log` under the working directory (the same
+`logs/` that `tools/release.sh` watches), rolled over at the start of every week into
+`flashchores.log.<year>-W<week>.<n>.gz`, with 26 weeks or 500 MB kept, whichever is hit
+first (`src/main/resources/logback-spring.xml`). Two knobs for the startup script:
+`--logging.file.name=/some/where/flashchores.log` moves it, and
+`--spring.profiles.active=prod` turns the console output off so stdout no longer needs a
+redirect of its own. Without the profile the console still gets a copy, which works but
+doubles the writes on a host that counts every byte.
 
 **After the restart**
 
@@ -260,9 +284,10 @@ new properties. The Apache deny rule is harmless on the old version and can stay
 
 ### Behind Cloudflare (free tier)
 
-The app is Cloudflare-ready (the repo side is `vaadin.pushLongPollingSuspendTimeout=80000`
-in `application.properties` — Cloudflare kills idle requests at ~100 s, and the suspended
-long-poll would otherwise sit open forever). Everything else is dashboard/proxy work:
+The app is Cloudflare-ready (the repo side is `vaadin.pushLongPollingSuspendTimeout=45000`
+in `application.properties` — Cloudflare kills idle requests at ~100 s and Apache's
+`ProxyTimeout` defaults to 60 s, and the suspended long-poll would otherwise sit open
+until one of them cuts it). Everything else is dashboard/proxy work:
 
 1. **DNS & TLS**: proxy (orange-cloud) the apex + `www`; topology stays
    CF → your TLS reverse proxy → `127.0.0.1:8080`. Set SSL mode to **Full (strict)** and
@@ -356,7 +381,7 @@ src/test/java/com/homechores/     # JUnit service tests + Vaadin UI unit tests
 ## Tests
 
 ```bash
-JAVA_HOME=/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home mvn clean test
+JAVA_HOME=$(/usr/libexec/java_home -v 25) mvn clean test
 ```
 
 (Use `clean` — incremental builds can leave stale compiled classes behind.)

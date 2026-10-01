@@ -228,6 +228,6 @@ class StatsPanel extends VerticalLayout {
                     md.member().getName() + " (" + md.doneToday() + "/" + md.target() + ")",
                     md.doneToday()));
         }
-        body.add(Charts.card(T.tr("stats.todayGoals"), Charts.horizontalBars(todayBars)));
+        body.add(Charts.card(T.tr("stats.todayGoals"), Charts.horizontalBars(todayBars, true)));
     }
 }

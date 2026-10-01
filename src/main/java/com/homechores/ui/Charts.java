@@ -10,6 +10,7 @@ import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
 import java.time.format.TextStyle;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
@@ -29,14 +30,33 @@ final class Charts {
         return card;
     }
 
-    /** Horizontal bars, each scaled to the largest value. */
+    /**
+     * Horizontal bars ranked longest first, each scaled to the largest value. Zero bars are
+     * left out: a ranking is read top-down for who or what did the most, and a tail of empty
+     * tracks only pushes the trend cards below it further down a phone screen.
+     */
     static Component horizontalBars(List<CountBar> bars) {
+        return horizontalBars(bars, false);
+    }
+
+    /**
+     * Horizontal bars ranked longest first. With {@code keepZeros} the empty bars stay, for
+     * cards where a zero is the message — "today's goals" lists every member, and a member
+     * on 0/3 belongs on it more than anyone.
+     */
+    static Component horizontalBars(List<CountBar> bars, boolean keepZeros) {
         Div box = new Div();
-        long max = bars.stream().mapToLong(CountBar::value).max().orElse(0);
-        if (bars.isEmpty() || max == 0) {
+        // Stable sort: ties keep the service's board order, so equal bars don't shuffle
+        // between renders.
+        List<CountBar> ranked = bars.stream()
+                .filter(b -> keepZeros || b.value() > 0)
+                .sorted(Comparator.comparingLong(CountBar::value).reversed())
+                .toList();
+        long max = ranked.stream().mapToLong(CountBar::value).max().orElse(0);
+        if (ranked.isEmpty() || max == 0) {
             return empty(T.tr("charts.noData"));
         }
-        for (CountBar b : bars) {
+        for (CountBar b : ranked) {
             Div row = new Div();
             row.addClassName("bar-row");
 
