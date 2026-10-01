@@ -231,6 +231,17 @@ listener on 8090 for Actuator.
 5. **Never open 8090.** The app binds it to 127.0.0.1, so no firewall rule is needed. Just
    never add a `ProxyPass` for it and never bind it to a public address.
 
+**Logs**
+
+The app writes its own log: `logs/flashchores.log` under the working directory (the same
+`logs/` that `tools/release.sh` watches), rolled over at the start of every week into
+`flashchores.log.<year>-W<week>.<n>.gz`, with 26 weeks or 500 MB kept, whichever is hit
+first (`src/main/resources/logback-spring.xml`). Two knobs for the startup script:
+`--logging.file.name=/some/where/flashchores.log` moves it, and
+`--spring.profiles.active=prod` turns the console output off so stdout no longer needs a
+redirect of its own. Without the profile the console still gets a copy, which works but
+doubles the writes on a host that counts every byte.
+
 **After the restart**
 
 6. **Both listeners on loopback only:** `ss -ltnp | grep java` must show 8080 and 8090 on
