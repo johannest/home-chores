@@ -135,7 +135,8 @@ The target host allows 100 processes, and on Linux that limit counts **threads**
 Java thread is a task against `RLIMIT_NPROC` / cgroup `pids.max`. Run the jar with:
 
 ```bash
-java -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx512m -jar target/flashchores-1.0.0.jar
+java -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xmx512m \
+     -Djdk.virtualThreadScheduler.maxPoolSize=4 -jar target/flashchores-1.0.0.jar
 ```
 
 Measured on this jar: **29 threads whether idle or serving 600 concurrent requests**, of
@@ -149,6 +150,8 @@ the separate management port** — the extra connector costs 5.) What each part 
 | `-XX:+UseSerialGC` | Drops G1's six threads (`GC Thread`×2, `G1 Service`, `G1 Refine`, `G1 Main Marker`, `G1 Conc`). The live set is tens of MB, so serial pauses stay trivial. |
 | `-Xmx512m` | Comfortable under the host's 2 GB limit: ~76 MB RSS idle, ~290 MB after a 600-request burst (SerialGC is not eager about returning it). Lower it if you want a tighter ceiling. |
 | `spring.threads.virtual.enabled=true` (in `application.properties`) | Removes Tomcat's growable exec pool, so thread count no longer tracks traffic. |
+| `-Djdk.virtualThreadScheduler.maxPoolSize=4` | Hard cap on the carrier pool. On Java 21 a virtual thread that blocks inside `synchronized` (H2 does this a lot) pins its carrier, and the scheduler compensates by adding carriers, by default up to 256. With this flag it can add two at most. Java 24+ no longer pins, which makes the flag harmless rather than necessary. |
+| `homechores.atmosphere.dispatch-threads=4` + `write-threads=8` (in `application.properties`, applied by `PushThreadBudget`) | Caps Atmosphere's push pools. Vaadin leaves them at Atmosphere's defaults — an unbounded dispatcher and up to 200 writers, platform threads with a 30 s idle timeout — so a change fanning out to many boards at once could add tens of threads in a burst. The caps bound that at 12. |
 | `management.server.port=8090` + `management.server.address=127.0.0.1` (in `application.properties`) | A second Tomcat connector for Actuator: +5 threads (acceptor, poller, handler) in exchange for metrics that can never be reached through the public port or the proxy. Delete both lines to serve `/actuator` on 8080 instead and firewall it at the proxy. |
 
 Verify on the host with `ls /proc/<pid>/task | wc -l` (JVM threads) and
@@ -157,6 +160,13 @@ Verify on the host with `ls /proc/<pid>/task | wc -l` (JVM threads) and
 Two things deliberately **not** done: `-XX:TieredStopAtLevel=1 -XX:CICompilerCount=1` saves
 one thread but disables C2 and made startup slower (2.5 s → 3.6 s), and a GraalVM native
 image trades away JIT peak throughput for startup and memory wins this host does not need.
+(`-XX:CICompilerCount=2` would change nothing: with two processors the JIT already runs
+on the tiered minimum of two threads.)
+
+The 29-thread figure above was measured under plain HTTP load. Push fan-out is the other
+load shape, and the one the Atmosphere caps are for: to re-measure it, attach several
+boards to one home, make a change on one of them, and sample `ls /proc/<pid>/task | wc -l`
+while the others redraw.
 
 ### Observability
 
