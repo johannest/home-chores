@@ -145,9 +145,17 @@ final class Charts {
         Div col = new Div();
         col.addClassName("trend-col");
 
+        // The bar and its count live in a plot box of their own, so the bar's percentage is
+        // measured against the room that is actually left for it. Measured against the whole
+        // column (as it was), a bar above ~65% collided with the count and the caption and
+        // flexbox shrank it to fit, so 65 and 98 drew the same height while 52 still fell short.
+        Div plot = new Div();
+        plot.addClassName("trend-plot");
+
         Div bar = new Div();
         bar.addClassName("trend-bar");
-        bar.getStyle().set("height", (max == 0 ? 0 : (int) (value * 100 / max)) + "%");
+        bar.getStyle().set("--trend-pct",
+                max == 0 ? "0" : String.format(Locale.ROOT, "%.4f", (double) value / max));
         bar.getElement().setAttribute("title", tooltip);
 
         Span caption = new Span(label);
@@ -159,9 +167,10 @@ final class Charts {
         if (value > 0) {
             Span count = new Span(String.valueOf(value));
             count.addClassName("trend-count");
-            col.add(count);
+            plot.add(count);
         }
-        col.add(bar, caption);
+        plot.add(bar);
+        col.add(plot, caption);
         return col;
     }
 

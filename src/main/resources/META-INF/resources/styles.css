@@ -954,8 +954,11 @@ vaadin-checkbox-group::part(group-field) {
     display: flex;
     align-items: flex-end;
     gap: 4px;
-    height: 104px; /* 90px + room for the count printed above each bar */
-    padding-top: 6px;
+    height: 104px;
+    /* The count printed above a bar: its line (0.7rem) plus the 4px gap below it. The plot
+       reserves this much, so a 100% bar plus its count still fits without flexbox shrinking the
+       bar — which is what used to cap every bar above ~65% at the same height. */
+    --trend-count-room: 15px;
 }
 .trend-col {
     flex: 1;
@@ -966,8 +969,22 @@ vaadin-checkbox-group::part(group-field) {
     height: 100%;
     gap: 4px;
 }
+/* The room above the caption; the bar's percentage is measured against this box, not the
+   whole column, so the caption never eats into it. */
+.trend-plot {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+}
 .trend-bar {
     width: 70%;
+    flex-shrink: 0;
+    height: calc((100% - var(--trend-count-room)) * var(--trend-pct, 0));
     min-height: 2px;
     border-radius: 4px 4px 0 0;
     background: var(--app-gradient);
@@ -990,8 +1007,8 @@ vaadin-checkbox-group::part(group-field) {
     font-size: 0.75rem; /* was 0.6rem = 9.6px */
     color: var(--lumo-secondary-text-color);
 }
-/* The count above a bar, so the number is readable without a hover tooltip. It never shrinks:
-   the bar gives up height instead, since a bar is only ever read relative to its neighbours. */
+/* The count above a bar, so the number is readable without a hover tooltip. Its room is
+   reserved by --trend-count-room, so it never has to fight the bar for space. */
 .trend-count {
     flex-shrink: 0;
     font-size: 0.7rem;
