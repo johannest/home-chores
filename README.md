@@ -260,9 +260,10 @@ new properties. The Apache deny rule is harmless on the old version and can stay
 
 ### Behind Cloudflare (free tier)
 
-The app is Cloudflare-ready (the repo side is `vaadin.pushLongPollingSuspendTimeout=80000`
-in `application.properties` — Cloudflare kills idle requests at ~100 s, and the suspended
-long-poll would otherwise sit open forever). Everything else is dashboard/proxy work:
+The app is Cloudflare-ready (the repo side is `vaadin.pushLongPollingSuspendTimeout=45000`
+in `application.properties` — Cloudflare kills idle requests at ~100 s and Apache's
+`ProxyTimeout` defaults to 60 s, and the suspended long-poll would otherwise sit open
+until one of them cuts it). Everything else is dashboard/proxy work:
 
 1. **DNS & TLS**: proxy (orange-cloud) the apex + `www`; topology stays
    CF → your TLS reverse proxy → `127.0.0.1:8080`. Set SSL mode to **Full (strict)** and
