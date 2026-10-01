@@ -5,7 +5,7 @@ join link) with your family, and tap a button whenever you do a chore. The app k
 things **fair** (no one can hog the easy chore forever), rewards effort with
 **credits**, and celebrates every win.
 
-Built with **Vaadin 25.3 Flow + Spring Boot 4** (Java 21), an **H2** file database,
+Built with **Vaadin 25.3 Flow + Spring Boot 4** (Java 25), an **H2** file database,
 **Vaadin Signals + server push** for live sync, and installable as a **PWA** on
 iPhone and Android. Available in **English, Finnish and Swedish**.
 
@@ -54,10 +54,10 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 
 ## Running it
 
-Requires **Java 21** and Maven.
+Requires **Java 25** and Maven.
 
 ```bash
-JAVA_HOME=/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home mvn spring-boot:run
+JAVA_HOME=$(/usr/libexec/java_home -v 25) mvn spring-boot:run
 ```
 
 Then open http://localhost:8080. On your phone, use your computer's LAN IP
@@ -122,7 +122,7 @@ build the frontend.
 **Production build (optimized frontend, executable jar):**
 
 ```bash
-JAVA_HOME=/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home mvn clean package -Pproduction
+JAVA_HOME=$(/usr/libexec/java_home -v 25) mvn clean package -Pproduction
 java -jar target/flashchores-1.0.0.jar
 ```
 
@@ -150,7 +150,8 @@ the separate management port** — the extra connector costs 5.) What each part 
 | `-XX:+UseSerialGC` | Drops G1's six threads (`GC Thread`×2, `G1 Service`, `G1 Refine`, `G1 Main Marker`, `G1 Conc`). The live set is tens of MB, so serial pauses stay trivial. |
 | `-Xmx512m` | Comfortable under the host's 2 GB limit: ~76 MB RSS idle, ~290 MB after a 600-request burst (SerialGC is not eager about returning it). Lower it if you want a tighter ceiling. |
 | `spring.threads.virtual.enabled=true` (in `application.properties`) | Removes Tomcat's growable exec pool, so thread count no longer tracks traffic. |
-| `-Djdk.virtualThreadScheduler.maxPoolSize=4` | Hard cap on the carrier pool. On Java 21 a virtual thread that blocks inside `synchronized` (H2 does this a lot) pins its carrier, and the scheduler compensates by adding carriers, by default up to 256. With this flag it can add two at most. Java 24+ no longer pins, which makes the flag harmless rather than necessary. |
+| Java 25 | Up to Java 23 a virtual thread that blocked inside `synchronized` (H2 does this a lot) pinned its carrier, and the scheduler compensated by adding carrier threads, by default up to 256. Java 24 removed that pinning (JEP 491), so on 25 the carrier count stays at the parallelism, 2 here. The app compiles for 25 (`maven.compiler.release`), so the host needs a Java 25 runtime. |
+| `-Djdk.virtualThreadScheduler.maxPoolSize=4` | Belt and braces for the row above: a hard cap on the carrier pool for whatever compensation remains (`Object.wait`, file I/O), so it can add two threads at most. |
 | `homechores.atmosphere.dispatch-threads=4` + `write-threads=8` (in `application.properties`, applied by `PushThreadBudget`) | Caps Atmosphere's push pools. Vaadin leaves them at Atmosphere's defaults — an unbounded dispatcher and up to 200 writers, platform threads with a 30 s idle timeout — so a change fanning out to many boards at once could add tens of threads in a burst. The caps bound that at 12. |
 | `management.server.port=8090` + `management.server.address=127.0.0.1` (in `application.properties`) | A second Tomcat connector for Actuator: +5 threads (acceptor, poller, handler) in exchange for metrics that can never be reached through the public port or the proxy. Delete both lines to serve `/actuator` on 8080 instead and firewall it at the proxy. |
 
@@ -211,7 +212,9 @@ listener on 8090 for Actuator.
 2. **Make sure 8090 is free:** `ss -ltnp | grep ':8090' || echo "8090 free"`. If something owns
    it, pass `--management.server.port=8091` on the java command line and use 8091 below.
 3. **Build and ship the jar** with `mvn clean package -Pproduction` as above, keeping the
-   previous jar next to it as the rollback. The run command is unchanged.
+   previous jar next to it as the rollback. The jar is compiled for Java 25, so the host's
+   runtime must be 25 too: `java -version` on the host must print 25 before the first
+   deploy of this build, or the jar fails at startup with an unsupported class version.
 
 **Lock down Apache**
 
@@ -367,7 +370,7 @@ src/test/java/com/homechores/     # JUnit service tests + Vaadin UI unit tests
 ## Tests
 
 ```bash
-JAVA_HOME=/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home mvn clean test
+JAVA_HOME=$(/usr/libexec/java_home -v 25) mvn clean test
 ```
 
 (Use `clean` — incremental builds can leave stale compiled classes behind.)
