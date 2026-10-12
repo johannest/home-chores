@@ -11,3 +11,5 @@
 /src/main/frontend/generated/
 # Written by logback-spring.xml when the app runs from the project directory
 /logs/
+# Log files copied in for a look (prod-logs.log and the like) never belong in the repo
+*.log

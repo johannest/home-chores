@@ -5,6 +5,9 @@ import com.homechores.domain.ChoreTaskRepository;
 import com.homechores.domain.Completion;
 import com.homechores.domain.CompletionRepository;
 import com.homechores.domain.CompletionStatus;
+import com.homechores.domain.CreditEntry;
+import com.homechores.domain.CreditEntryRepository;
+import com.homechores.domain.CreditType;
 import com.homechores.domain.Feedback;
 import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
@@ -34,13 +37,16 @@ public class StatsService {
     private final MemberRepository members;
     private final ChoreTaskRepository tasks;
     private final CompletionRepository completions;
+    private final CreditEntryRepository credits;
 
     public StatsService(HomeRepository homes, MemberRepository members,
-                        ChoreTaskRepository tasks, CompletionRepository completions) {
+                        ChoreTaskRepository tasks, CompletionRepository completions,
+                        CreditEntryRepository credits) {
         this.homes = homes;
         this.members = members;
         this.tasks = tasks;
         this.completions = completions;
+        this.credits = credits;
     }
 
     /** How many columns a longer trend shows. Twelve is what fits a ~360px phone column at a
@@ -299,7 +305,52 @@ public class StatsService {
                 daySeries(perDay, today, 7), dayCount, home.getDailyTargetPerMember(), otherHelp,
                 new PeriodCounts(dayCount, weekCount, monthCount, totalApproved), inPeriod,
                 weekSeries(perDay, today, TREND_WEEKS, loc),
-                monthSeries(perDay, today, TREND_MONTHS, loc));
+                monthSeries(perDay, today, TREND_MONTHS, loc),
+                diamondStats(memberId, today));
+    }
+
+    // ---- Diamonds ("My stats") ---------------------------------------------
+
+    /**
+     * What one member has <em>earned</em> in 💎, from a single query for their own ledger.
+     *
+     * <p>Earned only: the question the users asked was "how many diamonds did I get today / this
+     * week", which a redemption does not change — spending them is the admin's line in the
+     * ledger, and the balance on the leaderboard already answers "how many do I have". Spree
+     * bonuses are EARNED rows and count. A completion that is undone has its rows deleted
+     * ({@code CreditService.deleteForCompletion}), so the totals correct themselves.
+     *
+     * <p>Bucketed by {@code createdAt} in the server zone: a credit lands the moment its
+     * completion is approved, so for a home with approval on a chore done last night and approved
+     * this morning pays today. That is the ledger's truth and what the celebration toast said, so
+     * the chart agrees with the toast rather than with the chore trend.
+     */
+    public DiamondStats diamondStats(Long memberId, LocalDate today) {
+        Map<LocalDate, Long> perDay = new HashMap<>();
+        long dayCount = 0;
+        long weekCount = 0;
+        long monthCount = 0;
+        long allTime = 0;
+        for (CreditEntry e : credits.findByMemberId(memberId)) {
+            if (e.getType() != CreditType.EARNED) {
+                continue;
+            }
+            LocalDate on = e.getCreatedAt().atZone(zone()).toLocalDate();
+            long n = e.getAmount();
+            perDay.merge(on, n, Long::sum);
+            allTime += n;
+            if (Period.TODAY.includes(on, today)) {
+                dayCount += n;
+            }
+            if (Period.WEEK.includes(on, today)) {
+                weekCount += n;
+            }
+            if (Period.MONTH.includes(on, today)) {
+                monthCount += n;
+            }
+        }
+        return new DiamondStats(new PeriodCounts(dayCount, weekCount, monthCount, allTime),
+                daySeries(perDay, today, 7));
     }
 
     /** The last {@code days} days ending today, zero-filled — a chart needs every column. */
@@ -340,6 +391,8 @@ public class StatsService {
         LocalDate today = LocalDate.now();
 
         Map<Long, Long> approvedByMember = new HashMap<>();
+        Map<Long, Map<Long, Long>> byMemberByTask = new HashMap<>();
+        Map<Long, Long> otherHelpByMember = new HashMap<>();
         Map<Long, Long> todayByMember = new HashMap<>();
         Map<Long, Long> approvedByTask = new HashMap<>();
         Map<Long, long[]> feedbackByTaskId = new HashMap<>(); // [hate, ok, love]
@@ -391,8 +444,11 @@ public class StatsService {
             if (c.isOtherHelp()) {
                 // Accepted other help belongs in the picture, but has no chore to hang off.
                 otherHelp++;
+                otherHelpByMember.merge(c.getMemberId(), 1L, Long::sum);
             } else {
                 approvedByTask.merge(c.getTaskId(), 1L, Long::sum);
+                byMemberByTask.computeIfAbsent(c.getMemberId(), k -> new HashMap<>())
+                        .merge(c.getTaskId(), 1L, Long::sum);
             }
         }
 
@@ -404,6 +460,28 @@ public class StatsService {
             perMember.add(new CountBar(m.getName(), approvedByMember.getOrDefault(m.getId(), 0L)));
             adherence.add(new MemberDaily(m, todayByMember.getOrDefault(m.getId(), 0L),
                     home.getDailyTargetPerMember()));
+        }
+
+        // Every member's own "my chores" chart, for the admin: the same bars each member sees on
+        // their My stats, read off the per-member map in board order. Members with nothing in
+        // the period are left out — the card is a ranking of what was done, not a roll call (the
+        // adherence card below is the roll call).
+        List<MemberChores> perMemberChores = new ArrayList<>(memberList.size());
+        for (Member m : memberList) {
+            long total = approvedByMember.getOrDefault(m.getId(), 0L);
+            if (total == 0) {
+                continue;
+            }
+            Map<Long, Long> theirs = byMemberByTask.getOrDefault(m.getId(), Map.of());
+            List<CountBar> bars = new ArrayList<>();
+            for (ChoreTask t : taskList) {
+                long n = theirs.getOrDefault(t.getId(), 0L);
+                if (n > 0) {
+                    bars.add(new CountBar(t.getEmoji() + " " + t.getName(), n));
+                }
+            }
+            perMemberChores.add(new MemberChores(m, bars,
+                    otherHelpByMember.getOrDefault(m.getId(), 0L), total));
         }
 
         List<CountBar> popularity = new ArrayList<>(taskList.size());
@@ -423,7 +501,7 @@ public class StatsService {
                 daySeries(perDay, today, 14), adherence, pending, otherHelp,
                 new PeriodCounts(dayCount, weekCount, monthCount, allTime),
                 weekSeries(perDay, today, TREND_WEEKS, loc),
-                monthSeries(perDay, today, TREND_MONTHS, loc));
+                monthSeries(perDay, today, TREND_MONTHS, loc), perMemberChores);
     }
 
     // ---- DTOs ---------------------------------------------------------------
@@ -446,23 +524,35 @@ public class StatsService {
     public record MemberDaily(Member member, long doneToday, int target) {
     }
 
+    /** One member's chores by type under the lens — their own "My chores" chart, for the admin.
+     *  {@code byChore} is in board order with zero rows dropped; {@code total} includes
+     *  {@code otherHelp}. Only members with {@code total > 0} are emitted. */
+    public record MemberChores(Member member, List<CountBar> byChore, long otherHelp, long total) {
+    }
+
     /**
      * {@code otherHelp} = approved help entries with no chore behind them; the view labels and
      * appends them, since "Other help" is UI wording rather than a stored name.
      *
-     * <p>{@code totalApproved}, {@code counts}, {@code doneToday} and both trends are always
-     * all-time facts, whatever lens is selected — a period narrows the bars, not the picture of
+     * <p>{@code totalApproved}, {@code counts}, {@code doneToday}, {@code diamonds} and both
+     * trends are always all-time facts, whatever lens is selected — a period narrows the bars, not the picture of
      * how the member is doing over time. {@code byChore}, {@code feedback}, {@code otherHelp} and
      * {@code inPeriod} follow the lens.
      */
     public record MyStats(long totalApproved, List<CountBar> byChore, FeedbackSplit feedback,
                           List<DayCount> last7, long doneToday, int target, long otherHelp,
                           PeriodCounts counts, long inPeriod, List<PeriodBucket> byWeek,
-                          List<PeriodBucket> byMonth) {
+                          List<PeriodBucket> byMonth, DiamondStats diamonds) {
+    }
+
+    /** 💎 earned under each headline period, plus the last seven days — always all-time facts,
+     *  never narrowed by the lens, like the chore tiles they sit beside. */
+    public record DiamondStats(PeriodCounts earned, List<DayCount> last7) {
     }
 
     /**
-     * {@code perMember}, {@code chorePopularity} and {@code otherHelp} follow the selected lens;
+     * {@code perMember}, {@code perMemberChores}, {@code chorePopularity} and {@code otherHelp}
+     * follow the selected lens;
      * {@code counts}, {@code trend14}, both longer trends and {@code adherence} (which is about
      * today by definition) are always all-time facts. {@code feedbackByChore} likewise stays
      * all-time: it answers "which chore does this family hate", and a week's worth of reactions
@@ -472,6 +562,6 @@ public class StatsService {
                             List<ChoreFeedback> feedbackByChore, List<DayCount> trend14,
                             List<MemberDaily> adherence, long pending, long otherHelp,
                             PeriodCounts counts, List<PeriodBucket> byWeek,
-                            List<PeriodBucket> byMonth) {
+                            List<PeriodBucket> byMonth, List<MemberChores> perMemberChores) {
     }
 }

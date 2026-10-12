@@ -37,6 +37,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -693,6 +694,12 @@ public class ChoreService {
         // Appends rather than renumbering: on a legacy home where every chore still sits at 0 this
         // writes a larger number than its neighbours, and the chore still renders last because
         // createdAt is the tiebreaker. Correct by construction, no forced migration.
+        //
+        // Set here for the ungrouped case too, not only inside applyGroup: that method leaves a
+        // chore alone when its group is unchanged — and a new chore is born ungrouped — so a new
+        // ungrouped chore used to keep the entity default of 0 and, once a drag or an arrow had
+        // renumbered the section, surfaced *second* on the board rather than last.
+        t.setSortOrder(bucketOf(homeCode, null).size());
         applyGroup(t, groupId);
         t = tasks.save(t);
         homeState.bump(homeCode);
@@ -870,6 +877,80 @@ public class ChoreService {
         return true;
     }
 
+    /**
+     * Puts a chore where a drag dropped it: in the section {@code groupId} names (null =
+     * ungrouped), directly before {@code beforeTaskId}, or at that section's end when
+     * {@code beforeTaskId} is null. The board's long-press drag (SPEC §4.2b) ends in exactly one
+     * of these calls; the Admin tab's arrows keep using {@link #moveChore}.
+     *
+     * <p>The neighbour, not an index: a filtered board shows a subset of each section, so "drop
+     * at position 3" would mean a different slot on every lens, while "drop before the dishwasher"
+     * means the same slot whatever is hidden. When the two disagree the <em>neighbour's</em>
+     * section wins — the member dropped the card next to it, which is where they are looking.
+     *
+     * <p>{@code homeCode} is the <em>session's</em> home, not the card's: every id here arrives
+     * from the browser, and an admin of one home must not be able to arrange another home's
+     * board by forging them. A card outside that home — or one deleted mid-drag — is refused.
+     *
+     * <p>False, and nothing written or bumped, when the drop changes nothing: the card was let
+     * go where it was picked up, or beside a card from another home. The whole section is
+     * renumbered densely afterwards, the same invariant {@link #moveChore} keeps.
+     */
+    @Transactional
+    public boolean placeChore(String homeCode, Long taskId, Long groupId, Long beforeTaskId) {
+        if (taskId.equals(beforeTaskId)) {
+            return false; // "before itself" is where it already is, not "to the end"
+        }
+        ChoreTask t = tasks.findById(taskId).filter(x -> x.getHomeCode().equals(homeCode))
+                .orElse(null);
+        if (t == null) {
+            return false; // another home's card, or one that is gone: not ours to move
+        }
+        ChoreTask before = null;
+        Long target = liveGroup(homeCode, groupId);
+        if (beforeTaskId != null) {
+            before = tasks.findById(beforeTaskId).filter(b -> b.getHomeCode().equals(homeCode))
+                    .orElse(null);
+            if (before == null) {
+                return false; // another home's card, or one that is gone: nowhere to put it
+            }
+            target = liveGroup(homeCode, before.getGroupId());
+        }
+
+        List<ChoreTask> bucket = new ArrayList<>(bucketOf(homeCode, target));
+        List<Long> was = bucket.stream().map(ChoreTask::getId).toList();
+        bucket.removeIf(x -> x.getId().equals(taskId));
+        int at = before == null ? bucket.size() : indexOfTaskIn(bucket, before.getId());
+        if (at < 0) {
+            at = bucket.size();
+        }
+        bucket.add(at, t);
+        boolean sameGroup = Objects.equals(target, liveGroup(homeCode, t.getGroupId()));
+        if (sameGroup && was.equals(bucket.stream().map(ChoreTask::getId).toList())) {
+            return false; // let go where it was picked up
+        }
+        t.setGroupId(target);
+        List<ChoreTask> changed = new ArrayList<>(renumber(bucket));
+        if (!changed.contains(t)) {
+            changed.add(t); // its group changed even if its position number did not
+        }
+        tasks.saveAll(changed);
+        homeState.bump(homeCode);
+        return true;
+    }
+
+    /** {@code groupId} if it names one of this home's groups, else null (ungrouped) — the same
+     *  fallback {@link #tasksOf} applies to a dangling id; another home's group is refused the
+     *  same way. {@link #applyGroup} and {@link #placeChore} both resolve through here. */
+    private Long liveGroup(String homeCode, Long groupId) {
+        if (groupId == null) {
+            return null;
+        }
+        return groups.findById(groupId)
+                .filter(g -> g.getHomeCode().equals(homeCode))
+                .map(ChoreGroup::getId).orElse(null);
+    }
+
     /** Moves a chore into another group (null = ungrouped), appending it to that group's end. */
     @Transactional
     public void setChoreGroup(Long taskId, Long groupId) {
@@ -889,13 +970,8 @@ public class ChoreService {
      * smaller surprise than throwing at the family's admin.
      */
     private void applyGroup(ChoreTask t, Long groupId) {
-        Long target = null;
-        if (groupId != null) {
-            target = groups.findById(groupId)
-                    .filter(g -> g.getHomeCode().equals(t.getHomeCode()))
-                    .map(ChoreGroup::getId).orElse(null);
-        }
-        if (java.util.Objects.equals(target, t.getGroupId())) {
+        Long target = liveGroup(t.getHomeCode(), groupId);
+        if (Objects.equals(target, t.getGroupId())) {
             return; // unchanged — leave the position alone
         }
         t.setGroupId(target);
@@ -911,7 +987,7 @@ public class ChoreService {
         for (ChoreTask t : tasks.findByHomeCodeOrderBySortOrderAscCreatedAtAscIdAsc(homeCode)) {
             Long effective = (t.getGroupId() != null && live.contains(t.getGroupId()))
                     ? t.getGroupId() : null;
-            if (java.util.Objects.equals(effective, groupId)) {
+            if (Objects.equals(effective, groupId)) {
                 out.add(t);
             }
         }
@@ -932,13 +1008,20 @@ public class ChoreService {
      * side of a group move. A gap changes no visible order, and the next move renumbers anyway.
      */
     private void renumberChores(String homeCode, Long groupId) {
-        List<ChoreTask> bucket = bucketOf(homeCode, groupId);
-        for (int i = 0; i < bucket.size(); i++) {
-            if (bucket.get(i).getSortOrder() != i) {
-                bucket.get(i).setSortOrder(i);
-                tasks.save(bucket.get(i));
+        tasks.saveAll(renumber(bucketOf(homeCode, groupId)));
+    }
+
+    /** Stamps {@code ordered} 0..n-1 in list order, in memory, and returns the rows that
+     *  changed; the caller saves those. */
+    private static List<ChoreTask> renumber(List<ChoreTask> ordered) {
+        List<ChoreTask> changed = new ArrayList<>();
+        for (int i = 0; i < ordered.size(); i++) {
+            if (ordered.get(i).getSortOrder() != i) {
+                ordered.get(i).setSortOrder(i);
+                changed.add(ordered.get(i));
             }
         }
+        return changed;
     }
 
     private void renumberGroups(String homeCode) {

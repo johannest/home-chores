@@ -5,12 +5,15 @@ import com.homechores.service.ChoreService;
 import com.homechores.service.StatsService;
 import com.homechores.service.StatsService.ChoreFeedback;
 import com.homechores.service.StatsService.CountBar;
+import com.homechores.service.StatsService.DiamondStats;
 import com.homechores.service.StatsService.HomeStats;
+import com.homechores.service.StatsService.MemberChores;
 import com.homechores.service.StatsService.MemberDaily;
 import com.homechores.service.StatsService.MyStats;
 import com.homechores.service.StatsService.Period;
 import com.homechores.service.StatsService.PeriodCounts;
 import com.vaadin.flow.component.UI;
+import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.html.H2;
@@ -19,8 +22,10 @@ import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.List;
+import java.util.Set;
 
 /** Statistics: personal charts for everyone, plus home-wide charts for admins. */
 class StatsPanel extends VerticalLayout {
@@ -40,6 +45,11 @@ class StatsPanel extends VerticalLayout {
      * — which period one member is looking at is not the family's business.
      */
     private Period period = Period.WEEK;
+
+    /** Which members' folds the admin has opened on the Home tab, by member id. A field for
+     *  the same reason as the lens: the panel is rebuilt on every change in the home, and a fold
+     *  the admin just opened must not snap shut because somebody tapped a chore. */
+    private final Set<Long> memberOpen = new HashSet<>();
 
     StatsPanel(StatsService stats, ChoreService service, String homeCode, Long memberId) {
         this.stats = stats;
@@ -109,6 +119,11 @@ class StatsPanel extends VerticalLayout {
         body.add(Charts.card(T.tr("stats.byChore.period", lens),
                 s.inPeriod() == 0 ? emptyPeriod()
                         : Charts.horizontalBars(withOtherHelp(s.byChore(), s.otherHelp()))));
+        if (s.diamonds().earned().allTime() > 0) {
+            // Only once the member has ever earned one: a home that never uses credits would
+            // otherwise see a card of four zeros over seven empty columns.
+            body.add(Charts.card(T.tr("stats.diamonds"), diamondsBody(s.diamonds())));
+        }
         body.add(Charts.card(T.tr("stats.feelings"), Charts.feedbackBar(s.feedback())));
         body.add(Charts.card(T.tr("stats.last7"), Charts.dayTrend(s.last7())));
         body.add(Charts.card(T.tr("stats.trendWeeks"), Charts.periodTrend(s.byWeek())));
@@ -166,6 +181,32 @@ class StatsPanel extends VerticalLayout {
         renderBody(showHome);
     }
 
+    /**
+     * 💎 earned today / this week / this month / all time, then the last seven days.
+     *
+     * <p>The same four tiles as {@link #headlineRow}, deliberately <em>not</em> the lens picker:
+     * these are plain numbers, so no button role, no focus stop and no selected state — a second
+     * row of tappable tiles with the same labels would be the redundancy the chip row was removed
+     * for. Earned only; the balance is on the leaderboard.
+     */
+    private static Div diamondsBody(DiamondStats d) {
+        Div row = new Div();
+        row.addClassNames("stat-tiles", "readonly");
+        for (Period p : Period.values()) {
+            Div tile = new Div();
+            tile.addClassName("stat-tile");
+            Span value = new Span(String.valueOf(d.earned().of(p)));
+            value.addClassName("stat-value");
+            Span label = new Span(T.tr("stats.headline." + p.name().toLowerCase(Locale.ROOT)));
+            label.addClassName("stat-label");
+            tile.add(value, label);
+            row.add(tile);
+        }
+        Div box = new Div(row);
+        box.add(Charts.dayTrend(d.last7()));
+        return box;
+    }
+
     private static Paragraph emptyPeriod() {
         Paragraph p = new Paragraph(T.tr("stats.nothingInPeriod"));
         p.addClassName("feedback-hint");
@@ -185,6 +226,38 @@ class StatsPanel extends VerticalLayout {
         return all;
     }
 
+    /**
+     * Every member's own "my chores" chart, one fold each, for the admin. Folded by default:
+     * a family of five would otherwise stack five full bar charts on a phone before the trends.
+     * The summary carries the name and the total, so the folded card is already the ranking.
+     */
+    private Div perMemberChores(List<MemberChores> rows) {
+        Div holder = new Div();
+        if (rows.isEmpty()) {
+            holder.add(emptyPeriod());
+            return holder;
+        }
+        for (MemberChores mc : rows) {
+            Long id = mc.member().getId();
+            Details fold = new Details(mc.member().getName() + " · " + mc.total(),
+                    Charts.horizontalBars(withOtherHelp(mc.byChore(), mc.otherHelp())));
+            fold.addClassName("member-chores");
+            // setOpened before the listener, or the restore counts as the admin's own choice.
+            fold.setOpened(memberOpen.contains(id));
+            fold.addOpenedChangeListener(e -> {
+                if (e.isFromClient()) {
+                    if (e.isOpened()) {
+                        memberOpen.add(id);
+                    } else {
+                        memberOpen.remove(id);
+                    }
+                }
+            });
+            holder.add(fold);
+        }
+        return holder;
+    }
+
     private void renderHome() {
         HomeStats s = stats.homeStats(homeCode, period, UI.getCurrent().getLocale());
 
@@ -199,6 +272,8 @@ class StatsPanel extends VerticalLayout {
         String lens = T.tr("stats.period." + period.name().toLowerCase(Locale.ROOT));
         body.add(Charts.card(T.tr("stats.perMember.period", lens),
                 Charts.horizontalBars(s.perMember())));
+        body.add(Charts.card(T.tr("stats.perMemberChores.period", lens),
+                perMemberChores(s.perMemberChores())));
         body.add(Charts.card(T.tr("stats.popularity.period", lens), Charts.horizontalBars(
                 withOtherHelp(s.chorePopularity(), s.otherHelp()))));
 

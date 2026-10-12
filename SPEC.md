@@ -236,11 +236,20 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
 
 ### Phase 6
 
-- **US-50 Arrange the board.** As an admin, I can move a chore up or down so the board reads in
-  the order my family actually works through it, instead of the order the chores happened to be
-  created in. Arrows rather than dragging, because the board lives on phones. Rearranging is
-  purely cosmetic: it never changes who the rotation assigns what to (§4.5), and a home that
-  never touches it keeps exactly the order it had.
+- **US-50 Arrange the board.** As an admin, I can hold a chore card on the board and drag it to
+  where it belongs — into another group too — so the board reads in the order my family actually
+  works through it, instead of the order the chores happened to be created in; the Admin tab's
+  ↑/↓ stay as the keyboard path. Rearranging is purely cosmetic: it never changes who the
+  rotation assigns what to (§4.5), and a home that never touches it keeps exactly the order it
+  had.
+- **US-55 See what a chore pays.** As a family member choosing what to do next, I can see a
+  chore's 💎 value on its card, so a five-diamond chore stands out from a plain one before I tap.
+- **US-56 My diamonds.** As a family member, my statistics show the 💎 I *earned* today, this
+  week, this month and all time, with the last seven days as a trend — spending them is the
+  admin's business and shows on the leaderboard balance.
+- **US-57 What each member did.** As an admin, Home stats show every member's own chores-by-type
+  chart, folded one per member, so I can see for the whole family what each member sees for
+  themselves without asking around.
 - **US-52 See what I did today, this week, this month.** As a family member, my statistics open on
   a row of four counts — today, this week, this month, all time — and I can narrow the charts to
   any of them, so "am I keeping up?" is answerable at a glance instead of inferable from a 7-day
@@ -419,9 +428,28 @@ and the next interaction signs the phone straight back in.
 - **A group is a label, not a container.** Deleting one keeps every chore in it, and their whole
   history — they simply drop to the ungrouped section. The confirmation says so.
 - **Order** is `ChoreTask.sortOrder`, dense 0..n-1 within each group, arranged with ↑/↓ in the
-  Admin tab. Move up/down rather than drag-and-drop: the app is phone-first and HTML5 drag events
-  do not fire on mobile touch. Arrows are disabled at the ends of a bucket, not hidden, so rows
-  do not reflow as things move.
+  Admin tab or by **holding and dragging a card on the board**. Arrows are disabled at the ends
+  of a bucket, not hidden, so rows do not reflow as things move; they stay as the keyboard path.
+- **Hold-and-drag** (`board-drag.js`, admins only): hold a chore card still for 450 ms and it
+  lifts (a swell at 60 % of the hold says the hold is being noticed; a short vibration where the
+  device has one); drag it and the other cards reflow around the slot, like apps on a phone's
+  home screen; let go and it stays. Dropping it in another section moves it into that group.
+  Not HTML5 drag-and-drop, which does not fire on mobile touch: pointer events, with a
+  non-passive `touchmove` cancelled only while a card is lifted, so the board still scrolls under
+  a finger that starts on a card (`touch-action: pan-y`) and a move within the hold is a scroll,
+  not a lift. The DOM is moved only for the live preview; the drop dispatches `board-place` on
+  `.board-sections` with the dragged id, the target grid's group and the **next chore card's id**
+  (blank = the section's end). A neighbour rather than an index, because a filtered board shows a
+  subset of each section and "slot 3" would mean a different place on every lens. The server
+  re-checks that the sender is an admin — the `draggable` class is a hint to the browser, not an
+  authorisation — and `ChoreService.placeChore` removes the chore from its old bucket, inserts it
+  before the neighbour (the neighbour's section wins over the grid's, should they differ), writes
+  the bucket densely and bumps the home; a drop that changes nothing, one before itself, or one
+  of or beside another home's card writes nothing and the member's board is redrawn so the
+  preview snaps back. The dragged card is checked against the *session's* home, not the card's:
+  every id in the drop comes from the browser, and an admin of one home must not be able to
+  arrange another's board by forging them. The 🙋 and ＋ tiles carry no id, so they can be neither lifted nor landed on.
+  Rotation is unaffected (`tasksInRotationOrder`), as for every other arrangement.
 - **The upgrade is invisible.** `sortOrder` lands on existing rows at 0, so the board query
   tie-breaks on `createdAt` and a home that never reorders anything keeps exactly the order it
   had. Renumbering is lazy and per-bucket — the first move in a group is what gives it real
@@ -625,6 +653,10 @@ message and shows a matching badge on the card (`LockReason`):
     tier's credits are awarded. Celebration toasts announce both.
 - **Spree tiers** (admin): list of `days → credits` rows, addable/deletable.
 - **Balance** = earned − redeemed, per member.
+- **On the card**: a chore with `creditValue > 0` carries a 💎 *n* pill under its name on the
+  board (`.card-credit`, the leaderboard's yellow pill), so a member can see what a tap pays
+  before choosing. It sits inside the tap area — information, not a control — and a chore worth
+  nothing shows nothing, so a home that never uses credits sees the board it always had.
 - **Redemption** (admin): amount 1..balance with an optional note; recorded as a
   credit entry so history is auditable. Over-balance redemptions are rejected.
 
@@ -655,9 +687,28 @@ message and shows a matching badge on the card (`LockReason`):
   avoid a comparison per row already in memory, and it would cost the "one query for the working
   set" property `BoardRenderCostTest` pins.
 - **My stats** (any member): total approved; the period tiles; bar chart of my chores by type
-  under the lens; my feedback split; 7-day adherence; **12-week and 12-month trends**.
-- **Home stats** (admin): per-member and chore-popularity bars under the lens; feedback per chore;
-  14-day activity; **12-week and 12-month trends**; per-member adherence today.
+  under the lens; **💎 earned** (below); my feedback split; 7-day adherence; **12-week and
+  12-month trends**.
+- **💎 Diamonds I earned** (`StatsService.diamondStats`, one query for the member's own ledger):
+  the four headline totals — today / this week / this month / all time — as read-only tiles (the
+  picker's shape, no button role, no selected state) over a 7-day column trend. *Earned* only:
+  EARNED ledger rows including spree bonuses, bucketed by `createdAt` in the server zone, so a
+  credit lands on the day its completion was approved — the day the celebration toast announced
+  it. Redemptions never shrink it; the balance on the leaderboard is where spending shows. An
+  undone completion has its rows deleted, so the chart self-corrects. The card is hidden until
+  the member has ever earned a diamond, so a home that never uses credits sees no row of zeros.
+  Never narrowed by the lens, like the chore tiles beside it.
+- **Home stats** (admin): per-member bars under the lens; **what each member did** (below);
+  chore-popularity bars under the lens; feedback per chore; 14-day activity; **12-week and
+  12-month trends**; per-member adherence today.
+- **What each member did** (`HomeStats.perMemberChores`): every member's own "My chores" chart —
+  their chores by type in board order plus accepted other help — gathered in the same single pass
+  as the other home aggregates, so the admin sees for the whole family what each member sees for
+  themselves. One `Details` fold per member, summary "Name · total", **folded by default** (five
+  members would otherwise stack five bar charts on a phone before the trends); members with
+  nothing in the period get no fold, since the card ranks what was done and the adherence card is
+  the roll call. Which folds are open lives in a field on `StatsPanel`, so a `HomeState` redraw
+  keeps them open; it resets on navigation like the lens. Follows the lens.
 - **Twelve columns is the cap** (`StatsService.TREND_WEEKS`): that is what a ~360px phone column
   fits at a readable width, and the page must never scroll sideways. The axis carries digits —
   `15.6` for a week, the month *number* for a month — with the readable form in the tooltip,
@@ -1077,7 +1128,7 @@ scales up, not the other way round.
   `<html lang>` from the resolved locale.
 
 ## 5. Non-functional / technical
-- Vaadin 25.2 Flow + Spring Boot 4.1 (Java 21), H2 file DB (`data/`), server push
+- Vaadin 25.3 Flow + Spring Boot 4.1 (Java 25), H2 file DB (`data/`), server push
   (long-polling) + Vaadin Signals, installable PWA.
 - Charts, confetti and icons are self-contained (no external CDN, no licensed
   components).
@@ -1130,7 +1181,11 @@ scales up, not the other way round.
   the badge does), plus group CRUD, deleting a group keeping its chores and history, move-past-
   the-end being a no-op, buckets staying dense, a dangling groupId rendering as ungrouped, a
   cross-home group being refused, the legacy database keeping its exact order until something
-  moves, and groups round-tripping a backup (including a pre-groups file restoring ungrouped).
+  moves, and groups round-tripping a backup (including a pre-groups file restoring ungrouped);
+  and `placeChore` — before a neighbour, to a section's end, into another group via a neighbour,
+  into an empty group, a no-op drop (same slot, before itself, the last card to the end), another
+  home's neighbour refused, another home's *card* refused (the session's home scopes the drop),
+  and the rotation invariant again under drags.
 - **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest`,
   browserless): create-home flow navigates to the board with three tabs; join flow
   (two tabs, no Admin); PIN claim reveals the Admin tab; admin adds a chore from the
@@ -1142,8 +1197,17 @@ scales up, not the other way round.
   admin accepts it (counted) and promotes it to a chore, or declines it (no chore added); an
   admin logs a chore for another member from the Admin tab; an admin creates a chore group and the
   board shows it as a heading over its own grid while a home with no groups still renders one
-  unheaded grid; moving a chore up reorders the board; and the session lifetime is the member's
-  until the PIN is entered, and the admin's from then on.
+  unheaded grid; moving a chore up reorders the board; the board is `draggable` for the admin
+  only, with ids on chore cards and not on the 🙋/＋ tiles, and a drop handled by `ChoresPanel`
+  reorders the board for an admin and is thrown away for a member or when its ids belong to
+  another home; a chore's 💎 value shows on
+  its card and only there; the 💎 card on My stats appears once a diamond was earned and is not a
+  picker; the admin's Home stats fold each member's own chores and keep an open fold open across
+  a redraw; and the session lifetime is the member's until the PIN is entered, and the admin's
+  from then on.
+- **Statistics** (`StatsServiceTest`): my/home aggregates; 💎 earned follows an undo and ignores
+  redemptions, bucketed by the day the credit landed; each member's own bars in join order with
+  idle members skipped.
 - **Statistics periods** (`StatsPeriodTest`): yesterday counts in the week but not in today; the
   week starts Monday, matching the chore-master badge; REJECTED counts in no period; a
   **late-approved completion buckets by when it was done, not when it was approved**; the headline

@@ -51,6 +51,7 @@ import java.util.Optional;
 @PageTitle("FlashChores")
 @JsModule("./confetti.js")
 @JsModule("./list-swipe.js")
+@JsModule("./board-drag.js")
 public class HomeView extends VerticalLayout implements BeforeEnterObserver {
 
     private enum PanelTab { CHORES, LIST, STATS, ADMIN }

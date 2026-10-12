@@ -857,6 +857,11 @@ class AdminPanel extends VerticalLayout {
         Button add = new Button(T.tr("admin.addChore"), VaadinIcon.PLUS.create(), e -> choreDialog(null));
         add.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SMALL);
         s.add(add);
+        // The ↑/↓ items in each row's menu stay for keyboards; the gesture is where the board is.
+        Div hint = new Div();
+        hint.setText(T.tr("admin.chores.dragHint"));
+        hint.addClassNames("sub", "drag-hint");
+        s.add(hint);
 
         Map<Long, ChoreGroup> byId = new HashMap<>();
         groups.forEach(g -> byId.put(g.getId(), g));

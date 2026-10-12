@@ -1364,4 +1364,194 @@ class HomeUiTest extends SpringUIUnitTest {
 
         assertEquals(List.of("Alex", "Sam", "Kim"), leaderboardNames(), "ties keep the join order");
     }
+
+    // ---- 💎 on the card -------------------------------------------------------
+
+    /** A chore's reward shows on its card, so a member can see what a tap pays before tapping. */
+    @Test
+    void choreCard_showsItsCreditValue_andOnlyWhenItHasOne() {
+        Member alex = service.createHome("Shiny", "Alex");
+        String code = alex.getHomeCode();
+        service.addTask(code, "Clean the oven", "🧽", 0, 3);
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+
+        List<Span> pills = $(Span.class).all().stream()
+                .filter(sp -> sp.getClassNames().contains("card-credit") && usable(sp))
+                .toList();
+        assertEquals(1, pills.size(), "the eleven default chores pay nothing; only the oven does");
+        assertEquals("💎 3", pills.get(0).getText());
+        Div card = (Div) pills.get(0).getParent().orElseThrow().getParent().orElseThrow();
+        assertTrue(card.getElement().getTextRecursively().contains("Clean the oven"),
+                "the pill sits on the chore it belongs to");
+        assertTrue(pills.get(0).getParent().orElseThrow().getElement().getClassList()
+                .contains("complete-area"), "inside the tap area: tapping it logs the chore");
+
+        assertFalse($(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("help-card")
+                        || d.getClassNames().contains("add-card"))
+                .anyMatch(d -> d.getElement().getTextRecursively().contains("💎")),
+                "the 🙋 and ＋ tiles are not chores and carry no pill");
+    }
+
+    /** The 💎 card appears once there is something to show, as plain numbers rather than a
+     *  second lens picker. */
+    @Test
+    void myStats_showDiamondsEarned_onlyOnceAnyWereEarned() {
+        Member alex = service.createHome("Shiny", "Alex");
+        String code = alex.getHomeCode();
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Stats");
+        assertEquals(4, statTiles().size(), "no diamonds yet: the picker row only");
+
+        ChoreTask oven = service.addTask(code, "Clean the oven", "🧽", 0, 3);
+        service.complete(oven.getId(), alex.getId());
+        navigate(PrivacyView.class);
+        navigate(HomeView.class);
+        selectTab("Stats");
+
+        List<Div> readonly = $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("stat-tiles")
+                        && d.getClassNames().contains("readonly") && usable(d))
+                .toList();
+        assertEquals(1, readonly.size(), "one 💎 row");
+        List<Div> tiles = readonly.get(0).getChildren().map(Div.class::cast).toList();
+        assertEquals(4, tiles.size());
+        assertTrue(tiles.get(0).getElement().getTextRecursively().startsWith("3"),
+                "three diamonds today");
+        assertNull(tiles.get(0).getElement().getAttribute("role"),
+                "plain numbers, not a second picker");
+        assertTrue($(Div.class).all().stream().anyMatch(d ->
+                        d.getClassNames().contains("chart-title")
+                                && d.getElement().getTextRecursively().contains("Diamonds")),
+                "the card has its own title");
+    }
+
+    /** Home stats gives the admin every member's own "my chores" chart, folded per member. */
+    @Test
+    void homeStats_foldEachMembersOwnChores_andKeepAnOpenFoldOpenAcrossARedraw() {
+        Member alex = service.createHome("Numbers", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        service.joinHome(code, "Kim").orElseThrow();
+        List<ChoreTask> tasks = service.tasksOf(code);
+        service.complete(tasks.get(0).getId(), alex.getId());
+        service.complete(tasks.get(0).getId(), sam.getId());
+        service.complete(tasks.get(1).getId(), sam.getId());
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Stats");
+        Tabs sub = $(Tabs.class).all().get(1);
+        sub.setSelectedTab(sub.getChildren().filter(Tab.class::isInstance).map(Tab.class::cast)
+                .filter(t -> t.getElement().getTextRecursively().contains("Home stats"))
+                .findFirst().orElseThrow());
+
+        List<Details> folds = memberFolds();
+        assertEquals(List.of("Alex · 1", "Sam · 2"),
+                folds.stream().map(Details::getSummaryText).toList(),
+                "one fold per member who did something; Kim did nothing");
+        assertTrue(folds.stream().noneMatch(Details::isOpened), "folded by default");
+        assertTrue(folds.get(1).getElement().getTextRecursively()
+                .contains(tasks.get(1).getName()), "Sam's fold holds Sam's own bars");
+
+        // Open Sam's, then let a change in the home redraw the panel (HomeView calls refresh()
+        // on every HomeState bump): the fold the admin opened stays open, and the data is new.
+        Details samFold = folds.get(1);
+        samFold.setOpened(true);
+        ComponentUtil.fireEvent(samFold, new Details.OpenedChangeEvent(samFold, true));
+        service.complete(tasks.get(2).getId(), sam.getId());
+        $(StatsPanel.class).first().refresh();
+
+        folds = memberFolds();
+        assertEquals("Sam · 3", folds.get(1).getSummaryText(), "the new chore counts");
+        assertTrue(folds.get(1).isOpened(), "and the fold did not snap shut");
+        assertFalse(folds.get(0).isOpened());
+    }
+
+    private List<Details> memberFolds() {
+        return $(Details.class).all().stream()
+                .filter(d -> d.getClassNames().contains("member-chores") && usable(d))
+                .toList();
+    }
+
+    // ---- hold-and-drag to arrange the board ---------------------------------------
+
+    /** The gesture is wired for admins only, and only onto real chore cards. */
+    @Test
+    void board_isDraggableForTheAdmin_onChoreCardsOnly() {
+        Member alex = service.createHome("Arranged", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        Div board = boardSections();
+        assertTrue(board.getClassNames().contains("draggable"), "the admin may arrange the board");
+        List<Div> cards = $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("task-card") && usable(d)).toList();
+        assertEquals(11 + 2, cards.size(), "eleven chores plus 🙋 and ＋");
+        assertEquals(11, cards.stream()
+                .filter(d -> d.getElement().hasAttribute("data-task-id")).count(),
+                "every chore card carries its id — and nothing else does");
+        assertTrue($(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("task-grid") && usable(d))
+                .allMatch(d -> d.getElement().hasAttribute("data-group-id")),
+                "each grid names its section (blank for ungrouped)");
+
+        SessionContext.signIn(sam.getId(), code);
+        navigate(PrivacyView.class);
+        navigate(HomeView.class);
+        assertFalse(boardSections().getClassNames().contains("draggable"),
+                "a member's board is not arrangeable");
+    }
+
+    /** A drop lands where it was dropped, and a member's drop is thrown away. */
+    @Test
+    void droppingACard_reordersTheBoard_unlessYouAreNotTheAdmin() {
+        Member alex = service.createHome("Arranged", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        List<ChoreTask> before = service.tasksOf(code);
+        Long fifth = before.get(4).getId();
+        Long first = before.get(0).getId();
+
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        $(ChoresPanel.class).first().place(fifth, null, first);
+        List<ChoreTask> after = service.tasksOf(code);
+        assertEquals(fifth, after.get(0).getId(), "the dropped card leads the board");
+        assertEquals(first, after.get(1).getId());
+
+        SessionContext.signIn(sam.getId(), code);
+        navigate(PrivacyView.class);
+        navigate(HomeView.class);
+        $(ChoresPanel.class).first().place(first, null, fifth);
+        assertEquals(List.of(fifth, first),
+                service.tasksOf(code).subList(0, 2).stream().map(ChoreTask::getId).toList(),
+                "Sam is not the admin, so nothing moved");
+    }
+
+    /** An admin's drop carrying another home's ids is thrown away: the board is not theirs. */
+    @Test
+    void droppingAnotherHomesCard_isThrownAway() {
+        Member alex = service.createHome("Ours", "Alex");
+        String theirs = service.createHome("Theirs", "Sam").getHomeCode();
+        List<ChoreTask> theirBoard = service.tasksOf(theirs);
+        List<Long> theirOrder = theirBoard.stream().map(ChoreTask::getId).toList();
+
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+        $(ChoresPanel.class).first().place(theirOrder.get(theirOrder.size() - 1), null,
+                theirOrder.get(0));
+
+        assertEquals(theirOrder, service.tasksOf(theirs).stream().map(ChoreTask::getId).toList(),
+                "an admin of one home cannot arrange another home's board");
+    }
+
+    private Div boardSections() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("board-sections") && usable(d))
+                .findFirst().orElseThrow();
+    }
 }
