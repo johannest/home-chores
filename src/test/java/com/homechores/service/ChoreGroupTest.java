@@ -245,4 +245,145 @@ class ChoreGroupTest {
         assertNull(taskRepo.findById(t.getId()).orElseThrow().getGroupId(),
                 "a chore must never join another family's group");
     }
+
+    // ---- placeChore: where a drag drops a card ------------------------------
+
+    @Test
+    void placingAChoreBeforeAnother_movesItThere_andKeepsTheBucketDense() {
+        String code = service.createHome("Plain", "Alex").getHomeCode();
+        List<ChoreTask> all = service.tasksOf(code);
+        Long fifth = all.get(4).getId();
+        Long first = all.get(0).getId();
+
+        assertTrue(service.placeChore(fifth, null, first));
+
+        List<ChoreTask> after = service.tasksOf(code);
+        assertEquals(fifth, after.get(0).getId(), "dropped before the first card");
+        assertEquals(first, after.get(1).getId());
+        List<String> expected = new ArrayList<>(names(all));
+        expected.add(0, expected.remove(4));
+        assertEquals(expected, names(after), "everything else keeps its relative order");
+        for (int i = 0; i < after.size(); i++) {
+            assertEquals(i, after.get(i).getSortOrder(), "positions must be a dense 0..n-1");
+        }
+    }
+
+    @Test
+    void placingAChoreWithNoNeighbour_appendsItToThatSection() {
+        String code = service.createHome("Plain", "Alex").getHomeCode();
+        List<ChoreTask> all = service.tasksOf(code);
+        Long first = all.get(0).getId();
+
+        assertTrue(service.placeChore(first, null, null));
+
+        List<ChoreTask> after = service.tasksOf(code);
+        assertEquals(first, after.get(after.size() - 1).getId(), "now last");
+        assertEquals(names(all).subList(1, all.size()), names(after).subList(0, all.size() - 1));
+    }
+
+    @Test
+    void placingAChoreNextToACardInAnotherGroup_movesItIntoThatGroup() {
+        String code = service.createHome("Grouped", "Alex").getHomeCode();
+        ChoreGroup kitchen = service.addGroup(code, "Kitchen", "🍳");
+        List<ChoreTask> all = service.tasksOf(code);
+        Long a = all.get(0).getId();
+        Long b = all.get(1).getId();
+        service.setChoreGroup(a, kitchen.getId());
+        service.setChoreGroup(b, kitchen.getId());
+        Long late = all.get(7).getId();
+
+        // Dropped before b: the neighbour's section wins, whatever the caller said about the group.
+        assertTrue(service.placeChore(late, null, b));
+
+        assertEquals(kitchen.getId(), taskRepo.findById(late).orElseThrow().getGroupId());
+        List<ChoreTask> after = service.tasksOf(code);
+        assertEquals(List.of(a, late, b),
+                after.subList(0, 3).stream().map(ChoreTask::getId).toList(),
+                "the kitchen section leads the board: a, then the dropped card, then b");
+        assertEquals(List.of(0, 1, 2),
+                after.subList(0, 3).stream().map(ChoreTask::getSortOrder).toList());
+    }
+
+    @Test
+    void placingAChoreAtTheEndOfAnEmptyGroup_putsItThere() {
+        String code = service.createHome("Grouped", "Alex").getHomeCode();
+        ChoreGroup laundry = service.addGroup(code, "Laundry", "🧺");
+        List<ChoreTask> all = service.tasksOf(code);
+        Long moved = all.get(3).getId();
+
+        assertTrue(service.placeChore(moved, laundry.getId(), null));
+
+        ChoreTask t = taskRepo.findById(moved).orElseThrow();
+        assertEquals(laundry.getId(), t.getGroupId());
+        assertEquals(0, t.getSortOrder(), "first and only in its new section");
+        assertEquals(moved, service.tasksOf(code).get(0).getId(), "and the section leads the board");
+    }
+
+    @Test
+    void droppingACardWhereItWasPickedUp_changesNothing() {
+        String code = service.createHome("Plain", "Alex").getHomeCode();
+        List<ChoreTask> all = service.tasksOf(code);
+        Long second = all.get(1).getId();
+        Long third = all.get(2).getId();
+
+        assertFalse(service.placeChore(second, null, third), "before its own next card = same slot");
+        assertFalse(service.placeChore(second, null, second), "before itself");
+        assertFalse(service.placeChore(all.get(all.size() - 1).getId(), null, null),
+                "the last card to the end");
+        assertEquals(names(all), names(service.tasksOf(code)));
+    }
+
+    @Test
+    void placingNextToAnotherHomesCard_isRefused() {
+        String code = service.createHome("Ours", "Alex").getHomeCode();
+        String theirs = service.createHome("Theirs", "Sam").getHomeCode();
+        List<ChoreTask> ours = service.tasksOf(code);
+        Long stranger = service.tasksOf(theirs).get(0).getId();
+
+        assertFalse(service.placeChore(ours.get(3).getId(), null, stranger));
+        assertEquals(names(ours), names(service.tasksOf(code)), "nothing moved");
+        assertNull(taskRepo.findById(ours.get(3).getId()).orElseThrow().getGroupId());
+    }
+
+    /** The drag is one more way to arrange the board, so it gets the headline invariant too. */
+    @Test
+    void draggingChoresAround_doesNotChangeTodaysRotationAssignment() {
+        Member alex = service.createHome("Rotators", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        Home home = service.findHome(code).orElseThrow();
+        home.setDivisionStyle(DivisionStyle.ROTATING);
+        service.saveHome(home);
+        LocalDate today = LocalDate.now();
+        List<Long> before = List.of(
+                service.rotationAssignedChoreId(home, alex.getId(), today),
+                service.rotationAssignedChoreId(home, sam.getId(), today));
+
+        ChoreGroup kitchen = service.addGroup(code, "Kitchen", "🍳");
+        List<ChoreTask> all = service.tasksOf(code);
+        service.placeChore(all.get(5).getId(), kitchen.getId(), null);
+        service.placeChore(all.get(0).getId(), null, all.get(5).getId());
+        service.placeChore(all.get(9).getId(), null, all.get(1).getId());
+        assertFalse(names(service.tasksOf(code)).equals(names(service.tasksInRotationOrder(code))),
+                "the board order should actually have changed, or this test proves nothing");
+
+        assertEquals(before, List.of(
+                service.rotationAssignedChoreId(home, alex.getId(), today),
+                service.rotationAssignedChoreId(home, sam.getId(), today)),
+                "dragging cards about must not reassign anyone's day");
+    }
+
+    /** A new chore joins the end of its section even after the section has been renumbered. */
+    @Test
+    void aChoreAddedAfterAReorder_stillLandsLast() {
+        String code = service.createHome("Plain", "Alex").getHomeCode();
+        List<ChoreTask> all = service.tasksOf(code);
+        service.placeChore(all.get(4).getId(), null, all.get(0).getId()); // renumbers 0..10
+
+        ChoreTask oven = service.addTask(code, "Clean the oven", "🧽");
+
+        List<ChoreTask> after = service.tasksOf(code);
+        assertEquals(oven.getId(), after.get(after.size() - 1).getId(), "new chores go last");
+        assertEquals(all.size(), oven.getSortOrder(), "appended after a dense 0..n-1");
+    }
 }

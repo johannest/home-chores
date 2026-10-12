@@ -419,9 +419,26 @@ and the next interaction signs the phone straight back in.
 - **A group is a label, not a container.** Deleting one keeps every chore in it, and their whole
   history — they simply drop to the ungrouped section. The confirmation says so.
 - **Order** is `ChoreTask.sortOrder`, dense 0..n-1 within each group, arranged with ↑/↓ in the
-  Admin tab. Move up/down rather than drag-and-drop: the app is phone-first and HTML5 drag events
-  do not fire on mobile touch. Arrows are disabled at the ends of a bucket, not hidden, so rows
-  do not reflow as things move.
+  Admin tab or by **holding and dragging a card on the board**. Arrows are disabled at the ends
+  of a bucket, not hidden, so rows do not reflow as things move; they stay as the keyboard path.
+- **Hold-and-drag** (`board-drag.js`, admins only): hold a chore card still for 450 ms and it
+  lifts (a swell at 60 % of the hold says the hold is being noticed; a short vibration where the
+  device has one); drag it and the other cards reflow around the slot, like apps on a phone's
+  home screen; let go and it stays. Dropping it in another section moves it into that group.
+  Not HTML5 drag-and-drop, which does not fire on mobile touch: pointer events, with a
+  non-passive `touchmove` cancelled only while a card is lifted, so the board still scrolls under
+  a finger that starts on a card (`touch-action: pan-y`) and a move within the hold is a scroll,
+  not a lift. The DOM is moved only for the live preview; the drop dispatches `board-place` on
+  `.board-sections` with the dragged id, the target grid's group and the **next chore card's id**
+  (blank = the section's end). A neighbour rather than an index, because a filtered board shows a
+  subset of each section and "slot 3" would mean a different place on every lens. The server
+  re-checks that the sender is an admin — the `draggable` class is a hint to the browser, not an
+  authorisation — and `ChoreService.placeChore` removes the chore from its old bucket, inserts it
+  before the neighbour (the neighbour's section wins over the grid's, should they differ), writes
+  the bucket densely and bumps the home; a drop that changes nothing, one before itself, or one
+  beside another home's card writes nothing and the member's board is redrawn so the preview
+  snaps back. The 🙋 and ＋ tiles carry no id, so they can be neither lifted nor landed on.
+  Rotation is unaffected (`tasksInRotationOrder`), as for every other arrangement.
 - **The upgrade is invisible.** `sortOrder` lands on existing rows at 0, so the board query
   tie-breaks on `createdAt` and a home that never reorders anything keeps exactly the order it
   had. Renumbering is lazy and per-bucket — the first move in a group is what gives it real
@@ -1153,7 +1170,10 @@ scales up, not the other way round.
   the badge does), plus group CRUD, deleting a group keeping its chores and history, move-past-
   the-end being a no-op, buckets staying dense, a dangling groupId rendering as ungrouped, a
   cross-home group being refused, the legacy database keeping its exact order until something
-  moves, and groups round-tripping a backup (including a pre-groups file restoring ungrouped).
+  moves, and groups round-tripping a backup (including a pre-groups file restoring ungrouped);
+  and `placeChore` — before a neighbour, to a section's end, into another group via a neighbour,
+  into an empty group, a no-op drop (same slot, before itself, the last card to the end), another
+  home's neighbour refused, and the rotation invariant again under drags.
 - **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest`,
   browserless): create-home flow navigates to the board with three tabs; join flow
   (two tabs, no Admin); PIN claim reveals the Admin tab; admin adds a chore from the
@@ -1165,8 +1185,16 @@ scales up, not the other way round.
   admin accepts it (counted) and promotes it to a chore, or declines it (no chore added); an
   admin logs a chore for another member from the Admin tab; an admin creates a chore group and the
   board shows it as a heading over its own grid while a home with no groups still renders one
-  unheaded grid; moving a chore up reorders the board; and the session lifetime is the member's
-  until the PIN is entered, and the admin's from then on.
+  unheaded grid; moving a chore up reorders the board; the board is `draggable` for the admin
+  only, with ids on chore cards and not on the 🙋/＋ tiles, and a drop handled by `ChoresPanel`
+  reorders the board for an admin and is thrown away for a member; a chore's 💎 value shows on
+  its card and only there; the 💎 card on My stats appears once a diamond was earned and is not a
+  picker; the admin's Home stats fold each member's own chores and keep an open fold open across
+  a redraw; and the session lifetime is the member's until the PIN is entered, and the admin's
+  from then on.
+- **Statistics** (`StatsServiceTest`): my/home aggregates; 💎 earned follows an undo and ignores
+  redemptions, bucketed by the day the credit landed; each member's own bars in join order with
+  idle members skipped.
 - **Statistics periods** (`StatsPeriodTest`): yesterday counts in the week but not in today; the
   week starts Monday, matching the chore-master badge; REJECTED counts in no period; a
   **late-approved completion buckets by when it was done, not when it was approved**; the headline

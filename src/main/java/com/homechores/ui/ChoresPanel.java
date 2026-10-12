@@ -137,6 +137,46 @@ class ChoresPanel extends VerticalLayout {
         filterBar.setVisible(false);
         add(dailyStrip, doneTodayHolder, undoStrip, sectionLabel(T.tr("board.leaderboard")),
                 leaderboard, sectionLabel(T.tr("board.tapPrompt")), filterBar, board);
+
+        // Where a held-and-dragged card was let go (board-drag.js). The ids arrive as strings —
+        // an empty one means "no neighbour" / "ungrouped" — and the admin check is repeated here
+        // rather than trusted from the client: the class that enables the gesture is a hint to the
+        // browser, not an authorisation.
+        board.getElement().addEventListener("board-place", e -> place(
+                        parseId(e.getEventData().path("event.detail.taskId").asString()),
+                        parseId(e.getEventData().path("event.detail.groupId").asString()),
+                        parseId(e.getEventData().path("event.detail.beforeTaskId").asString())))
+                .addEventData("event.detail.taskId")
+                .addEventData("event.detail.groupId")
+                .addEventData("event.detail.beforeTaskId");
+    }
+
+    /**
+     * Puts a dragged chore where it was dropped: into the section {@code groupId} names, before
+     * {@code beforeTaskId} (null = that section's end). Admins only — a member's drop is ignored,
+     * and their board is redrawn so the card snaps back to where the home has it.
+     */
+    void place(Long taskId, Long groupId, Long beforeTaskId) {
+        boolean admin = service.findMember(memberId).map(Member::isAdmin).orElse(false);
+        if (!admin || taskId == null) {
+            refresh();
+            return;
+        }
+        if (!service.placeChore(taskId, groupId, beforeTaskId)) {
+            refresh(); // nothing changed server-side, so no push: undo the preview by hand
+        }
+        // Otherwise the HomeState bump redraws this board along with everyone else's.
+    }
+
+    private static Long parseId(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(raw.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private Div sectionLabel(String text) {
@@ -320,6 +360,15 @@ class ChoresPanel extends VerticalLayout {
 
         renderFilters(chips, admin);
 
+        // The long-press drag (board-drag.js) is an admin's gesture: board order is the home's
+        // setting (SPEC §4.2b), and a child shuffling the family's board would be a surprise for
+        // everyone else's phone.
+        if (admin) {
+            board.addClassName("draggable");
+        } else {
+            board.removeClassName("draggable");
+        }
+
         // Grouping happens strictly AFTER selection, so the "never render an empty board" reset
         // above still reasons over the flat list and is unaffected by any of this.
         List<ChoreGroup> groups = service.groupsOf(homeCode);
@@ -353,7 +402,8 @@ class ChoresPanel extends VerticalLayout {
         for (ChoreGroup g : groups) {
             List<TaskView> bucket = buckets.get(g.getId());
             if (!bucket.isEmpty()) { // an empty group is not a heading over nothing
-                board.add(groupHeading(g.display()), gridOf(bucket, rotating, admin, List.of()));
+                board.add(groupHeading(g.display()),
+                        gridOf(bucket, rotating, admin, List.of(), g.getId()));
             }
         }
         if (!ungrouped.isEmpty() || !extras.isEmpty()) {
@@ -361,7 +411,7 @@ class ChoresPanel extends VerticalLayout {
             if (anyGroupShown && !ungrouped.isEmpty()) {
                 board.add(groupHeading(T.tr("board.group.ungrouped")));
             }
-            board.add(gridOf(ungrouped, rotating, admin, extras));
+            board.add(gridOf(ungrouped, rotating, admin, extras, null));
         }
     }
 
@@ -373,9 +423,11 @@ class ChoresPanel extends VerticalLayout {
     }
 
     private Div gridOf(List<TaskView> views, boolean rotating, boolean admin,
-                       List<Component> extras) {
+                       List<Component> extras, Long groupId) {
         Div grid = new Div();
         grid.addClassName("task-grid");
+        // Which section a dropped card lands in; empty for the ungrouped grid.
+        grid.getElement().setAttribute("data-group-id", groupId == null ? "" : String.valueOf(groupId));
         views.forEach(v -> grid.add(taskCard(v, rotating, admin)));
         extras.forEach(grid::add);
         return grid;
@@ -481,6 +533,8 @@ class ChoresPanel extends VerticalLayout {
     private Div taskCard(TaskView view, boolean rotating, boolean admin) {
         Div card = new Div();
         card.addClassName("task-card");
+        // Only real chores carry the id: it is what makes a card liftable and landable-on.
+        card.getElement().setAttribute("data-task-id", String.valueOf(view.task().getId()));
         if (view.lockedForMe()) {
             card.addClassName("locked");
         }

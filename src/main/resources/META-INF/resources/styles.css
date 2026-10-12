@@ -521,6 +521,50 @@ vaadin-checkbox-group::part(group-field) {
     cursor: not-allowed;
 }
 
+/* ---- Hold-and-drag to arrange the board (board-drag.js, admins only) ---- */
+/* pan-y, not none: the board must still scroll under a finger that starts on a card — which is
+   most fingers, the cards being most of the screen. Once a card is lifted the script cancels
+   touchmove itself. No callout: iOS would otherwise open its link/image sheet over the hold. */
+.board-sections.draggable .task-card[data-task-id] {
+    touch-action: pan-y;
+    -webkit-touch-callout: none;
+}
+/* The hold being noticed: the card swells a touch before it lifts. */
+.task-card.lifting {
+    transform: scale(1.04);
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18);
+    border-color: var(--lumo-primary-color-50pct);
+}
+.task-card.lifting:active {
+    transform: scale(1.04); /* not the press animation: this is not a tap */
+}
+/* Where the card will land: it stays in the grid at reduced presence so the others reflow
+   around the slot, exactly as a phone's home screen does. */
+.task-card.drag-placeholder {
+    opacity: 0.35;
+    border-style: dashed;
+    transform: none;
+    box-shadow: none;
+}
+/* The card under the finger: a fixed clone the page scrolls beneath. */
+.drag-ghost {
+    position: fixed;
+    top: 0;
+    left: 0;
+    margin: 0;
+    z-index: 1000;
+    pointer-events: none;
+    opacity: 0.92;
+    transform-origin: center;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.25);
+    border-color: var(--lumo-primary-color);
+}
+body.board-dragging {
+    user-select: none;
+    -webkit-user-select: none;
+    overscroll-behavior: contain;
+}
+
 .task-card.add-card {
     border-style: dashed;
     border-width: 2px;
@@ -1238,6 +1282,7 @@ vaadin-checkbox-group::part(group-field) {
 .swipe-actions .swipe-delete { background: var(--lumo-error-color); }
 @media (prefers-reduced-motion: reduce) {
     .list-item .swipe-face { transition: none; }
+    .task-card.lifting, .task-card.drag-placeholder, .drag-ghost { transition: none; }
 }
 .list-row .list-text.done {
     text-decoration: line-through;

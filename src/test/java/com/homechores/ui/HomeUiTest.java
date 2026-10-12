@@ -1474,4 +1474,67 @@ class HomeUiTest extends SpringUIUnitTest {
                 .filter(d -> d.getClassNames().contains("member-chores") && usable(d))
                 .toList();
     }
+
+    // ---- hold-and-drag to arrange the board ---------------------------------------
+
+    /** The gesture is wired for admins only, and only onto real chore cards. */
+    @Test
+    void board_isDraggableForTheAdmin_onChoreCardsOnly() {
+        Member alex = service.createHome("Arranged", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        Div board = boardSections();
+        assertTrue(board.getClassNames().contains("draggable"), "the admin may arrange the board");
+        List<Div> cards = $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("task-card") && usable(d)).toList();
+        assertEquals(11 + 2, cards.size(), "eleven chores plus 🙋 and ＋");
+        assertEquals(11, cards.stream()
+                .filter(d -> d.getElement().hasAttribute("data-task-id")).count(),
+                "every chore card carries its id — and nothing else does");
+        assertTrue($(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("task-grid") && usable(d))
+                .allMatch(d -> d.getElement().hasAttribute("data-group-id")),
+                "each grid names its section (blank for ungrouped)");
+
+        SessionContext.signIn(sam.getId(), code);
+        navigate(PrivacyView.class);
+        navigate(HomeView.class);
+        assertFalse(boardSections().getClassNames().contains("draggable"),
+                "a member's board is not arrangeable");
+    }
+
+    /** A drop lands where it was dropped, and a member's drop is thrown away. */
+    @Test
+    void droppingACard_reordersTheBoard_unlessYouAreNotTheAdmin() {
+        Member alex = service.createHome("Arranged", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        List<ChoreTask> before = service.tasksOf(code);
+        Long fifth = before.get(4).getId();
+        Long first = before.get(0).getId();
+
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        $(ChoresPanel.class).first().place(fifth, null, first);
+        List<ChoreTask> after = service.tasksOf(code);
+        assertEquals(fifth, after.get(0).getId(), "the dropped card leads the board");
+        assertEquals(first, after.get(1).getId());
+
+        SessionContext.signIn(sam.getId(), code);
+        navigate(PrivacyView.class);
+        navigate(HomeView.class);
+        $(ChoresPanel.class).first().place(first, null, fifth);
+        assertEquals(List.of(fifth, first),
+                service.tasksOf(code).subList(0, 2).stream().map(ChoreTask::getId).toList(),
+                "Sam is not the admin, so nothing moved");
+    }
+
+    private Div boardSections() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("board-sections") && usable(d))
+                .findFirst().orElseThrow();
+    }
 }
