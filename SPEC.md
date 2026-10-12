@@ -670,8 +670,17 @@ message and shows a matching badge on the card (`LockReason`):
   undone completion has its rows deleted, so the chart self-corrects. The card is hidden until
   the member has ever earned a diamond, so a home that never uses credits sees no row of zeros.
   Never narrowed by the lens, like the chore tiles beside it.
-- **Home stats** (admin): per-member and chore-popularity bars under the lens; feedback per chore;
-  14-day activity; **12-week and 12-month trends**; per-member adherence today.
+- **Home stats** (admin): per-member bars under the lens; **what each member did** (below);
+  chore-popularity bars under the lens; feedback per chore; 14-day activity; **12-week and
+  12-month trends**; per-member adherence today.
+- **What each member did** (`HomeStats.perMemberChores`): every member's own "My chores" chart —
+  their chores by type in board order plus accepted other help — gathered in the same single pass
+  as the other home aggregates, so the admin sees for the whole family what each member sees for
+  themselves. One `Details` fold per member, summary "Name · total", **folded by default** (five
+  members would otherwise stack five bar charts on a phone before the trends); members with
+  nothing in the period get no fold, since the card ranks what was done and the adherence card is
+  the roll call. Which folds are open lives in a field on `StatsPanel`, so a `HomeState` redraw
+  keeps them open; it resets on navigation like the lens. Follows the lens.
 - **Twelve columns is the cap** (`StatsService.TREND_WEEKS`): that is what a ~360px phone column
   fits at a readable width, and the page must never scroll sideways. The axis carries digits —
   `15.6` for a week, the month *number* for a month — with the readable form in the tooltip,

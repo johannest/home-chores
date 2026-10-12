@@ -396,6 +396,8 @@ public class StatsService {
         LocalDate today = LocalDate.now();
 
         Map<Long, Long> approvedByMember = new HashMap<>();
+        Map<Long, Map<Long, Long>> byMemberByTask = new HashMap<>();
+        Map<Long, Long> otherHelpByMember = new HashMap<>();
         Map<Long, Long> todayByMember = new HashMap<>();
         Map<Long, Long> approvedByTask = new HashMap<>();
         Map<Long, long[]> feedbackByTaskId = new HashMap<>(); // [hate, ok, love]
@@ -447,8 +449,11 @@ public class StatsService {
             if (c.isOtherHelp()) {
                 // Accepted other help belongs in the picture, but has no chore to hang off.
                 otherHelp++;
+                otherHelpByMember.merge(c.getMemberId(), 1L, Long::sum);
             } else {
                 approvedByTask.merge(c.getTaskId(), 1L, Long::sum);
+                byMemberByTask.computeIfAbsent(c.getMemberId(), k -> new HashMap<>())
+                        .merge(c.getTaskId(), 1L, Long::sum);
             }
         }
 
@@ -460,6 +465,28 @@ public class StatsService {
             perMember.add(new CountBar(m.getName(), approvedByMember.getOrDefault(m.getId(), 0L)));
             adherence.add(new MemberDaily(m, todayByMember.getOrDefault(m.getId(), 0L),
                     home.getDailyTargetPerMember()));
+        }
+
+        // Every member's own "my chores" chart, for the admin: the same bars each member sees on
+        // their My stats, read off the per-member map in board order. Members with nothing in
+        // the period are left out — the card is a ranking of what was done, not a roll call (the
+        // adherence card below is the roll call).
+        List<MemberChores> perMemberChores = new ArrayList<>(memberList.size());
+        for (Member m : memberList) {
+            long total = approvedByMember.getOrDefault(m.getId(), 0L);
+            if (total == 0) {
+                continue;
+            }
+            Map<Long, Long> theirs = byMemberByTask.getOrDefault(m.getId(), Map.of());
+            List<CountBar> bars = new ArrayList<>();
+            for (ChoreTask t : taskList) {
+                long n = theirs.getOrDefault(t.getId(), 0L);
+                if (n > 0) {
+                    bars.add(new CountBar(t.getEmoji() + " " + t.getName(), n));
+                }
+            }
+            perMemberChores.add(new MemberChores(m, bars,
+                    otherHelpByMember.getOrDefault(m.getId(), 0L), total));
         }
 
         List<CountBar> popularity = new ArrayList<>(taskList.size());
@@ -479,7 +506,7 @@ public class StatsService {
                 daySeries(perDay, today, 14), adherence, pending, otherHelp,
                 new PeriodCounts(dayCount, weekCount, monthCount, allTime),
                 weekSeries(perDay, today, TREND_WEEKS, loc),
-                monthSeries(perDay, today, TREND_MONTHS, loc));
+                monthSeries(perDay, today, TREND_MONTHS, loc), perMemberChores);
     }
 
     // ---- DTOs ---------------------------------------------------------------
@@ -500,6 +527,12 @@ public class StatsService {
     }
 
     public record MemberDaily(Member member, long doneToday, int target) {
+    }
+
+    /** One member's chores by type under the lens — their own "My chores" chart, for the admin.
+     *  {@code byChore} is in board order with zero rows dropped; {@code total} includes
+     *  {@code otherHelp}. Only members with {@code total > 0} are emitted. */
+    public record MemberChores(Member member, List<CountBar> byChore, long otherHelp, long total) {
     }
 
     /**
@@ -523,7 +556,8 @@ public class StatsService {
     }
 
     /**
-     * {@code perMember}, {@code chorePopularity} and {@code otherHelp} follow the selected lens;
+     * {@code perMember}, {@code perMemberChores}, {@code chorePopularity} and {@code otherHelp}
+     * follow the selected lens;
      * {@code counts}, {@code trend14}, both longer trends and {@code adherence} (which is about
      * today by definition) are always all-time facts. {@code feedbackByChore} likewise stays
      * all-time: it answers "which chore does this family hate", and a week's worth of reactions
@@ -533,6 +567,6 @@ public class StatsService {
                             List<ChoreFeedback> feedbackByChore, List<DayCount> trend14,
                             List<MemberDaily> adherence, long pending, long otherHelp,
                             PeriodCounts counts, List<PeriodBucket> byWeek,
-                            List<PeriodBucket> byMonth) {
+                            List<PeriodBucket> byMonth, List<MemberChores> perMemberChores) {
     }
 }

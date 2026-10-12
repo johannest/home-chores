@@ -217,4 +217,23 @@ class StatsPeriodTest {
         HomeStats all = stats.homeStats(code, Period.ALL, Locale.ENGLISH);
         assertEquals(2, all.perMember().stream().mapToLong(b -> b.value()).sum());
     }
+
+    /** The admin's per-member folds follow the lens like the bars beside them. */
+    @Test
+    void perMemberChoresFollowTheLens() {
+        Member alex = chores.createHome("Periods", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = chores.joinHome(code, "Sam").orElseThrow();
+        logOn(code, alex.getId(), 0, 0);
+        logOn(code, sam.getId(), 1, 40);
+
+        HomeStats today = stats.homeStats(code, Period.TODAY, Locale.ENGLISH);
+        assertEquals(List.of("Alex"),
+                today.perMemberChores().stream().map(r -> r.member().getName()).toList(),
+                "Sam's chore was forty days ago, so under Today Sam has no fold");
+
+        HomeStats all = stats.homeStats(code, Period.ALL, Locale.ENGLISH);
+        assertEquals(List.of("Alex", "Sam"),
+                all.perMemberChores().stream().map(r -> r.member().getName()).toList());
+    }
 }

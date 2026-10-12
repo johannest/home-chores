@@ -799,6 +799,15 @@ vaadin-checkbox-group::part(group-field) {
     color: var(--lumo-secondary-text-color);
 }
 
+/* The admin's per-member folds on Home stats: one line per member until opened. */
+.member-chores vaadin-details-summary {
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+.member-chores[opened] {
+    margin-bottom: var(--lumo-space-s);
+}
+
 .undo-strip {
     display: flex;
     align-items: center;

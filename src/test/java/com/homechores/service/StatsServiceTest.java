@@ -11,6 +11,7 @@ import com.homechores.domain.Member;
 import com.homechores.service.ChoreService.CompleteOutcome;
 import com.homechores.service.StatsService.DiamondStats;
 import com.homechores.service.StatsService.HomeStats;
+import com.homechores.service.StatsService.MemberChores;
 import com.homechores.service.StatsService.MyStats;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -119,5 +120,37 @@ class StatsServiceTest {
         assertEquals(5, d.earned().allTime(), "and the redemption did not shrink what was earned");
         assertEquals(5, d.last7().get(5).value(), "yesterday is the second-to-last column");
         assertEquals(2, creditService.balance(alex.getId()), "while the balance did go down");
+    }
+
+    // ---- each member's own chores, for the admin -------------------------------
+
+    @Test
+    void homeStats_carryEachMembersOwnChoreBars_inJoinOrder_skippingTheIdle() {
+        Member alex = chores.createHome("Nest", "Alex");
+        Member sam = chores.joinHome(alex.getHomeCode(), "Sam").orElseThrow();
+        chores.joinHome(alex.getHomeCode(), "Kim").orElseThrow(); // does nothing
+        List<ChoreTask> t = chores.tasksOf(alex.getHomeCode());
+
+        chores.complete(t.get(0).getId(), alex.getId());
+        chores.complete(t.get(0).getId(), sam.getId());
+        chores.complete(t.get(1).getId(), sam.getId());
+        chores.logOtherHelpAsAdmin(alex.getHomeCode(), alex.getId(), "Carried the shopping", 0);
+
+        List<MemberChores> rows = stats.homeStats(alex.getHomeCode()).perMemberChores();
+        assertEquals(List.of("Alex", "Sam"),
+                rows.stream().map(r -> r.member().getName()).toList(),
+                "join order, and Kim — who did nothing — has no fold");
+
+        MemberChores alexRow = rows.get(0);
+        assertEquals(1, alexRow.byChore().size(), "one chore type");
+        assertEquals(1, alexRow.otherHelp(), "plus the help the admin logged");
+        assertEquals(2, alexRow.total(), "the total counts both");
+
+        MemberChores samRow = rows.get(1);
+        assertEquals(2, samRow.byChore().size(), "two distinct chores");
+        assertEquals(t.get(0).getEmoji() + " " + t.get(0).getName(), samRow.byChore().get(0).label(),
+                "bars in board order, like the member's own chart");
+        assertEquals(0, samRow.otherHelp());
+        assertEquals(2, samRow.total());
     }
 }

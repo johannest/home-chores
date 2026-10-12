@@ -1427,4 +1427,51 @@ class HomeUiTest extends SpringUIUnitTest {
                                 && d.getElement().getTextRecursively().contains("Diamonds")),
                 "the card has its own title");
     }
+
+    /** Home stats gives the admin every member's own "my chores" chart, folded per member. */
+    @Test
+    void homeStats_foldEachMembersOwnChores_andKeepAnOpenFoldOpenAcrossARedraw() {
+        Member alex = service.createHome("Numbers", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        service.joinHome(code, "Kim").orElseThrow();
+        List<ChoreTask> tasks = service.tasksOf(code);
+        service.complete(tasks.get(0).getId(), alex.getId());
+        service.complete(tasks.get(0).getId(), sam.getId());
+        service.complete(tasks.get(1).getId(), sam.getId());
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Stats");
+        Tabs sub = $(Tabs.class).all().get(1);
+        sub.setSelectedTab(sub.getChildren().filter(Tab.class::isInstance).map(Tab.class::cast)
+                .filter(t -> t.getElement().getTextRecursively().contains("Home stats"))
+                .findFirst().orElseThrow());
+
+        List<Details> folds = memberFolds();
+        assertEquals(List.of("Alex · 1", "Sam · 2"),
+                folds.stream().map(Details::getSummaryText).toList(),
+                "one fold per member who did something; Kim did nothing");
+        assertTrue(folds.stream().noneMatch(Details::isOpened), "folded by default");
+        assertTrue(folds.get(1).getElement().getTextRecursively()
+                .contains(tasks.get(1).getName()), "Sam's fold holds Sam's own bars");
+
+        // Open Sam's, then let a change in the home redraw the panel (HomeView calls refresh()
+        // on every HomeState bump): the fold the admin opened stays open, and the data is new.
+        Details samFold = folds.get(1);
+        samFold.setOpened(true);
+        ComponentUtil.fireEvent(samFold, new Details.OpenedChangeEvent(samFold, true));
+        service.complete(tasks.get(2).getId(), sam.getId());
+        $(StatsPanel.class).first().refresh();
+
+        folds = memberFolds();
+        assertEquals("Sam · 3", folds.get(1).getSummaryText(), "the new chore counts");
+        assertTrue(folds.get(1).isOpened(), "and the fold did not snap shut");
+        assertFalse(folds.get(0).isOpened());
+    }
+
+    private List<Details> memberFolds() {
+        return $(Details.class).all().stream()
+                .filter(d -> d.getClassNames().contains("member-chores") && usable(d))
+                .toList();
+    }
 }

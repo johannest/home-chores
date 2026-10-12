@@ -7,11 +7,13 @@ import com.homechores.service.StatsService.ChoreFeedback;
 import com.homechores.service.StatsService.CountBar;
 import com.homechores.service.StatsService.DiamondStats;
 import com.homechores.service.StatsService.HomeStats;
+import com.homechores.service.StatsService.MemberChores;
 import com.homechores.service.StatsService.MemberDaily;
 import com.homechores.service.StatsService.MyStats;
 import com.homechores.service.StatsService.Period;
 import com.homechores.service.StatsService.PeriodCounts;
 import com.vaadin.flow.component.UI;
+import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.html.H2;
@@ -20,8 +22,10 @@ import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Locale;
 import java.util.List;
+import java.util.Map;
 
 /** Statistics: personal charts for everyone, plus home-wide charts for admins. */
 class StatsPanel extends VerticalLayout {
@@ -41,6 +45,11 @@ class StatsPanel extends VerticalLayout {
      * — which period one member is looking at is not the family's business.
      */
     private Period period = Period.WEEK;
+
+    /** Which members' folds the admin has opened on the Home tab — memberId → open. A field for
+     *  the same reason as the lens: the panel is rebuilt on every change in the home, and a fold
+     *  the admin just opened must not snap shut because somebody tapped a chore. */
+    private final Map<Long, Boolean> memberOpen = new HashMap<>();
 
     StatsPanel(StatsService stats, ChoreService service, String homeCode, Long memberId) {
         this.stats = stats;
@@ -217,6 +226,34 @@ class StatsPanel extends VerticalLayout {
         return all;
     }
 
+    /**
+     * Every member's own "my chores" chart, one fold each, for the admin. Folded by default:
+     * a family of five would otherwise stack five full bar charts on a phone before the trends.
+     * The summary carries the name and the total, so the folded card is already the ranking.
+     */
+    private Div perMemberChores(List<MemberChores> rows) {
+        Div holder = new Div();
+        if (rows.isEmpty()) {
+            holder.add(emptyPeriod());
+            return holder;
+        }
+        for (MemberChores mc : rows) {
+            Long id = mc.member().getId();
+            Details fold = new Details(mc.member().getName() + " · " + mc.total(),
+                    Charts.horizontalBars(withOtherHelp(mc.byChore(), mc.otherHelp())));
+            fold.addClassName("member-chores");
+            // setOpened before the listener, or the restore counts as the admin's own choice.
+            fold.setOpened(memberOpen.getOrDefault(id, false));
+            fold.addOpenedChangeListener(e -> {
+                if (e.isFromClient()) {
+                    memberOpen.put(id, e.isOpened());
+                }
+            });
+            holder.add(fold);
+        }
+        return holder;
+    }
+
     private void renderHome() {
         HomeStats s = stats.homeStats(homeCode, period, UI.getCurrent().getLocale());
 
@@ -231,6 +268,8 @@ class StatsPanel extends VerticalLayout {
         String lens = T.tr("stats.period." + period.name().toLowerCase(Locale.ROOT));
         body.add(Charts.card(T.tr("stats.perMember.period", lens),
                 Charts.horizontalBars(s.perMember())));
+        body.add(Charts.card(T.tr("stats.perMemberChores.period", lens),
+                perMemberChores(s.perMemberChores())));
         body.add(Charts.card(T.tr("stats.popularity.period", lens), Charts.horizontalBars(
                 withOtherHelp(s.chorePopularity(), s.otherHelp()))));
 
