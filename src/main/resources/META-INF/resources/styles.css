@@ -435,10 +435,12 @@ vaadin-checkbox-group::part(group-field) {
 
 /* The chore's reward, under its name. The same yellow pill as the leaderboard's 💎 balance, so
    the two read as the same currency. In flow rather than in a corner: top-left is the snooze
-   chip and top-right the status badge, and a 136px phone card has no third corner to spare. */
+   chip and top-right the status badge, and a 136px phone card has no third corner to spare.
+   30% lightness, not 38%: at this size the text needs 4.5:1 on the tinted pill, and 38% gave
+   3.3 (docs/UX-REVIEW-2026-09-16.md); 30% gives 4.9. */
 .task-card .card-credit {
     background: hsla(45, 100%, 51%, 0.18);
-    color: light-dark(hsl(38, 92%, 38%), hsl(45, 95%, 65%));
+    color: light-dark(hsl(38, 92%, 30%), hsl(45, 95%, 65%));
     border-radius: 999px;
     padding: 1px 7px;
     font-size: 0.72rem;
@@ -712,7 +714,7 @@ body.board-dragging {
 
 .member-chip .credit-chip {
     background: hsla(45, 100%, 51%, 0.18);
-    color: light-dark(hsl(38, 92%, 38%), hsl(45, 95%, 65%));
+    color: light-dark(hsl(38, 92%, 30%), hsl(45, 95%, 65%)); /* 4.9:1, see .card-credit */
     border-radius: 999px;
     padding: 1px 9px;
     font-size: 0.8rem;
@@ -841,6 +843,11 @@ body.board-dragging {
     font-size: 0.85rem;
     font-weight: 700;
     color: var(--lumo-secondary-text-color);
+}
+
+/* The Admin tab's one-line reminder that the board itself is where chores are arranged. */
+.drag-hint {
+    margin: var(--lumo-space-xs) 0 var(--lumo-space-s);
 }
 
 /* The admin's per-member folds on Home stats: one line per member until opened. */

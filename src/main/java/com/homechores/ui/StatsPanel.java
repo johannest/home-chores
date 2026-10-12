@@ -22,10 +22,10 @@ import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 
 /** Statistics: personal charts for everyone, plus home-wide charts for admins. */
 class StatsPanel extends VerticalLayout {
@@ -46,10 +46,10 @@ class StatsPanel extends VerticalLayout {
      */
     private Period period = Period.WEEK;
 
-    /** Which members' folds the admin has opened on the Home tab — memberId → open. A field for
+    /** Which members' folds the admin has opened on the Home tab, by member id. A field for
      *  the same reason as the lens: the panel is rebuilt on every change in the home, and a fold
      *  the admin just opened must not snap shut because somebody tapped a chore. */
-    private final Map<Long, Boolean> memberOpen = new HashMap<>();
+    private final Set<Long> memberOpen = new HashSet<>();
 
     StatsPanel(StatsService stats, ChoreService service, String homeCode, Long memberId) {
         this.stats = stats;
@@ -243,10 +243,14 @@ class StatsPanel extends VerticalLayout {
                     Charts.horizontalBars(withOtherHelp(mc.byChore(), mc.otherHelp())));
             fold.addClassName("member-chores");
             // setOpened before the listener, or the restore counts as the admin's own choice.
-            fold.setOpened(memberOpen.getOrDefault(id, false));
+            fold.setOpened(memberOpen.contains(id));
             fold.addOpenedChangeListener(e -> {
                 if (e.isFromClient()) {
-                    memberOpen.put(id, e.isOpened());
+                    if (e.isOpened()) {
+                        memberOpen.add(id);
+                    } else {
+                        memberOpen.remove(id);
+                    }
                 }
             });
             holder.add(fold);

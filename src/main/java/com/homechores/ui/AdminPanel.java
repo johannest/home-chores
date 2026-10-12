@@ -860,8 +860,7 @@ class AdminPanel extends VerticalLayout {
         // The ↑/↓ items in each row's menu stay for keyboards; the gesture is where the board is.
         Div hint = new Div();
         hint.setText(T.tr("admin.chores.dragHint"));
-        hint.addClassName("sub");
-        hint.getStyle().set("margin", "var(--lumo-space-xs) 0 var(--lumo-space-s)");
+        hint.addClassNames("sub", "drag-hint");
         s.add(hint);
 
         Map<Long, ChoreGroup> byId = new HashMap<>();

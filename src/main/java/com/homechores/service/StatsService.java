@@ -311,11 +311,6 @@ public class StatsService {
 
     // ---- Diamonds ("My stats") ---------------------------------------------
 
-    /** All-time-and-today, for callers with no clock of their own. */
-    public DiamondStats diamondStats(Long memberId) {
-        return diamondStats(memberId, LocalDate.now());
-    }
-
     /**
      * What one member has <em>earned</em> in 💎, from a single query for their own ledger.
      *

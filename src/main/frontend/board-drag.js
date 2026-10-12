@@ -12,7 +12,8 @@
 // Pointer events for touch, pen and mouse alike. A HOLD of 450ms is what separates the three
 // things a finger on a card can mean: a tap completes, a move within the hold scrolls, a still
 // hold lifts. Once lifted, touchmove is cancelled (non-passive) so the page stops panning under
-// the drag; before that the browser scrolls as it always has.
+// the drag; that listener exists only for the lifetime of a drag, so before the lift — and on
+// every member's phone, where nothing ever lifts — the browser scrolls as it always has.
 (() => {
     if (window.__boardDrag) {
         return;
@@ -24,7 +25,7 @@
     const EDGE = 60;         // px from the viewport edge where the page auto-scrolls
     const SCROLL_STEP = 14;  // px per frame of auto-scroll
 
-    let pending = null;      // { card, x0, y0, timer, pointerId }
+    let pending = null;      // { card, x0, y0, timer }
     let drag = null;         // { card, ghost, x, y, dx, dy, raf, beforeId, groupId }
 
     const cardAt = (target) => {
@@ -54,10 +55,16 @@
         };
     };
 
+    // Non-passive on purpose: while a card is lifted the page must stop panning under it.
+    // Attached at lift and removed at finish, never left on the document: a non-passive
+    // touchmove listener makes every scroll wait for it, and most phones never drag.
+    const blockPan = (e) => e.preventDefault();
+
     const lift = () => {
         const { card, x0, y0 } = pending;
         pending = null;
         navigator.vibrate?.(15);
+        document.addEventListener('touchmove', blockPan, { passive: false });
 
         const rect = card.getBoundingClientRect();
         const ghost = card.cloneNode(true);
@@ -167,6 +174,7 @@
         const { card, ghost, originBefore, originGroup, originParent, originNext } = drag;
         cancelAnimationFrame(drag.raf);
         drag = null;
+        document.removeEventListener('touchmove', blockPan);
         ghost.remove();
         card.classList.remove('drag-placeholder', 'lifting');
         document.body.classList.remove('board-dragging');
@@ -205,7 +213,7 @@
         }
         clearPending();
         pending = {
-            card, x0: e.clientX, y0: e.clientY, pointerId: e.pointerId,
+            card, x0: e.clientX, y0: e.clientY,
             timer: setTimeout(() => {
                 if (pending) {
                     lift();
@@ -243,14 +251,6 @@
             drag.raf = requestAnimationFrame(autoScroll);
         }
     }, { passive: true });
-
-    // Non-passive on purpose: once a card is lifted the page must stop panning under it. Before
-    // the lift this does nothing, so scrolling the board stays native.
-    document.addEventListener('touchmove', (e) => {
-        if (drag) {
-            e.preventDefault();
-        }
-    }, { passive: false });
 
     document.addEventListener('pointerup', () => {
         if (pending) {
