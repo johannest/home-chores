@@ -1364,4 +1364,33 @@ class HomeUiTest extends SpringUIUnitTest {
 
         assertEquals(List.of("Alex", "Sam", "Kim"), leaderboardNames(), "ties keep the join order");
     }
+
+    // ---- 💎 on the card -------------------------------------------------------
+
+    /** A chore's reward shows on its card, so a member can see what a tap pays before tapping. */
+    @Test
+    void choreCard_showsItsCreditValue_andOnlyWhenItHasOne() {
+        Member alex = service.createHome("Shiny", "Alex");
+        String code = alex.getHomeCode();
+        service.addTask(code, "Clean the oven", "🧽", 0, 3);
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+
+        List<Span> pills = $(Span.class).all().stream()
+                .filter(sp -> sp.getClassNames().contains("card-credit") && usable(sp))
+                .toList();
+        assertEquals(1, pills.size(), "the eleven default chores pay nothing; only the oven does");
+        assertEquals("💎 3", pills.get(0).getText());
+        Div card = (Div) pills.get(0).getParent().orElseThrow().getParent().orElseThrow();
+        assertTrue(card.getElement().getTextRecursively().contains("Clean the oven"),
+                "the pill sits on the chore it belongs to");
+        assertTrue(pills.get(0).getParent().orElseThrow().getElement().getClassList()
+                .contains("complete-area"), "inside the tap area: tapping it logs the chore");
+
+        assertFalse($(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("help-card")
+                        || d.getClassNames().contains("add-card"))
+                .anyMatch(d -> d.getElement().getTextRecursively().contains("💎")),
+                "the 🙋 and ＋ tiles are not chores and carry no pill");
+    }
 }

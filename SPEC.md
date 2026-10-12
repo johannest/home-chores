@@ -625,6 +625,10 @@ message and shows a matching badge on the card (`LockReason`):
     tier's credits are awarded. Celebration toasts announce both.
 - **Spree tiers** (admin): list of `days → credits` rows, addable/deletable.
 - **Balance** = earned − redeemed, per member.
+- **On the card**: a chore with `creditValue > 0` carries a 💎 *n* pill under its name on the
+  board (`.card-credit`, the leaderboard's yellow pill), so a member can see what a tap pays
+  before choosing. It sits inside the tap area — information, not a control — and a chore worth
+  nothing shows nothing, so a home that never uses credits sees the board it always had.
 - **Redemption** (admin): amount 1..balance with an optional note; recorded as a
   credit entry so history is auditable. Over-balance redemptions are rejected.
 

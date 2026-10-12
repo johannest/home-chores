@@ -498,6 +498,19 @@ class ChoresPanel extends VerticalLayout {
         name.setText(view.task().getName());
         name.addClassName("name");
         completeArea.add(emoji, name);
+        // What the chore pays, on the card itself: the credit value used to be visible only in the
+        // Admin tab's edit dialog and in the celebration after the fact, so a member choosing what
+        // to do next could not tell a 💎 5 chore from a plain one. Inside the complete-area on
+        // purpose — it is information about the tap, not a second control, so tapping it logs the
+        // chore like tapping the name does. Zero stays blank: a home that never uses credits sees
+        // the board it always had.
+        int creditValue = view.task().getCreditValue();
+        if (creditValue > 0) {
+            Span credit = new Span("💎 " + creditValue);
+            credit.addClassName("card-credit");
+            credit.getElement().setAttribute("aria-label", T.tr("board.card.credits", creditValue));
+            completeArea.add(credit);
+        }
         Long taskId = view.task().getId();
         completeArea.addClickListener(e -> handleComplete(taskId));
         card.add(completeArea);
