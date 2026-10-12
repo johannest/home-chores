@@ -139,9 +139,9 @@ class ChoresPanel extends VerticalLayout {
                 leaderboard, sectionLabel(T.tr("board.tapPrompt")), filterBar, board);
 
         // Where a held-and-dragged card was let go (board-drag.js). The ids arrive as strings —
-        // an empty one means "no neighbour" / "ungrouped" — and the admin check is repeated here
-        // rather than trusted from the client: the class that enables the gesture is a hint to the
-        // browser, not an authorisation.
+        // an empty one means "no neighbour" / "ungrouped" — and both the admin check and the home
+        // are re-established here rather than trusted from the client: the class that enables the
+        // gesture is a hint to the browser, not an authorisation, and the ids could be anyone's.
         board.getElement().addEventListener("board-place", e -> place(
                         parseId(e.getEventData().path("event.detail.taskId").asString()),
                         parseId(e.getEventData().path("event.detail.groupId").asString()),
@@ -153,16 +153,16 @@ class ChoresPanel extends VerticalLayout {
 
     /**
      * Puts a dragged chore where it was dropped: into the section {@code groupId} names, before
-     * {@code beforeTaskId} (null = that section's end). Admins only — a member's drop is ignored,
-     * and their board is redrawn so the card snaps back to where the home has it.
+     * {@code beforeTaskId} (null = that section's end). Admins only — a member's drop is ignored
+     * outright: their board never lifts a card, so there is no preview to snap back, and an
+     * event forged from a member's browser earns no server work beyond this check.
      */
     void place(Long taskId, Long groupId, Long beforeTaskId) {
         boolean admin = service.findMember(memberId).map(Member::isAdmin).orElse(false);
         if (!admin || taskId == null) {
-            refresh();
             return;
         }
-        if (!service.placeChore(taskId, groupId, beforeTaskId)) {
+        if (!service.placeChore(homeCode, taskId, groupId, beforeTaskId)) {
             refresh(); // nothing changed server-side, so no push: undo the preview by hand
         }
         // Otherwise the HomeState bump redraws this board along with everyone else's.

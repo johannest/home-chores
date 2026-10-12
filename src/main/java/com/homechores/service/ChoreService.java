@@ -37,6 +37,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -887,17 +888,24 @@ public class ChoreService {
      * means the same slot whatever is hidden. When the two disagree the <em>neighbour's</em>
      * section wins — the member dropped the card next to it, which is where they are looking.
      *
+     * <p>{@code homeCode} is the <em>session's</em> home, not the card's: every id here arrives
+     * from the browser, and an admin of one home must not be able to arrange another home's
+     * board by forging them. A card outside that home — or one deleted mid-drag — is refused.
+     *
      * <p>False, and nothing written or bumped, when the drop changes nothing: the card was let
      * go where it was picked up, or beside a card from another home. The whole section is
      * renumbered densely afterwards, the same invariant {@link #moveChore} keeps.
      */
     @Transactional
-    public boolean placeChore(Long taskId, Long groupId, Long beforeTaskId) {
+    public boolean placeChore(String homeCode, Long taskId, Long groupId, Long beforeTaskId) {
         if (taskId.equals(beforeTaskId)) {
             return false; // "before itself" is where it already is, not "to the end"
         }
-        ChoreTask t = tasks.findById(taskId).orElseThrow();
-        String homeCode = t.getHomeCode();
+        ChoreTask t = tasks.findById(taskId).filter(x -> x.getHomeCode().equals(homeCode))
+                .orElse(null);
+        if (t == null) {
+            return false; // another home's card, or one that is gone: not ours to move
+        }
         ChoreTask before = null;
         Long target = liveGroup(homeCode, groupId);
         if (beforeTaskId != null) {
@@ -917,7 +925,7 @@ public class ChoreService {
             at = bucket.size();
         }
         bucket.add(at, t);
-        boolean sameGroup = java.util.Objects.equals(target, liveGroup(homeCode, t.getGroupId()));
+        boolean sameGroup = Objects.equals(target, liveGroup(homeCode, t.getGroupId()));
         if (sameGroup && was.equals(bucket.stream().map(ChoreTask::getId).toList())) {
             return false; // let go where it was picked up
         }
@@ -932,8 +940,8 @@ public class ChoreService {
     }
 
     /** {@code groupId} if it names one of this home's groups, else null (ungrouped) — the same
-     *  fallback {@link #tasksOf} applies to a dangling id, and the same refusal
-     *  {@link #applyGroup} gives another home's group. */
+     *  fallback {@link #tasksOf} applies to a dangling id; another home's group is refused the
+     *  same way. {@link #applyGroup} and {@link #placeChore} both resolve through here. */
     private Long liveGroup(String homeCode, Long groupId) {
         if (groupId == null) {
             return null;
@@ -962,13 +970,8 @@ public class ChoreService {
      * smaller surprise than throwing at the family's admin.
      */
     private void applyGroup(ChoreTask t, Long groupId) {
-        Long target = null;
-        if (groupId != null) {
-            target = groups.findById(groupId)
-                    .filter(g -> g.getHomeCode().equals(t.getHomeCode()))
-                    .map(ChoreGroup::getId).orElse(null);
-        }
-        if (java.util.Objects.equals(target, t.getGroupId())) {
+        Long target = liveGroup(t.getHomeCode(), groupId);
+        if (Objects.equals(target, t.getGroupId())) {
             return; // unchanged — leave the position alone
         }
         t.setGroupId(target);
@@ -984,7 +987,7 @@ public class ChoreService {
         for (ChoreTask t : tasks.findByHomeCodeOrderBySortOrderAscCreatedAtAscIdAsc(homeCode)) {
             Long effective = (t.getGroupId() != null && live.contains(t.getGroupId()))
                     ? t.getGroupId() : null;
-            if (java.util.Objects.equals(effective, groupId)) {
+            if (Objects.equals(effective, groupId)) {
                 out.add(t);
             }
         }

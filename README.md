@@ -30,16 +30,16 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Celebrations & feedback** | Confetti, a *"New chore unlocked!"* popup, trophy 🏆 milestones at **5/10/25/50/100/250**, and escalating daily praise: the 2nd chore of the day gets 💪, the 3rd+ gets 🔥 with double-burst side-cannon confetti. Every completion also asks *"How was it?"* — 😖 / 🙂 / 😍. |
 | **Today filter & done-today** | The board opens on a **Today** lens (anytime chores + interval chores that are due again; a weekly chore done recently stays parked), and a collapsible **"Done today (n)"** list under the progress ring shows who did what, home-wide. |
 | **Avatars & chore master** | Members pick an animal avatar from a CC0 set (Kenney's Animal Pack Redux, self-hosted — tap your own leaderboard chip), and last ISO week's most active member wears the **🥇 chore master** badge in the header. |
-| **Credits & rewards** | Chores can award **💎 credits** (great for challenging tasks), and admins can define **spree bonuses** (X days in a row → Y credits). Admins **redeem** credits for real-world rewards (e.g. movie night). Balances show on the leaderboard. |
+| **Credits & rewards** | Chores can award **💎 credits** (great for challenging tasks) — the value shows on the chore's card — and admins can define **spree bonuses** (X days in a row → Y credits). Admins **redeem** credits for real-world rewards (e.g. movie night). Balances show on the leaderboard. |
 | **Badge counter reset** | The number in each member's leaderboard chip starts over **every month** by default; admins can pick weekly, yearly or never, and press **Reset counters now**. Only that badge resets — statistics, milestones and credits always count everything. |
 | **Daily target** | The admin sets **1–3 chores expected per member per day** (default 1); each person sees a *done/target* progress ring. |
 | **Admin role (PIN)** | The creator is admin. Enter the admin PIN via **Admin?** in the header to (re)claim admin on any device. Admins can promote others. |
-| **Chore groups & order** | Admins can create groups (🍳 Kitchen, 🧺 Laundry) that become headings on the board, and move chores up/down within them (arrows, not dragging — the board lives on phones). Ungrouped chores sit under *Other chores*. Deleting a group keeps its chores. Rearranging is purely cosmetic: it never changes who the daily rotation assigns what to. |
+| **Chore groups & order** | Admins can create groups (🍳 Kitchen, 🧺 Laundry) that become headings on the board, and arrange them: **hold a card on the board and drag it** to where it belongs (into another group too), or use the ↑/↓ items in the Admin tab. Ungrouped chores sit under *Other chores*. Deleting a group keeps its chores. Rearranging is purely cosmetic: it never changes who the daily rotation assigns what to. |
 | **Admin CRUD** | Under the **Admin** tab: add/edit/delete chores (name, emoji, group, interval, credits, hours), rename/remove members, promote/demote admins, rename the home, change the PIN. |
 | **Optional approval** | Admins can require approval. Completions then wait as **pending** until an admin **approves** (counts) or **rejects** (discarded). A badge shows the pending count. |
 | **Shared lists** | A **Lists** tab with **Groceries**, **To-do** and **Dinner** for the whole family. Anyone adds a line, whoever is at the store ticks it off — nothing here is a chore, so ticking earns no credits and starts no streak. Ticked lines show struck through with who ticked them, can be unticked, and vanish after 24 h (or on **Clear done**). **Dinner** is a sliding window of today plus a full week: one free-text slot per day, labelled with the weekday, today highlighted; as days pass a new empty slot appears at the far end, and a Sunday plan still reaches next Sunday. Included in backups. |
 | **List reminders** | Tap 🔔 on a to-do or grocery line and pick *in 1 hour / tomorrow 9:00 / next week / next month*, or a date and time — one push notification naming the line goes to **everyone in the home**, and the line shows when it will fire. When it does, opening the app (or tapping the notification) shows the reminder with the same choices to **snooze** it, plus **Done** and **Dismiss** — so it works on iPhone too, where notifications have no buttons. Anyone can move or cancel it; ticking the line off clears it. Needs the same VAPID keys as the other reminders. |
-| **Statistics & charts** | The **Stats** tab opens on four counts side by side — **today, this week, this month, all time** — and tapping a count picks that period for the charts below. Personal charts (chores by type, feedback split, 7-day trend) plus **12-week and 12-month trends** for the longer view. Admins also get **Home stats**: per-member totals, chore popularity, feedback per chore, 14-day activity, daily-goal adherence. Charts are dependency-free (no licensed add-on). |
+| **Statistics & charts** | The **Stats** tab opens on four counts side by side — **today, this week, this month, all time** — and tapping a count picks that period for the charts below. Personal charts (chores by type, **💎 diamonds earned** today / this week / this month / all time with a 7-day trend, feedback split, 7-day trend) plus **12-week and 12-month trends** for the longer view. Admins also get **Home stats**: per-member totals, **what each member did** (every member's own chores-by-type chart, folded), chore popularity, feedback per chore, 14-day activity, daily-goal adherence. Charts are dependency-free (no licensed add-on). |
 | **Delete the home** | A **Danger zone** at the bottom of the Admin tab wipes the whole family — members, chores, completions, credits, settings. Confirmed by typing the home code, and it prompts for a backup first. Everyone still on the board is signed out live. |
 | **Retention (opt-in)** | Tracks when each home was last *used* (a chore, a review, opening the board — not background traffic). Three windows: `empty-home-hours` (72h in prod config) and `abandoned-home-days` purge homes that were never used (**no chore history and at most one member**); `inactive-home-days` (30 in prod config) additionally deletes **any** home nobody has used that long — after writing a full JSON safety export to `retention.export-dir` (the operator's undo; export failure keeps the home). `/terms` and `/privacy` state the windows automatically. Off when all are 0. |
 | **Backup / restore** | Admins can download a JSON backup of the whole family (settings, members, chores, groups and their order, completions, credits, spree tiers) and restore from one (replaces current data after a confirmation). |
@@ -375,6 +375,8 @@ src/main/resources/
 ├── META-INF/resources/styles.css # app styling (Lumo tweaks + components)
 └── META-INF/resources/icons/     # PWA icons + iOS splash screens (generated set)
 src/main/frontend/confetti.js     # self-contained confetti (no CDN)
+src/main/frontend/list-swipe.js   # swipe-to-reveal actions on list lines
+src/main/frontend/board-drag.js   # hold-and-drag to arrange the board (admins)
 src/test/java/com/homechores/     # JUnit service tests + Vaadin UI unit tests
 ```
 
@@ -394,6 +396,13 @@ test base class's `test(Chart)` overload resolves during JUnit scanning — the 
 uses Charts.)* `ArchitectureTest` (ArchUnit) pins the package layering and the coding
 conventions listed in SPEC §6, so a stray repository in a view or a Vaadin import in a
 service fails the build rather than a review.
+
+### Code review
+
+Every change is reviewed from a fixed set of personas before it is merged — project manager
+(spec and README stay the ground truth), security engineer (tenant isolation, no leaked
+data, availability), lead developer (clean and consistent code), mobile UX and
+accessibility, and QA. The checklist each one walks through lives in [`CLAUDE.md`](CLAUDE.md).
 
 ## Credits
 

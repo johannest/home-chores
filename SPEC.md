@@ -236,11 +236,20 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
 
 ### Phase 6
 
-- **US-50 Arrange the board.** As an admin, I can move a chore up or down so the board reads in
-  the order my family actually works through it, instead of the order the chores happened to be
-  created in. Arrows rather than dragging, because the board lives on phones. Rearranging is
-  purely cosmetic: it never changes who the rotation assigns what to (§4.5), and a home that
-  never touches it keeps exactly the order it had.
+- **US-50 Arrange the board.** As an admin, I can hold a chore card on the board and drag it to
+  where it belongs — into another group too — so the board reads in the order my family actually
+  works through it, instead of the order the chores happened to be created in; the Admin tab's
+  ↑/↓ stay as the keyboard path. Rearranging is purely cosmetic: it never changes who the
+  rotation assigns what to (§4.5), and a home that never touches it keeps exactly the order it
+  had.
+- **US-55 See what a chore pays.** As a family member choosing what to do next, I can see a
+  chore's 💎 value on its card, so a five-diamond chore stands out from a plain one before I tap.
+- **US-56 My diamonds.** As a family member, my statistics show the 💎 I *earned* today, this
+  week, this month and all time, with the last seven days as a trend — spending them is the
+  admin's business and shows on the leaderboard balance.
+- **US-57 What each member did.** As an admin, Home stats show every member's own chores-by-type
+  chart, folded one per member, so I can see for the whole family what each member sees for
+  themselves without asking around.
 - **US-52 See what I did today, this week, this month.** As a family member, my statistics open on
   a row of four counts — today, this week, this month, all time — and I can narrow the charts to
   any of them, so "am I keeping up?" is answerable at a glance instead of inferable from a 7-day
@@ -436,8 +445,10 @@ and the next interaction signs the phone straight back in.
   authorisation — and `ChoreService.placeChore` removes the chore from its old bucket, inserts it
   before the neighbour (the neighbour's section wins over the grid's, should they differ), writes
   the bucket densely and bumps the home; a drop that changes nothing, one before itself, or one
-  beside another home's card writes nothing and the member's board is redrawn so the preview
-  snaps back. The 🙋 and ＋ tiles carry no id, so they can be neither lifted nor landed on.
+  of or beside another home's card writes nothing and the member's board is redrawn so the
+  preview snaps back. The dragged card is checked against the *session's* home, not the card's:
+  every id in the drop comes from the browser, and an admin of one home must not be able to
+  arrange another's board by forging them. The 🙋 and ＋ tiles carry no id, so they can be neither lifted nor landed on.
   Rotation is unaffected (`tasksInRotationOrder`), as for every other arrangement.
 - **The upgrade is invisible.** `sortOrder` lands on existing rows at 0, so the board query
   tie-breaks on `createdAt` and a home that never reorders anything keeps exactly the order it
@@ -1117,7 +1128,7 @@ scales up, not the other way round.
   `<html lang>` from the resolved locale.
 
 ## 5. Non-functional / technical
-- Vaadin 25.2 Flow + Spring Boot 4.1 (Java 21), H2 file DB (`data/`), server push
+- Vaadin 25.3 Flow + Spring Boot 4.1 (Java 25), H2 file DB (`data/`), server push
   (long-polling) + Vaadin Signals, installable PWA.
 - Charts, confetti and icons are self-contained (no external CDN, no licensed
   components).
@@ -1173,7 +1184,8 @@ scales up, not the other way round.
   moves, and groups round-tripping a backup (including a pre-groups file restoring ungrouped);
   and `placeChore` — before a neighbour, to a section's end, into another group via a neighbour,
   into an empty group, a no-op drop (same slot, before itself, the last card to the end), another
-  home's neighbour refused, and the rotation invariant again under drags.
+  home's neighbour refused, another home's *card* refused (the session's home scopes the drop),
+  and the rotation invariant again under drags.
 - **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest`,
   browserless): create-home flow navigates to the board with three tabs; join flow
   (two tabs, no Admin); PIN claim reveals the Admin tab; admin adds a chore from the
@@ -1187,7 +1199,8 @@ scales up, not the other way round.
   board shows it as a heading over its own grid while a home with no groups still renders one
   unheaded grid; moving a chore up reorders the board; the board is `draggable` for the admin
   only, with ids on chore cards and not on the 🙋/＋ tiles, and a drop handled by `ChoresPanel`
-  reorders the board for an admin and is thrown away for a member; a chore's 💎 value shows on
+  reorders the board for an admin and is thrown away for a member or when its ids belong to
+  another home; a chore's 💎 value shows on
   its card and only there; the 💎 card on My stats appears once a diamond was earned and is not a
   picker; the admin's Home stats fold each member's own chores and keep an open fold open across
   a redraw; and the session lifetime is the member's until the PIN is entered, and the admin's

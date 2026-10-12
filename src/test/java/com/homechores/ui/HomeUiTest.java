@@ -1532,6 +1532,23 @@ class HomeUiTest extends SpringUIUnitTest {
                 "Sam is not the admin, so nothing moved");
     }
 
+    /** An admin's drop carrying another home's ids is thrown away: the board is not theirs. */
+    @Test
+    void droppingAnotherHomesCard_isThrownAway() {
+        Member alex = service.createHome("Ours", "Alex");
+        String theirs = service.createHome("Theirs", "Sam").getHomeCode();
+        List<ChoreTask> theirBoard = service.tasksOf(theirs);
+        List<Long> theirOrder = theirBoard.stream().map(ChoreTask::getId).toList();
+
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+        $(ChoresPanel.class).first().place(theirOrder.get(theirOrder.size() - 1), null,
+                theirOrder.get(0));
+
+        assertEquals(theirOrder, service.tasksOf(theirs).stream().map(ChoreTask::getId).toList(),
+                "an admin of one home cannot arrange another home's board");
+    }
+
     private Div boardSections() {
         return $(Div.class).all().stream()
                 .filter(d -> d.getClassNames().contains("board-sections") && usable(d))
