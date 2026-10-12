@@ -5,6 +5,7 @@ import com.homechores.service.ChoreService;
 import com.homechores.service.StatsService;
 import com.homechores.service.StatsService.ChoreFeedback;
 import com.homechores.service.StatsService.CountBar;
+import com.homechores.service.StatsService.DiamondStats;
 import com.homechores.service.StatsService.HomeStats;
 import com.homechores.service.StatsService.MemberDaily;
 import com.homechores.service.StatsService.MyStats;
@@ -109,6 +110,11 @@ class StatsPanel extends VerticalLayout {
         body.add(Charts.card(T.tr("stats.byChore.period", lens),
                 s.inPeriod() == 0 ? emptyPeriod()
                         : Charts.horizontalBars(withOtherHelp(s.byChore(), s.otherHelp()))));
+        if (s.diamonds().earned().allTime() > 0) {
+            // Only once the member has ever earned one: a home that never uses credits would
+            // otherwise see a card of four zeros over seven empty columns.
+            body.add(Charts.card(T.tr("stats.diamonds"), diamondsBody(s.diamonds())));
+        }
         body.add(Charts.card(T.tr("stats.feelings"), Charts.feedbackBar(s.feedback())));
         body.add(Charts.card(T.tr("stats.last7"), Charts.dayTrend(s.last7())));
         body.add(Charts.card(T.tr("stats.trendWeeks"), Charts.periodTrend(s.byWeek())));
@@ -164,6 +170,32 @@ class StatsPanel extends VerticalLayout {
         }
         period = p;
         renderBody(showHome);
+    }
+
+    /**
+     * 💎 earned today / this week / this month / all time, then the last seven days.
+     *
+     * <p>The same four tiles as {@link #headlineRow}, deliberately <em>not</em> the lens picker:
+     * these are plain numbers, so no button role, no focus stop and no selected state — a second
+     * row of tappable tiles with the same labels would be the redundancy the chip row was removed
+     * for. Earned only; the balance is on the leaderboard.
+     */
+    private static Div diamondsBody(DiamondStats d) {
+        Div row = new Div();
+        row.addClassNames("stat-tiles", "readonly");
+        for (Period p : Period.values()) {
+            Div tile = new Div();
+            tile.addClassName("stat-tile");
+            Span value = new Span(String.valueOf(d.earned().of(p)));
+            value.addClassName("stat-value");
+            Span label = new Span(T.tr("stats.headline." + p.name().toLowerCase(Locale.ROOT)));
+            label.addClassName("stat-label");
+            tile.add(value, label);
+            row.add(tile);
+        }
+        Div box = new Div(row);
+        box.add(Charts.dayTrend(d.last7()));
+        return box;
     }
 
     private static Paragraph emptyPeriod() {

@@ -1393,4 +1393,38 @@ class HomeUiTest extends SpringUIUnitTest {
                 .anyMatch(d -> d.getElement().getTextRecursively().contains("💎")),
                 "the 🙋 and ＋ tiles are not chores and carry no pill");
     }
+
+    /** The 💎 card appears once there is something to show, as plain numbers rather than a
+     *  second lens picker. */
+    @Test
+    void myStats_showDiamondsEarned_onlyOnceAnyWereEarned() {
+        Member alex = service.createHome("Shiny", "Alex");
+        String code = alex.getHomeCode();
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Stats");
+        assertEquals(4, statTiles().size(), "no diamonds yet: the picker row only");
+
+        ChoreTask oven = service.addTask(code, "Clean the oven", "🧽", 0, 3);
+        service.complete(oven.getId(), alex.getId());
+        navigate(PrivacyView.class);
+        navigate(HomeView.class);
+        selectTab("Stats");
+
+        List<Div> readonly = $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("stat-tiles")
+                        && d.getClassNames().contains("readonly") && usable(d))
+                .toList();
+        assertEquals(1, readonly.size(), "one 💎 row");
+        List<Div> tiles = readonly.get(0).getChildren().map(Div.class::cast).toList();
+        assertEquals(4, tiles.size());
+        assertTrue(tiles.get(0).getElement().getTextRecursively().startsWith("3"),
+                "three diamonds today");
+        assertNull(tiles.get(0).getElement().getAttribute("role"),
+                "plain numbers, not a second picker");
+        assertTrue($(Div.class).all().stream().anyMatch(d ->
+                        d.getClassNames().contains("chart-title")
+                                && d.getElement().getTextRecursively().contains("Diamonds")),
+                "the card has its own title");
+    }
 }

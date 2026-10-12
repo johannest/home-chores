@@ -659,7 +659,17 @@ message and shows a matching badge on the card (`LockReason`):
   avoid a comparison per row already in memory, and it would cost the "one query for the working
   set" property `BoardRenderCostTest` pins.
 - **My stats** (any member): total approved; the period tiles; bar chart of my chores by type
-  under the lens; my feedback split; 7-day adherence; **12-week and 12-month trends**.
+  under the lens; **💎 earned** (below); my feedback split; 7-day adherence; **12-week and
+  12-month trends**.
+- **💎 Diamonds I earned** (`StatsService.diamondStats`, one query for the member's own ledger):
+  the four headline totals — today / this week / this month / all time — as read-only tiles (the
+  picker's shape, no button role, no selected state) over a 7-day column trend. *Earned* only:
+  EARNED ledger rows including spree bonuses, bucketed by `createdAt` in the server zone, so a
+  credit lands on the day its completion was approved — the day the celebration toast announced
+  it. Redemptions never shrink it; the balance on the leaderboard is where spending shows. An
+  undone completion has its rows deleted, so the chart self-corrects. The card is hidden until
+  the member has ever earned a diamond, so a home that never uses credits sees no row of zeros.
+  Never narrowed by the lens, like the chore tiles beside it.
 - **Home stats** (admin): per-member and chore-popularity bars under the lens; feedback per chore;
   14-day activity; **12-week and 12-month trends**; per-member adherence today.
 - **Twelve columns is the cap** (`StatsService.TREND_WEEKS`): that is what a ~360px phone column

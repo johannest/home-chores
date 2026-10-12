@@ -951,6 +951,13 @@ vaadin-checkbox-group::part(group-field) {
     border-color: var(--lumo-primary-color);
     background: var(--lumo-primary-color-10pct);
 }
+/* The 💎 row reuses the tiles for their shape only — plain numbers, not a picker. */
+.stat-tiles.readonly .stat-tile {
+    cursor: default;
+}
+.stat-tiles.readonly .stat-tile:hover {
+    border-color: transparent;
+}
 .stat-value {
     font-size: 1.35rem;
     font-weight: 800;

@@ -5,6 +5,9 @@ import com.homechores.domain.ChoreTaskRepository;
 import com.homechores.domain.Completion;
 import com.homechores.domain.CompletionRepository;
 import com.homechores.domain.CompletionStatus;
+import com.homechores.domain.CreditEntry;
+import com.homechores.domain.CreditEntryRepository;
+import com.homechores.domain.CreditType;
 import com.homechores.domain.Feedback;
 import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
@@ -34,13 +37,16 @@ public class StatsService {
     private final MemberRepository members;
     private final ChoreTaskRepository tasks;
     private final CompletionRepository completions;
+    private final CreditEntryRepository credits;
 
     public StatsService(HomeRepository homes, MemberRepository members,
-                        ChoreTaskRepository tasks, CompletionRepository completions) {
+                        ChoreTaskRepository tasks, CompletionRepository completions,
+                        CreditEntryRepository credits) {
         this.homes = homes;
         this.members = members;
         this.tasks = tasks;
         this.completions = completions;
+        this.credits = credits;
     }
 
     /** How many columns a longer trend shows. Twelve is what fits a ~360px phone column at a
@@ -299,7 +305,57 @@ public class StatsService {
                 daySeries(perDay, today, 7), dayCount, home.getDailyTargetPerMember(), otherHelp,
                 new PeriodCounts(dayCount, weekCount, monthCount, totalApproved), inPeriod,
                 weekSeries(perDay, today, TREND_WEEKS, loc),
-                monthSeries(perDay, today, TREND_MONTHS, loc));
+                monthSeries(perDay, today, TREND_MONTHS, loc),
+                diamondStats(memberId, today));
+    }
+
+    // ---- Diamonds ("My stats") ---------------------------------------------
+
+    /** All-time-and-today, for callers with no clock of their own. */
+    public DiamondStats diamondStats(Long memberId) {
+        return diamondStats(memberId, LocalDate.now());
+    }
+
+    /**
+     * What one member has <em>earned</em> in 💎, from a single query for their own ledger.
+     *
+     * <p>Earned only: the question the users asked was "how many diamonds did I get today / this
+     * week", which a redemption does not change — spending them is the admin's line in the
+     * ledger, and the balance on the leaderboard already answers "how many do I have". Spree
+     * bonuses are EARNED rows and count. A completion that is undone has its rows deleted
+     * ({@code CreditService.deleteForCompletion}), so the totals correct themselves.
+     *
+     * <p>Bucketed by {@code createdAt} in the server zone: a credit lands the moment its
+     * completion is approved, so for a home with approval on a chore done last night and approved
+     * this morning pays today. That is the ledger's truth and what the celebration toast said, so
+     * the chart agrees with the toast rather than with the chore trend.
+     */
+    public DiamondStats diamondStats(Long memberId, LocalDate today) {
+        Map<LocalDate, Long> perDay = new HashMap<>();
+        long dayCount = 0;
+        long weekCount = 0;
+        long monthCount = 0;
+        long allTime = 0;
+        for (CreditEntry e : credits.findByMemberId(memberId)) {
+            if (e.getType() != CreditType.EARNED) {
+                continue;
+            }
+            LocalDate on = e.getCreatedAt().atZone(zone()).toLocalDate();
+            long n = e.getAmount();
+            perDay.merge(on, n, Long::sum);
+            allTime += n;
+            if (Period.TODAY.includes(on, today)) {
+                dayCount += n;
+            }
+            if (Period.WEEK.includes(on, today)) {
+                weekCount += n;
+            }
+            if (Period.MONTH.includes(on, today)) {
+                monthCount += n;
+            }
+        }
+        return new DiamondStats(new PeriodCounts(dayCount, weekCount, monthCount, allTime),
+                daySeries(perDay, today, 7));
     }
 
     /** The last {@code days} days ending today, zero-filled — a chart needs every column. */
@@ -450,15 +506,20 @@ public class StatsService {
      * {@code otherHelp} = approved help entries with no chore behind them; the view labels and
      * appends them, since "Other help" is UI wording rather than a stored name.
      *
-     * <p>{@code totalApproved}, {@code counts}, {@code doneToday} and both trends are always
-     * all-time facts, whatever lens is selected — a period narrows the bars, not the picture of
+     * <p>{@code totalApproved}, {@code counts}, {@code doneToday}, {@code diamonds} and both
+     * trends are always all-time facts, whatever lens is selected — a period narrows the bars, not the picture of
      * how the member is doing over time. {@code byChore}, {@code feedback}, {@code otherHelp} and
      * {@code inPeriod} follow the lens.
      */
     public record MyStats(long totalApproved, List<CountBar> byChore, FeedbackSplit feedback,
                           List<DayCount> last7, long doneToday, int target, long otherHelp,
                           PeriodCounts counts, long inPeriod, List<PeriodBucket> byWeek,
-                          List<PeriodBucket> byMonth) {
+                          List<PeriodBucket> byMonth, DiamondStats diamonds) {
+    }
+
+    /** 💎 earned under each headline period, plus the last seven days — always all-time facts,
+     *  never narrowed by the lens, like the chore tiles they sit beside. */
+    public record DiamondStats(PeriodCounts earned, List<DayCount> last7) {
     }
 
     /**
