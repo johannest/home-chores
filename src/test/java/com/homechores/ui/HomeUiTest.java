@@ -14,6 +14,7 @@ import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import com.homechores.domain.Season;
 import com.homechores.service.ChoreService;
+import com.homechores.service.CreditService;
 import com.homechores.service.ListItemService;
 import com.vaadin.flow.component.ClickEvent;
 import com.vaadin.flow.component.Component;
@@ -24,6 +25,7 @@ import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Image;
+import com.vaadin.flow.component.html.ListItem;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.menubar.MenuBar;
@@ -47,6 +49,8 @@ class HomeUiTest extends SpringUIUnitTest {
 
     @Autowired
     ChoreService service;
+    @Autowired
+    CreditService creditService;
 
     @Autowired
     CompletionRepository completions;
@@ -1426,6 +1430,65 @@ class HomeUiTest extends SpringUIUnitTest {
                         d.getClassNames().contains("chart-title")
                                 && d.getElement().getTextRecursively().contains("Diamonds")),
                 "the card has its own title");
+    }
+
+    /** The redeemed card appears once something was redeemed: earned · redeemed · balance as
+     *  plain tiles, then the rewards; the admin's Home stats list the same rows with names. */
+    @Test
+    void stats_showRedeemedDiamonds_onlyOnceAnyWereRedeemed_andNameThemForTheAdmin() {
+        Member alex = service.createHome("Shiny", "Alex");
+        String code = alex.getHomeCode();
+        ChoreTask oven = service.addTask(code, "Clean the oven", "🧽", 0, 5);
+        service.complete(oven.getId(), alex.getId());
+        service.complete(oven.getId(), alex.getId());
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Stats");
+        assertEquals(1, readonlyTileRows().size(), "earned, but nothing redeemed: one 💎 row");
+        assertTrue(redemptionRows().isEmpty());
+
+        creditService.redeem(code, alex.getId(), 7, "movie night", alex.getId());
+        navigate(PrivacyView.class);
+        navigate(HomeView.class);
+        selectTab("Stats");
+
+        List<Div> rows = readonlyTileRows();
+        assertEquals(2, rows.size(), "the earned row and the redeemed row");
+        List<String> tiles = rows.get(1).getChildren()
+                .map(t -> t.getElement().getTextRecursively()).toList();
+        assertEquals(3, tiles.size());
+        assertTrue(tiles.get(0).startsWith("10"), "earned");
+        assertTrue(tiles.get(1).startsWith("7"), "redeemed");
+        assertTrue(tiles.get(2).startsWith("3"), "and what is left");
+        assertTrue(rows.get(1).getChildren().allMatch(
+                t -> t.getElement().getAttribute("role") == null), "facts, not a picker");
+        List<ListItem> items = redemptionRows();
+        assertEquals(1, items.size());
+        String row = items.get(0).getElement().getTextRecursively();
+        assertTrue(row.contains("movie night") && row.contains("💎 7"), row);
+        assertFalse(row.contains("Alex"), "my own list needs no name");
+
+        Tabs sub = $(Tabs.class).all().get(1);
+        sub.setSelectedTab(sub.getChildren().filter(Tab.class::isInstance).map(Tab.class::cast)
+                .filter(t -> t.getElement().getTextRecursively().contains("Home stats"))
+                .findFirst().orElseThrow());
+        items = redemptionRows();
+        assertEquals(1, items.size(), "the admin's list has the same one row");
+        row = items.get(0).getElement().getTextRecursively();
+        assertTrue(row.contains("Alex · movie night") && row.contains("💎 7"), row);
+    }
+
+    private List<Div> readonlyTileRows() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("stat-tiles")
+                        && d.getClassNames().contains("readonly") && usable(d))
+                .toList();
+    }
+
+    private List<ListItem> redemptionRows() {
+        return $(ListItem.class).all().stream()
+                .filter(d -> d.getClassNames().contains("redemption-row") && usable(d))
+                .toList();
     }
 
     /** Home stats gives the admin every member's own "my chores" chart, folded per member. */

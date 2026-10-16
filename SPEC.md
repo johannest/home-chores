@@ -246,10 +246,15 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   chore's 💎 value on its card, so a five-diamond chore stands out from a plain one before I tap.
 - **US-56 My diamonds.** As a family member, my statistics show the 💎 I *earned* today, this
   week, this month and all time, with the last seven days as a trend — spending them is the
-  admin's business and shows on the leaderboard balance.
+  admin's business and has its own card (US-58).
 - **US-57 What each member did.** As an admin, Home stats show every member's own chores-by-type
   chart, folded one per member, so I can see for the whole family what each member sees for
   themselves without asking around.
+- **US-58 What I redeemed.** As a family member who earns a lot and cashes it in often, my
+  statistics show what I *redeemed* — earned, redeemed and what is left side by side, then each
+  redemption with the reward the admin noted ("movie night") — so a balance near zero is not read
+  as "never has any diamonds". As an admin, Home stats list the whole family's redemptions by
+  name, newest first.
 - **US-52 See what I did today, this week, this month.** As a family member, my statistics open on
   a row of four counts — today, this week, this month, all time — and I can narrow the charts to
   any of them, so "am I keeping up?" is answerable at a glance instead of inferable from a 7-day
@@ -658,7 +663,9 @@ message and shows a matching badge on the card (`LockReason`):
   before choosing. It sits inside the tap area — information, not a control — and a chore worth
   nothing shows nothing, so a home that never uses credits sees the board it always had.
 - **Redemption** (admin): amount 1..balance with an optional note; recorded as a
-  credit entry so history is auditable. Over-balance redemptions are rejected.
+  credit entry so history is auditable. Over-balance redemptions are rejected. A blank note is
+  stored as the marker `CreditService.NO_NOTE`, which the stats show as "(no note)" in the
+  member's language rather than as a reward called "Redeemed".
 
 ### 4.8 Daily target (per member)
 - `Home.dailyTargetPerMember` ∈ [1,3], default 1.
@@ -687,20 +694,35 @@ message and shows a matching badge on the card (`LockReason`):
   avoid a comparison per row already in memory, and it would cost the "one query for the working
   set" property `BoardRenderCostTest` pins.
 - **My stats** (any member): total approved; the period tiles; bar chart of my chores by type
-  under the lens; **💎 earned** (below); my feedback split; 7-day adherence; **12-week and
-  12-month trends**.
+  under the lens; **💎 earned** and **💎 redeemed** (below); my feedback split; 7-day adherence;
+  **12-week and 12-month trends**.
 - **💎 Diamonds I earned** (`StatsService.diamondStats`, one query for the member's own ledger):
   the four headline totals — today / this week / this month / all time — as read-only tiles (the
   picker's shape, no button role, no selected state) over a 7-day column trend. *Earned* only:
   EARNED ledger rows including spree bonuses, bucketed by `createdAt` in the server zone, so a
   credit lands on the day its completion was approved — the day the celebration toast announced
-  it. Redemptions never shrink it; the balance on the leaderboard is where spending shows. An
+  it. Redemptions never shrink it; spending has its own card, below. An
   undone completion has its rows deleted, so the chart self-corrects. The card is hidden until
   the member has ever earned a diamond, so a home that never uses credits sees no row of zeros.
   Never narrowed by the lens, like the chore tiles beside it.
+- **💎 Diamonds I redeemed** (the REDEEMED rows of the same ledger pass, `DiamondStats.redeemed`
+  and `.redemptions`): three read-only tiles — **earned · redeemed · balance**, where balance is
+  the leaderboard's number — over a list of the member's redemptions, newest first, each with
+  the day (`12.10.`, with the year only when it is not this year), the admin's note as the reward
+  or "(no note)", and the 💎 amount. The list is a real `<ul>` so a screen reader announces its
+  length. It is capped at the newest `StatsService.RECENT_REDEMPTIONS` = **10** rows, a phone
+  screen's worth; older rows are counted in a trailing "…and N earlier" line and in the redeemed
+  tile, never dropped from the total. Hidden until the member has redeemed at least once, for the
+  same reason the earned card is hidden; never narrowed by the lens. The point of the card: a
+  member who earns a lot and cashes it in promptly otherwise shows a balance near zero everywhere
+  and reads, to the rest of the family, as someone who never earns anything.
 - **Home stats** (admin): per-member bars under the lens; **what each member did** (below);
-  chore-popularity bars under the lens; feedback per chore; 14-day activity; **12-week and
-  12-month trends**; per-member adherence today.
+  **💎 Redeemed rewards** — the same redemption list for the whole home, newest first, each row
+  prefixed with the member's name (`HomeStats.redemptions`, one query for the home's REDEEMED rows
+  only: a redemption is an admin typing into a dialog, so that table grows by the week where
+  completions grow by the hour), same cap, hidden while the home has never redeemed, never
+  narrowed by the lens; chore-popularity bars under the lens; feedback per chore; 14-day activity;
+  **12-week and 12-month trends**; per-member adherence today.
 - **What each member did** (`HomeStats.perMemberChores`): every member's own "My chores" chart —
   their chores by type in board order plus accepted other help — gathered in the same single pass
   as the other home aggregates, so the admin sees for the whole family what each member sees for
@@ -1202,12 +1224,17 @@ scales up, not the other way round.
   reorders the board for an admin and is thrown away for a member or when its ids belong to
   another home; a chore's 💎 value shows on
   its card and only there; the 💎 card on My stats appears once a diamond was earned and is not a
-  picker; the admin's Home stats fold each member's own chores and keep an open fold open across
+  picker; the 💎 redeemed card appears once something was redeemed, with earned · redeemed ·
+  balance as plain tiles and the reward note in the list, and the admin's Home stats list the same
+  row with the member's name; the admin's Home stats fold each member's own chores and keep an open fold open across
   a redraw; and the session lifetime is the member's until the PIN is entered, and the admin's
   from then on.
 - **Statistics** (`StatsServiceTest`): my/home aggregates; 💎 earned follows an undo and ignores
-  redemptions, bucketed by the day the credit landed; each member's own bars in join order with
-  idle members skipped.
+  redemptions, bucketed by the day the credit landed; 💎 redeemed lists the member's redemptions
+  newest first with the note as the reward and a blank note as none, and earned − redeemed is the
+  balance; the list is capped at ten with the hidden rows counted; the home's list names who
+  redeemed what, never shows another home's redemptions, and is empty for a home that never
+  redeems; each member's own bars in join order with idle members skipped.
 - **Statistics periods** (`StatsPeriodTest`): yesterday counts in the week but not in today; the
   week starts Monday, matching the chore-master badge; REJECTED counts in no period; a
   **late-approved completion buckets by when it was done, not when it was approved**; the headline

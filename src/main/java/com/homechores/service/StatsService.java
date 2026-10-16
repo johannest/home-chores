@@ -22,11 +22,13 @@ import java.time.format.TextStyle;
 import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.function.Function;
 import org.springframework.stereotype.Service;
 
 /** Read-only aggregations for the statistics / chart views. */
@@ -54,6 +56,10 @@ public class StatsService {
      *  labels start colliding, and the page must never scroll sideways (SPEC §4.15.1). */
     static final int TREND_WEEKS = 12;
     static final int TREND_MONTHS = 12;
+
+    /** How many redemptions a 💎 card lists before it says "…and N earlier". Ten is a phone
+     *  screen's worth below the tiles; the total still counts every one. */
+    static final int RECENT_REDEMPTIONS = 10;
 
     private static ZoneId zone() {
         return ZoneId.systemDefault();
@@ -324,15 +330,24 @@ public class StatsService {
      * completion is approved, so for a home with approval on a chore done last night and approved
      * this morning pays today. That is the ledger's truth and what the celebration toast said, so
      * the chart agrees with the toast rather than with the chore trend.
+     *
+     * <p>The REDEEMED rows of the same pass become the member's own redemption list — what they
+     * spent, on what, and when — so a diligent member who cashes in often is not read as someone
+     * who never earns anything just because the leaderboard balance sits near zero.
      */
     public DiamondStats diamondStats(Long memberId, LocalDate today) {
+        Member member = members.findById(memberId).orElseThrow();
         Map<LocalDate, Long> perDay = new HashMap<>();
         long dayCount = 0;
         long weekCount = 0;
         long monthCount = 0;
         long allTime = 0;
+        long redeemed = 0;
+        List<CreditEntry> spent = new ArrayList<>();
         for (CreditEntry e : credits.findByMemberId(memberId)) {
-            if (e.getType() != CreditType.EARNED) {
+            if (e.getType() == CreditType.REDEEMED) {
+                redeemed += e.getAmount();
+                spent.add(e);
                 continue;
             }
             LocalDate on = e.getCreatedAt().atZone(zone()).toLocalDate();
@@ -349,8 +364,31 @@ public class StatsService {
                 monthCount += n;
             }
         }
+        spent.sort(Comparator.comparing(CreditEntry::getCreatedAt)
+                .thenComparing(CreditEntry::getId).reversed());
         return new DiamondStats(new PeriodCounts(dayCount, weekCount, monthCount, allTime),
-                daySeries(perDay, today, 7));
+                daySeries(perDay, today, 7), redeemed, redemptions(spent, id -> member));
+    }
+
+    /**
+     * The newest {@link #RECENT_REDEMPTIONS} of {@code newestFirst} as {@link Redemption}s, with
+     * a count of the ones the cap left out. The admin's default reason ({@code CreditService
+     * .NO_NOTE}) is a marker, not a reward, so it comes through as {@code null} and the view
+     * says "no note" in the member's language.
+     */
+    private static Redemptions redemptions(List<CreditEntry> newestFirst,
+                                           Function<Long, Member> memberOf) {
+        List<Redemption> recent = new ArrayList<>(RECENT_REDEMPTIONS);
+        for (CreditEntry e : newestFirst) {
+            if (recent.size() == RECENT_REDEMPTIONS) {
+                break;
+            }
+            String reward = e.getReason() == null || CreditService.NO_NOTE.equals(e.getReason())
+                    ? null : e.getReason();
+            recent.add(new Redemption(memberOf.apply(e.getMemberId()), e.getAmount(), reward,
+                    e.getCreatedAt().atZone(zone()).toLocalDate()));
+        }
+        return new Redemptions(recent, newestFirst.size() - recent.size());
     }
 
     /** The last {@code days} days ending today, zero-filled — a chart needs every column. */
@@ -496,12 +534,24 @@ public class StatsService {
             }
         }
 
+        // Who redeemed what: the home's REDEEMED rows only. One more query, but a small one by
+        // nature — a redemption is an admin typing into a dialog, not a tap on the board, so the
+        // list grows by the week where completions grow by the hour.
+        Map<Long, Member> memberById = new HashMap<>();
+        for (Member m : memberList) {
+            memberById.put(m.getId(), m);
+        }
+        Redemptions redemptions = redemptions(
+                credits.findByHomeCodeAndTypeOrderByCreatedAtDescIdDesc(homeCode,
+                        CreditType.REDEEMED),
+                memberById::get);
+
         Locale loc = locale == null ? Locale.ENGLISH : locale;
         return new HomeStats(perMember, popularity, feedbackByChore,
                 daySeries(perDay, today, 14), adherence, pending, otherHelp,
                 new PeriodCounts(dayCount, weekCount, monthCount, allTime),
                 weekSeries(perDay, today, TREND_WEEKS, loc),
-                monthSeries(perDay, today, TREND_MONTHS, loc), perMemberChores);
+                monthSeries(perDay, today, TREND_MONTHS, loc), perMemberChores, redemptions);
     }
 
     // ---- DTOs ---------------------------------------------------------------
@@ -546,8 +596,27 @@ public class StatsService {
     }
 
     /** 💎 earned under each headline period, plus the last seven days — always all-time facts,
-     *  never narrowed by the lens, like the chore tiles they sit beside. */
-    public record DiamondStats(PeriodCounts earned, List<DayCount> last7) {
+     *  never narrowed by the lens, like the chore tiles they sit beside. {@code redeemed} is the
+     *  all-time total spent and {@code redemptions} the latest of them, so the card can answer
+     *  "earned, redeemed, left" in one row. */
+    public record DiamondStats(PeriodCounts earned, List<DayCount> last7, long redeemed,
+                               Redemptions redemptions) {
+        public long balance() {
+            return earned.allTime() - redeemed;
+        }
+    }
+
+    /** One redemption: who, how many 💎, what for ({@code null} when the admin left no note),
+     *  and the day it was booked in the server zone. */
+    public record Redemption(Member member, int amount, String reward, LocalDate on) {
+    }
+
+    /** The newest redemptions, capped at {@link #RECENT_REDEMPTIONS}; {@code earlier} is how many
+     *  older ones the cap hid, so the view can say so instead of pretending the list is whole. */
+    public record Redemptions(List<Redemption> recent, long earlier) {
+        public boolean isEmpty() {
+            return recent.isEmpty();
+        }
     }
 
     /**
@@ -556,12 +625,14 @@ public class StatsService {
      * {@code counts}, {@code trend14}, both longer trends and {@code adherence} (which is about
      * today by definition) are always all-time facts. {@code feedbackByChore} likewise stays
      * all-time: it answers "which chore does this family hate", and a week's worth of reactions
-     * is too thin to answer it.
+     * is too thin to answer it. {@code redemptions} — who redeemed what, newest first — is
+     * all-time too, like the 💎 card on My stats.
      */
     public record HomeStats(List<CountBar> perMember, List<CountBar> chorePopularity,
                             List<ChoreFeedback> feedbackByChore, List<DayCount> trend14,
                             List<MemberDaily> adherence, long pending, long otherHelp,
                             PeriodCounts counts, List<PeriodBucket> byWeek,
-                            List<PeriodBucket> byMonth, List<MemberChores> perMemberChores) {
+                            List<PeriodBucket> byMonth, List<MemberChores> perMemberChores,
+                            Redemptions redemptions) {
     }
 }

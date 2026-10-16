@@ -1018,6 +1018,43 @@ body.board-dragging {
 .stat-tiles.readonly .stat-tile:hover {
     border-color: transparent;
 }
+/* Earned · redeemed · balance: three facts, so three equal columns. */
+.stat-tiles.three {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+/* The redemption list under the 💎 tiles: day, what for, how many. The note gets the slack
+   and wraps; the day and the amount never do, so a long "movie night with popcorn and the
+   whole family" cannot push the number off a 360px screen. */
+.redemptions {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.redemption-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 0;
+    border-top: 1px solid var(--lumo-contrast-10pct);
+    font-size: 0.85rem;
+}
+.redemption-row:first-child {
+    border-top: 0;
+}
+.redemption-date {
+    color: var(--lumo-secondary-text-color);
+    white-space: nowrap;
+}
+.redemption-reward {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.redemption-amount {
+    font-weight: 700;
+    white-space: nowrap;
+}
 .stat-value {
     font-size: 1.35rem;
     font-weight: 800;
