@@ -69,6 +69,10 @@
         if (!drag) {
             return;
         }
+        if (document.body.classList.contains('hold-dragging')) {
+            drag = null; // the line was lifted (list-drag.js): the finger is arranging, not swiping
+            return;
+        }
         const mx = e.clientX - drag.x0;
         const my = e.clientY - drag.y0;
         if (!drag.axis) {

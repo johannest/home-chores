@@ -121,13 +121,6 @@
             <version>${archunit.version}</version>
             <scope>test</scope>
         </dependency>
-        <!-- Only present so the UI-unit-test base class's test(Chart) overload resolves
-             during JUnit method scanning; the app never instantiates a Chart. -->
-        <dependency>
-            <groupId>com.vaadin</groupId>
-            <artifactId>vaadin-charts-flow</artifactId>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>

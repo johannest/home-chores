@@ -25,6 +25,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class CreditService {
 
+    /** The reason stored on a redemption the admin left no note on. Stored, not localized,
+     *  so the stats can tell "no note" from a reward that happens to be called that. */
+    public static final String NO_NOTE = "Redeemed";
+
     private final CreditEntryRepository credits;
     private final SpreeTierRepository tiers;
     private final CompletionRepository completions;
@@ -137,7 +141,7 @@ public class CreditService {
         if (amount <= 0 || amount > balance(memberId)) {
             return false;
         }
-        String reason = note == null || note.isBlank() ? "Redeemed"
+        String reason = note == null || note.isBlank() ? NO_NOTE
                 : InputLimits.clip(note, InputLimits.REASON);
         credits.save(new CreditEntry(homeCode, memberId, amount, CreditType.REDEEMED, reason, 0));
         homeState.bump(homeCode);

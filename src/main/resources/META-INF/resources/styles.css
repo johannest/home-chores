@@ -523,11 +523,13 @@ vaadin-checkbox-group::part(group-field) {
     cursor: not-allowed;
 }
 
-/* ---- Hold-and-drag to arrange the board (board-drag.js, admins only) ---- */
-/* pan-y, not none: the board must still scroll under a finger that starts on a card — which is
-   most fingers, the cards being most of the screen. Once a card is lifted the script cancels
-   touchmove itself. No callout: iOS would otherwise open its link/image sheet over the hold. */
-.board-sections.draggable .task-card[data-task-id] {
+/* ---- Hold-and-drag (hold-drag.js): the board's cards for admins, a shared list's lines for
+   everyone ---- */
+/* pan-y, not none: the page must still scroll under a finger that starts on a card or a line —
+   which is most fingers. Once something is lifted the script cancels touchmove itself. No
+   callout: iOS would otherwise open its link/image sheet over the hold. */
+.board-sections.draggable .task-card[data-task-id],
+.shared-list.draggable .list-item[data-item-id] {
     touch-action: pan-y;
     -webkit-touch-callout: none;
 }
@@ -540,15 +542,28 @@ vaadin-checkbox-group::part(group-field) {
 .task-card.lifting:active {
     transform: scale(1.04); /* not the press animation: this is not a tap */
 }
-/* Where the card will land: it stays in the grid at reduced presence so the others reflow
+/* A line swells less: it is full-width, and 4 % of 360px would run off the screen. */
+.list-item.lifting {
+    transform: scale(1.02);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+    border-radius: var(--lumo-border-radius-m);
+}
+.list-item.lifting .swipe-face {
+    background: var(--lumo-base-color);
+}
+/* Where the card or line will land: it stays in place at reduced presence so the others reflow
    around the slot, exactly as a phone's home screen does. */
-.task-card.drag-placeholder {
+.task-card.drag-placeholder,
+.list-item.drag-placeholder {
     opacity: 0.35;
     border-style: dashed;
     transform: none;
     box-shadow: none;
 }
-/* The card under the finger: a fixed clone the page scrolls beneath. */
+.list-item.drag-placeholder {
+    border-top: 1px dashed var(--lumo-contrast-30pct);
+}
+/* The card or line under the finger: a fixed clone the page scrolls beneath. */
 .drag-ghost {
     position: fixed;
     top: 0;
@@ -561,7 +576,16 @@ vaadin-checkbox-group::part(group-field) {
     box-shadow: 0 18px 40px rgba(0, 0, 0, 0.25);
     border-color: var(--lumo-primary-color);
 }
-body.board-dragging {
+/* A lifted line's clone needs the face painted: at rest the face is transparent so the page
+   gradient shows through, which over the page makes an unreadable ghost. */
+.drag-ghost.list-item {
+    border-radius: var(--lumo-border-radius-m);
+    overflow: hidden;
+}
+.drag-ghost.list-item .swipe-face {
+    background: var(--lumo-base-color);
+}
+body.hold-dragging {
     user-select: none;
     -webkit-user-select: none;
     overscroll-behavior: contain;
@@ -1018,6 +1042,43 @@ body.board-dragging {
 .stat-tiles.readonly .stat-tile:hover {
     border-color: transparent;
 }
+/* Earned · redeemed · balance: three facts, so three equal columns. */
+.stat-tiles.three {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+/* The redemption list under the 💎 tiles: day, what for, how many. The note gets the slack
+   and wraps; the day and the amount never do, so a long "movie night with popcorn and the
+   whole family" cannot push the number off a 360px screen. */
+.redemptions {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.redemption-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 0;
+    border-top: 1px solid var(--lumo-contrast-10pct);
+    font-size: 0.85rem;
+}
+.redemption-row:first-child {
+    border-top: 0;
+}
+.redemption-date {
+    color: var(--lumo-secondary-text-color);
+    white-space: nowrap;
+}
+.redemption-reward {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.redemption-amount {
+    font-weight: 700;
+    white-space: nowrap;
+}
 .stat-value {
     font-size: 1.35rem;
     font-weight: 800;
@@ -1181,6 +1242,22 @@ body.board-dragging {
 .list-row:first-of-type { border-top: none; }
 .list-row .grow { flex: 1; min-width: 0; }
 
+/* ↑/↓ on a plain list line: the keyboard path to arranging a list, the way the Admin tab's
+   arrows are the board's. On a phone the row has no room for two more 40px targets beside the
+   bell and the trash, and a thumb holds and drags instead — so below 480px they are clipped out
+   of sight (not display:none: still in the tab order and the accessibility tree) and come back
+   while focused, for whoever tabbed to them. */
+@media (max-width: 479px) {
+    .list-row .list-move-btn:not(:focus-visible) {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+}
+
 /* A chore row carries four controls now (↑ ↓ ✎ 🗑). Grouping them means that on a 360px phone,
    where .list-row wraps, the cluster drops under the name as a block — loose buttons would split
    three-and-one across the wrap, which reads as broken rather than as wrapped. */
@@ -1289,7 +1366,8 @@ body.board-dragging {
 .swipe-actions .swipe-delete { background: var(--lumo-error-color); }
 @media (prefers-reduced-motion: reduce) {
     .list-item .swipe-face { transition: none; }
-    .task-card.lifting, .task-card.drag-placeholder, .drag-ghost { transition: none; }
+    .task-card.lifting, .task-card.drag-placeholder, .drag-ghost,
+    .list-item.lifting, .list-item.drag-placeholder { transition: none; }
 }
 .list-row .list-text.done {
     text-decoration: line-through;

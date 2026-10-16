@@ -246,10 +246,21 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   chore's 💎 value on its card, so a five-diamond chore stands out from a plain one before I tap.
 - **US-56 My diamonds.** As a family member, my statistics show the 💎 I *earned* today, this
   week, this month and all time, with the last seven days as a trend — spending them is the
-  admin's business and shows on the leaderboard balance.
+  admin's business and has its own card (US-58).
 - **US-57 What each member did.** As an admin, Home stats show every member's own chores-by-type
   chart, folded one per member, so I can see for the whole family what each member sees for
   themselves without asking around.
+- **US-58 What I redeemed.** As a family member who earns a lot and cashes it in often, my
+  statistics show what I *redeemed* — earned, redeemed and what is left side by side, then each
+  redemption with the reward the admin noted ("movie night") — so a balance near zero is not read
+  as "never has any diamonds". As an admin, Home stats list the whole family's redemptions by
+  name, newest first.
+- **US-59 Arrange a list, and let reminders sort themselves.** As a family member, I can hold a
+  line on a shared list and drag it to where it belongs, the way the admin arranges the board, so
+  the shopping list reads in the order of the aisles. A line I set a reminder on sorts itself by
+  when it is due instead: due today or already nagging, it leads the list; due next week or next
+  month, it waits at the bottom — "call the plumber, next month" stops sitting between the milk
+  and the bread.
 - **US-52 See what I did today, this week, this month.** As a family member, my statistics open on
   a row of four counts — today, this week, this month, all time — and I can narrow the charts to
   any of them, so "am I keeping up?" is answerable at a glance instead of inferable from a 7-day
@@ -430,8 +441,9 @@ and the next interaction signs the phone straight back in.
 - **Order** is `ChoreTask.sortOrder`, dense 0..n-1 within each group, arranged with ↑/↓ in the
   Admin tab or by **holding and dragging a card on the board**. Arrows are disabled at the ends
   of a bucket, not hidden, so rows do not reflow as things move; they stay as the keyboard path.
-- **Hold-and-drag** (`board-drag.js`, admins only): hold a chore card still for 450 ms and it
-  lifts (a swell at 60 % of the hold says the hold is being noticed; a short vibration where the
+- **Hold-and-drag** (`board-drag.js`, admins only — a configuration of the shared
+  `hold-drag.js`, which `list-drag.js` reuses for shared lists, §4.4e): hold a chore card still
+  for 450 ms and it lifts (a swell at 60 % of the hold says the hold is being noticed; a short vibration where the
   device has one); drag it and the other cards reflow around the slot, like apps on a phone's
   home screen; let go and it stays. Dropping it in another section moves it into that group.
   Not HTML5 drag-and-drop, which does not fire on mobile touch: pointer events, with a
@@ -557,7 +569,7 @@ message and shows a matching badge on the card (`LockReason`):
 - A **Lists** tab between Chores and Stats, for everyone. Three sub-tabs, **Groceries**,
   **To-do** and **Dinner**, backed by one table (`ListItem`: `homeCode`, `kind`
   GROCERY/TODO/DINNER, `text` ≤ 160, `createdAt`, `createdByMemberId`, `doneAt`,
-  `doneByMemberId`, nullable `day` for dinners).
+  `doneByMemberId`, nullable `day` for dinners, `sortOrder`).
 - **Not chores.** Ticking a line creates no `Completion`, earns no credits, starts no streak
   and needs no approval — whoever is at the store ticks the milk off. That is why the feature
   lives in its own `ListItemService` rather than in `ChoreService`.
@@ -567,6 +579,39 @@ message and shows a matching badge on the card (`LockReason`):
 - Quick entry: a text box with Enter-to-add at the top of the list; the half-typed draft is a
   panel field, so another phone's edit re-rendering the panel does not lose it. Blank lines
   add nothing; long lines are clipped (`InputLimits.LIST_ITEM`).
+- **Order.** Open lines are shown in the family's own order, `ListItem.sortOrder` ascending
+  with `createdAt` as the tie-break — so a list nobody has arranged (every line at 0) reads in
+  writing order, exactly as before. **Hold-and-drag** (`list-drag.js`, the same gesture as the
+  board's, §4.2b, from the shared `hold-drag.js`) rearranges it, for *everyone* in the home: a
+  shared list is shared, and whoever is at the store arranges it. The drop dispatches
+  `list-place` on `.shared-list` with the dragged line's id and the next arrangeable line's id
+  (blank = the end); `ListItemService.placeItem` checks both ids against the *session's* home —
+  the ids come from the browser — refuses a line that is gone, ticked, a dinner slot, another
+  home's, or a neighbour on another list, renumbers the list's open lines densely 0..n-1 and bumps
+  the home; a drop that changes nothing writes nothing and the panel redraws so the preview snaps
+  back. A new line gets the position after the last one, so it still lands at the bottom of an
+  arranged list; ticking and unticking keep a line's number. The upgrade is invisible, as the
+  board's was: the column lands on existing rows at 0 with a default (`ddl-auto=update` on a table
+  that already has every family's lines in it), and the first drag on a list is what gives it
+  real positions.
+- **Keyboard path.** A hold is a thumb's gesture, so every plain line also carries ↑/↓
+  (`list-move-btn`, labelled "Move up" / "Move down"), disabled at the ends of the plain run as
+  the board's arrows are at the ends of a bucket, and going through the same `placeItem` with the
+  neighbour a drop there would name. Below 480px, where the row has no room for two more 40px
+  targets beside the bell and the trash, they are clipped out of sight rather than removed —
+  still in the tab order and the accessibility tree — and reappear while focused.
+- **Reminders sort themselves** (`ListItemService.displayOrder`): a line with a reminder is not
+  the family's to arrange — it is pinned by its due time. Lines whose reminder is **due** (fired
+  and unanswered, or due by the end of today in the viewer's zone, the zone the badge is
+  formatted in) lead the list, soonest first; then the plain lines in the family's order; then
+  lines whose reminder is further off, soonest first. "Tomorrow 9:00" waits below the plain lines
+  until midnight and then leads; "next month" sits at the bottom until its day comes. A pinned
+  line carries no `data-item-id`, so it can be neither lifted nor landed on, and the drag's run of
+  landable lines is bounded by the pinned ones above and below. Underneath, the line keeps its own
+  `sortOrder`, so once the reminder is answered or cancelled it drops back into the family's order
+  where it was. The swipe (`list-swipe.js`) and the hold coexist on the same row: a finger that
+  moves within the 450 ms hold swipes or scrolls and never lifts, and once a line is lifted the
+  swipe script stands down for that gesture.
 - Ticked lines sink to a **Done (n)** section, struck through, with who ticked them and when.
   Ticking an already ticked line keeps the original ticker (two phones racing must not flip
   it). Unticking clears both stamps.
@@ -658,7 +703,9 @@ message and shows a matching badge on the card (`LockReason`):
   before choosing. It sits inside the tap area — information, not a control — and a chore worth
   nothing shows nothing, so a home that never uses credits sees the board it always had.
 - **Redemption** (admin): amount 1..balance with an optional note; recorded as a
-  credit entry so history is auditable. Over-balance redemptions are rejected.
+  credit entry so history is auditable. Over-balance redemptions are rejected. A blank note is
+  stored as the marker `CreditService.NO_NOTE`, which the stats show as "(no note)" in the
+  member's language rather than as a reward called "Redeemed".
 
 ### 4.8 Daily target (per member)
 - `Home.dailyTargetPerMember` ∈ [1,3], default 1.
@@ -687,20 +734,35 @@ message and shows a matching badge on the card (`LockReason`):
   avoid a comparison per row already in memory, and it would cost the "one query for the working
   set" property `BoardRenderCostTest` pins.
 - **My stats** (any member): total approved; the period tiles; bar chart of my chores by type
-  under the lens; **💎 earned** (below); my feedback split; 7-day adherence; **12-week and
-  12-month trends**.
+  under the lens; **💎 earned** and **💎 redeemed** (below); my feedback split; 7-day adherence;
+  **12-week and 12-month trends**.
 - **💎 Diamonds I earned** (`StatsService.diamondStats`, one query for the member's own ledger):
   the four headline totals — today / this week / this month / all time — as read-only tiles (the
   picker's shape, no button role, no selected state) over a 7-day column trend. *Earned* only:
   EARNED ledger rows including spree bonuses, bucketed by `createdAt` in the server zone, so a
   credit lands on the day its completion was approved — the day the celebration toast announced
-  it. Redemptions never shrink it; the balance on the leaderboard is where spending shows. An
+  it. Redemptions never shrink it; spending has its own card, below. An
   undone completion has its rows deleted, so the chart self-corrects. The card is hidden until
   the member has ever earned a diamond, so a home that never uses credits sees no row of zeros.
   Never narrowed by the lens, like the chore tiles beside it.
+- **💎 Diamonds I redeemed** (the REDEEMED rows of the same ledger pass, `DiamondStats.redeemed`
+  and `.redemptions`): three read-only tiles — **earned · redeemed · balance**, where balance is
+  the leaderboard's number — over a list of the member's redemptions, newest first, each with
+  the day (`12.10.`, with the year only when it is not this year), the admin's note as the reward
+  or "(no note)", and the 💎 amount. The list is a real `<ul>` so a screen reader announces its
+  length. It is capped at the newest `StatsService.RECENT_REDEMPTIONS` = **10** rows, a phone
+  screen's worth; older rows are counted in a trailing "…and N earlier" line and in the redeemed
+  tile, never dropped from the total. Hidden until the member has redeemed at least once, for the
+  same reason the earned card is hidden; never narrowed by the lens. The point of the card: a
+  member who earns a lot and cashes it in promptly otherwise shows a balance near zero everywhere
+  and reads, to the rest of the family, as someone who never earns anything.
 - **Home stats** (admin): per-member bars under the lens; **what each member did** (below);
-  chore-popularity bars under the lens; feedback per chore; 14-day activity; **12-week and
-  12-month trends**; per-member adherence today.
+  **💎 Redeemed rewards** — the same redemption list for the whole home, newest first, each row
+  prefixed with the member's name (`HomeStats.redemptions`, one query for the home's REDEEMED rows
+  only: a redemption is an admin typing into a dialog, so that table grows by the week where
+  completions grow by the hour), same cap, hidden while the home has never redeemed, never
+  narrowed by the lens; chore-popularity bars under the lens; feedback per chore; 14-day activity;
+  **12-week and 12-month trends**; per-member adherence today.
 - **What each member did** (`HomeStats.perMemberChores`): every member's own "My chores" chart —
   their chores by type in board order plus accepted other help — gathered in the same single pass
   as the other home aggregates, so the admin sees for the whole family what each member sees for
@@ -882,7 +944,8 @@ message and shows a matching badge on the card (`LockReason`):
   shared: one `ListReminder` per line, pushed to every subscribed device in the home (each in its
   own member's language via `Member.reminderLocale`), badged under the line for everyone
   ("⏰ 9:00", "⏰ 19.9. 9:00", "⏰ in 12d" — absolute, never relative, for the reason the chore
-  badge is), and movable or cancellable by anyone in the home. Because it is the family's
+  badge is), and movable or cancellable by anyone in the home. The reminder also decides where
+  the line sits on its list — due ones lead, far-off ones trail (§4.4e). Because it is the family's
   business, arming, answering and firing all **bump `HomeState`** — again unlike the chore snooze.
   Upserted per line in the service, not with a unique index (`ddl-auto=update`, §4.13b).
 - **Fired is not finished.** Vaadin's generated service worker answers a notification tap by
@@ -1186,9 +1249,23 @@ scales up, not the other way round.
   into an empty group, a no-op drop (same slot, before itself, the last card to the end), another
   home's neighbour refused, another home's *card* refused (the session's home scopes the drop),
   and the rotation invariant again under drags.
-- **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest`,
-  browserless): create-home flow navigates to the board with three tabs; join flow
-  (two tabs, no Admin); PIN claim reveals the Admin tab; admin adds a chore from the
+- **Upgrade path** (`SchemaEvolutionTest`): the whole application booted with the production
+  `ddl-auto=update` against a file database built from `legacy-schema.sql`, a pre-Phase-4
+  FlashChores: the context starts at all, settings added since adopt their documented
+  default on an old home, historic rows still complete, aggregate and export, tables added
+  since are created empty and writable, chores from before groups existed keep their order
+  with the column default 0 until the first move, and list lines written without
+  `sort_order` read in writing order with the default 0 until the first drag renumbers them.
+- **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest` through
+  `HomeChoresUiTest`, which installs TestBench's signals test environment so that another
+  phone's bump of the home reaches the view deterministically through `runPendingSignalsTasks`
+  rather than through `VaadinService`'s thread pool; browserless): create-home flow navigates to the board with four tabs; join flow
+  (three tabs, no Admin); PIN claim reveals the Admin tab, and a wrong PIN marks the field
+  and reveals nothing — no tab, no role, the member lifetime; a demoted admin's own device
+  loses the Admin tab and the panel on the next redraw and drops back to the member
+  lifetime; a removed member, and everyone in a deleted home, is shown out to the landing
+  page signed out; the members card refuses to demote or remove the last admin; a member's
+  Stats has no Home stats switch; admin adds a chore from the
   Admin panel; members never see the Admin tab; the sign-back-in dialog matches a member by
   nickname and signs in as the existing member without duplicating them (gate off) and
   raises a pending request instead of signing in (gate on); a first-time join with the
@@ -1202,12 +1279,18 @@ scales up, not the other way round.
   reorders the board for an admin and is thrown away for a member or when its ids belong to
   another home; a chore's 💎 value shows on
   its card and only there; the 💎 card on My stats appears once a diamond was earned and is not a
-  picker; the admin's Home stats fold each member's own chores and keep an open fold open across
+  picker; the 💎 redeemed card appears once something was redeemed, with earned · redeemed ·
+  balance as plain tiles and the reward note in the list, and the admin's Home stats list the same
+  row with the member's name, a blank note reads "(no note)" and past ten rows the card counts
+  the ones it left out; the admin's Home stats fold each member's own chores and keep an open fold open across
   a redraw; and the session lifetime is the member's until the PIN is entered, and the admin's
   from then on.
 - **Statistics** (`StatsServiceTest`): my/home aggregates; 💎 earned follows an undo and ignores
-  redemptions, bucketed by the day the credit landed; each member's own bars in join order with
-  idle members skipped.
+  redemptions, bucketed by the day the credit landed; 💎 redeemed lists the member's redemptions
+  newest first with the note as the reward and a blank note as none, and earned − redeemed is the
+  balance; the list is capped at ten with the hidden rows counted; the home's list names who
+  redeemed what, never shows another home's redemptions, and is empty for a home that never
+  redeems; each member's own bars in join order with idle members skipped.
 - **Statistics periods** (`StatsPeriodTest`): yesterday counts in the week but not in today; the
   week starts Monday, matching the chore-master badge; REJECTED counts in no period; a
   **late-approved completion buckets by when it was done, not when it was approved**; the headline
@@ -1224,6 +1307,27 @@ scales up, not the other way round.
   reminder. Plus `SnoozeUiTest` (push mocked as configured): a chip on every chore card and none on
   the 🙋/＋ tiles, no chips at all without VAPID keys, the dialog offers every offset, and an armed
   reminder badges its own card and only that one.
+- **Shared lists** (`ListItemServiceTest`): writing order per list and clipping; blank lines and
+  strangers refused; ticking stamps who and when, unticking clears, nothing becomes a chore; done
+  lines hide after a day and the purge reclaims them; clear-done per list; delete for any member
+  and no outsider; dinner upsert, inclusive window, weekly purge; every edit bumps the home.
+  **Arranging**: a drop lands before its neighbour or at the end, a drop that changes nothing or
+  "before itself" says so, a new line still goes last on an arranged list, and ticking plus
+  unticking keeps a line's place; a stranger is refused, and another home's line (dragged or as the
+  neighbour), a neighbour on another list, a ticked line and a dinner slot all move nothing.
+  **Display order**: due reminders lead soonest first, far-off ones trail soonest first, the plain
+  lines keep the family's order between them, "tomorrow 9:00" is below the plain lines today and
+  above them tomorrow, and with no reminders the display order is the family's order. Plus
+  `ListEditUiTest`: tapping the text edits, the swipe tray edits and deletes, the reminder badge
+  opens its time; rows with a reminder sort by due date and carry no id while plain rows do, the
+  list is `draggable` for a member, a drop through the panel reorders the rows and the family's
+  order, a drop beside an id that is not ours moves nothing, a drop naming another home's line
+  (dragged or as the neighbour) moves nothing in either home, a ticked line carries no id and
+  sits in a section that is no drop target, and a custom list is arranged the same way but
+  never beside a To-do neighbour; ↑/↓ sit on the plain lines only, are disabled at the ends of
+  the plain run, and move a line through the same path as a drop. `BackupServiceTest`: an arranged
+  list comes back arranged, and a file from before lines could be arranged comes back in writing
+  order.
 - **List-line reminders** (`ListReminderServiceTest`, sender mocked): fires once to every device
   in the home and is then marked fired rather than deleted, never sent twice; nothing before its
   time; scheduling twice moves the one reminder and anyone in the home may move it; snoozing a

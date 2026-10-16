@@ -143,9 +143,9 @@ class ChoresPanel extends VerticalLayout {
         // are re-established here rather than trusted from the client: the class that enables the
         // gesture is a hint to the browser, not an authorisation, and the ids could be anyone's.
         board.getElement().addEventListener("board-place", e -> place(
-                        parseId(e.getEventData().path("event.detail.taskId").asString()),
-                        parseId(e.getEventData().path("event.detail.groupId").asString()),
-                        parseId(e.getEventData().path("event.detail.beforeTaskId").asString())))
+                        ClientId.parse(e.getEventData().path("event.detail.taskId").asString()),
+                        ClientId.parse(e.getEventData().path("event.detail.groupId").asString()),
+                        ClientId.parse(e.getEventData().path("event.detail.beforeTaskId").asString())))
                 .addEventData("event.detail.taskId")
                 .addEventData("event.detail.groupId")
                 .addEventData("event.detail.beforeTaskId");
@@ -166,17 +166,6 @@ class ChoresPanel extends VerticalLayout {
             refresh(); // nothing changed server-side, so no push: undo the preview by hand
         }
         // Otherwise the HomeState bump redraws this board along with everyone else's.
-    }
-
-    private static Long parseId(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return null;
-        }
-        try {
-            return Long.valueOf(raw.trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
     }
 
     private Div sectionLabel(String text) {

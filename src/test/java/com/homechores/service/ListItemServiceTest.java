@@ -10,10 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListItemRepository;
 import com.homechores.domain.ListKind;
+import com.homechores.domain.ListReminder;
 import com.homechores.domain.Member;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -262,5 +264,117 @@ class ListItemServiceTest {
         assertEquals(r5, homeState.revision(code).peek(), "saving the same text again changes nothing");
         lists.setDinner(code, today, alex.getId(), "");
         assertTrue(homeState.revision(code).peek() > r5, "clearing");
+    }
+
+    // ---- arranging a list ---------------------------------------------------------
+
+    private static List<String> texts(List<ListItem> lines) {
+        return lines.stream().map(ListItem::getText).toList();
+    }
+
+    /** A drop lands before its neighbour or at the end, a new line still goes last, and a drop
+     *  that changes nothing says so. */
+    @Test
+    void placeItem_reordersTheOpenLines_andANewLineStillGoesLast() {
+        Member alex = chores.createHome("Listy", "Alex");
+        String code = alex.getHomeCode();
+        ListItem milk = lists.add(code, ListKind.GROCERY, alex.getId(), "Milk").orElseThrow();
+        ListItem bread = lists.add(code, ListKind.GROCERY, alex.getId(), "Bread").orElseThrow();
+        ListItem eggs = lists.add(code, ListKind.GROCERY, alex.getId(), "Eggs").orElseThrow();
+
+        assertTrue(lists.placeItem(code, alex.getId(), eggs.getId(), milk.getId()));
+        assertEquals(List.of("Eggs", "Milk", "Bread"), texts(lists.openItems(code, ListKind.GROCERY)),
+                "dropped before the milk");
+        assertTrue(lists.placeItem(code, alex.getId(), milk.getId(), null));
+        assertEquals(List.of("Eggs", "Bread", "Milk"), texts(lists.openItems(code, ListKind.GROCERY)),
+                "no neighbour means the end");
+
+        assertFalse(lists.placeItem(code, alex.getId(), milk.getId(), null), "let go where it was");
+        assertFalse(lists.placeItem(code, alex.getId(), bread.getId(), bread.getId()), "before itself");
+
+        lists.add(code, ListKind.GROCERY, alex.getId(), "Butter");
+        assertEquals(List.of("Eggs", "Bread", "Milk", "Butter"), texts(lists.openItems(code, ListKind.GROCERY)),
+                "a new line goes after the arranged ones, not to the top at 0");
+
+        lists.setDone(eggs.getId(), alex.getId(), true);
+        lists.setDone(eggs.getId(), alex.getId(), false);
+        assertEquals(List.of("Eggs", "Bread", "Milk", "Butter"), texts(lists.openItems(code, ListKind.GROCERY)),
+                "ticking and unticking keeps a line's place");
+    }
+
+    /** Every id in a drop comes from the browser: another home's, another list's, a ticked
+     *  line's and a dinner slot's all write nothing, and a stranger is refused outright. */
+    @Test
+    void placeItem_refusesStrangers_otherHomesLines_otherLists_tickedLines_andDinners() {
+        Member alex = chores.createHome("Listy", "Alex");
+        String code = alex.getHomeCode();
+        ListItem milk = lists.add(code, ListKind.GROCERY, alex.getId(), "Milk").orElseThrow();
+        ListItem bread = lists.add(code, ListKind.GROCERY, alex.getId(), "Bread").orElseThrow();
+        ListItem plumber = lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber").orElseThrow();
+        ListItem pasta = lists.setDinner(code, LocalDate.now(), alex.getId(), "Pasta").orElseThrow();
+        Member kim = chores.createHome("Elsewhere", "Kim");
+        ListItem theirs = lists.add(kim.getHomeCode(), ListKind.GROCERY, kim.getId(), "Theirs").orElseThrow();
+        List<String> before = texts(lists.openItems(code, ListKind.GROCERY));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> lists.placeItem(code, kim.getId(), bread.getId(), milk.getId()), "not in this home");
+        assertFalse(lists.placeItem(code, alex.getId(), theirs.getId(), milk.getId()), "another home's line");
+        assertFalse(lists.placeItem(code, alex.getId(), bread.getId(), theirs.getId()),
+                "another home's line as the neighbour");
+        assertFalse(lists.placeItem(code, alex.getId(), bread.getId(), plumber.getId()),
+                "a neighbour on another list");
+        assertFalse(lists.placeItem(code, alex.getId(), pasta.getId(), null), "a dinner slot");
+        lists.setDone(bread.getId(), alex.getId(), true);
+        assertFalse(lists.placeItem(code, alex.getId(), bread.getId(), milk.getId()), "a ticked line");
+        lists.setDone(bread.getId(), alex.getId(), false);
+
+        assertEquals(before, texts(lists.openItems(code, ListKind.GROCERY)), "nothing moved");
+        assertEquals(List.of("Theirs"), texts(lists.openItems(kim.getHomeCode(), ListKind.GROCERY)));
+        assertEquals(List.of("Call the plumber"), texts(lists.openItems(code, ListKind.TODO)));
+    }
+
+    /** Due reminders lead, far-off ones trail, and the plain lines keep the family's order
+     *  between them — judged against the viewer's day. */
+    @Test
+    void displayOrder_putsDueRemindersFirst_farOffOnesLast_andTheRestInBetween() {
+        Member alex = chores.createHome("Listy", "Alex");
+        String code = alex.getHomeCode();
+        ListItem a = lists.add(code, ListKind.TODO, alex.getId(), "A next month").orElseThrow();
+        ListItem b = lists.add(code, ListKind.TODO, alex.getId(), "B plain").orElseThrow();
+        ListItem c = lists.add(code, ListKind.TODO, alex.getId(), "C this afternoon").orElseThrow();
+        ListItem d = lists.add(code, ListKind.TODO, alex.getId(), "D plain").orElseThrow();
+        ListItem e = lists.add(code, ListKind.TODO, alex.getId(), "E fired yesterday").orElseThrow();
+        ListItem f = lists.add(code, ListKind.TODO, alex.getId(), "F tomorrow 9:00").orElseThrow();
+
+        ZoneId utc = ZoneId.of("UTC");
+        LocalDate today = LocalDate.of(2026, 10, 16);
+        Instant noon = today.atTime(12, 0).atZone(utc).toInstant();
+        ListReminder fired = new ListReminder(code, e.getId(), noon.minus(Duration.ofDays(1)), alex.getId());
+        fired.setFiredAt(noon.minus(Duration.ofDays(1)));
+        Map<Long, ListReminder> reminders = Map.of(
+                a.getId(), new ListReminder(code, a.getId(), noon.plus(Duration.ofDays(30)), alex.getId()),
+                c.getId(), new ListReminder(code, c.getId(), noon.plus(Duration.ofHours(3)), alex.getId()),
+                e.getId(), fired,
+                f.getId(), new ListReminder(code, f.getId(), noon.plus(Duration.ofHours(21)), alex.getId()));
+
+        List<ListItem> shown = ListItemService.displayOrder(lists.openItems(code, ListKind.TODO),
+                reminders, today, utc);
+        assertEquals(List.of("E fired yesterday", "C this afternoon", "B plain", "D plain",
+                        "F tomorrow 9:00", "A next month"), texts(shown),
+                "due by tonight lead soonest first; tomorrow and next month trail soonest first");
+
+        // Tomorrow 9:00 is "later" today and "due" tomorrow — the same list, seen the next morning.
+        shown = ListItemService.displayOrder(lists.openItems(code, ListKind.TODO), reminders,
+                today.plusDays(1), utc);
+        assertEquals("F tomorrow 9:00", shown.get(2).getText(), "its day has come: above the plain lines");
+
+        // The plain lines follow the family's order, not their writing order.
+        assertTrue(lists.placeItem(code, alex.getId(), d.getId(), b.getId()));
+        shown = ListItemService.displayOrder(lists.openItems(code, ListKind.TODO), reminders, today, utc);
+        assertEquals(List.of("D plain", "B plain"), texts(shown.subList(2, 4)));
+
+        assertEquals(texts(lists.openItems(code, ListKind.TODO)),
+                texts(ListItemService.displayOrder(lists.openItems(code, ListKind.TODO), Map.of(), today, utc)),
+                "with no reminders the display order is the family's order");
     }
 }

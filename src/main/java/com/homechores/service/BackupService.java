@@ -144,7 +144,7 @@ public class BackupService {
         for (ListItem li : listItems.findByHomeCodeOrderByCreatedAtAscIdAsc(homeCode)) {
             b.listItems.add(new ListItemDto(li.getKind(), li.getText(), li.getCreatedAt(),
                     li.getCreatedByMemberId(), li.getDoneAt(), li.getDoneByMemberId(), li.getDay(),
-                    li.getListId()));
+                    li.getListId(), li.getSortOrder()));
         }
         try {
             return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(b);
@@ -365,6 +365,9 @@ public class BackupService {
             if (listId != null && entity.getKind() == ListKind.TODO) {
                 entity.setListId(listId);
             }
+            // A file from before lines could be arranged has no order: 0 for every line, and the
+            // tie-break on createdAt gives back the writing order, as for a never-dragged list.
+            entity.setSortOrder(li.sortOrder == null ? 0 : li.sortOrder);
             listItems.save(entity);
         }
         for (SpreeTierDto st : b.spreeTiers) {
@@ -544,7 +547,10 @@ public class BackupService {
                               java.time.LocalDate day,
                               /** The custom list it is on; null for the built-in lists and in
                                *  files written before custom lists existed. */
-                              Long listId) {
+                              Long listId,
+                              /** Its place among the list's lines; absent in files written
+                               *  before lines could be arranged. */
+                              Integer sortOrder) {
     }
 
     public record CustomListDto(Long id, String name, Instant createdAt, Long createdByMemberId) {

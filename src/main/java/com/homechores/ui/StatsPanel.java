@@ -12,15 +12,21 @@ import com.homechores.service.StatsService.MemberDaily;
 import com.homechores.service.StatsService.MyStats;
 import com.homechores.service.StatsService.Period;
 import com.homechores.service.StatsService.PeriodCounts;
+import com.homechores.service.StatsService.Redemption;
+import com.homechores.service.StatsService.Redemptions;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.html.H2;
+import com.vaadin.flow.component.html.ListItem;
 import com.vaadin.flow.component.html.Paragraph;
+import com.vaadin.flow.component.html.UnorderedList;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Locale;
@@ -124,6 +130,13 @@ class StatsPanel extends VerticalLayout {
             // otherwise see a card of four zeros over seven empty columns.
             body.add(Charts.card(T.tr("stats.diamonds"), diamondsBody(s.diamonds())));
         }
+        if (s.diamonds().redeemed() > 0) {
+            // Likewise only once something was redeemed. The card exists so that a member who
+            // earns a lot and cashes it in is not read, from a balance near zero, as someone who
+            // never earns anything: earned, redeemed and what is left sit side by side, and the
+            // rewards below say what the diamonds became.
+            body.add(Charts.card(T.tr("stats.redeemed"), redeemedBody(s.diamonds())));
+        }
         body.add(Charts.card(T.tr("stats.feelings"), Charts.feedbackBar(s.feedback())));
         body.add(Charts.card(T.tr("stats.last7"), Charts.dayTrend(s.last7())));
         body.add(Charts.card(T.tr("stats.trendWeeks"), Charts.periodTrend(s.byWeek())));
@@ -193,18 +206,79 @@ class StatsPanel extends VerticalLayout {
         Div row = new Div();
         row.addClassNames("stat-tiles", "readonly");
         for (Period p : Period.values()) {
-            Div tile = new Div();
-            tile.addClassName("stat-tile");
-            Span value = new Span(String.valueOf(d.earned().of(p)));
-            value.addClassName("stat-value");
-            Span label = new Span(T.tr("stats.headline." + p.name().toLowerCase(Locale.ROOT)));
-            label.addClassName("stat-label");
-            tile.add(value, label);
-            row.add(tile);
+            row.add(readonlyTile(d.earned().of(p),
+                    T.tr("stats.headline." + p.name().toLowerCase(Locale.ROOT))));
         }
         Div box = new Div(row);
         box.add(Charts.dayTrend(d.last7()));
         return box;
+    }
+
+    /**
+     * Earned · redeemed · balance as three read-only tiles, then the latest redemptions with
+     * their reward notes. All-time, never narrowed by the lens, like the earned card above it.
+     */
+    private static Div redeemedBody(DiamondStats d) {
+        Div row = new Div();
+        row.addClassNames("stat-tiles", "readonly", "three");
+        row.add(readonlyTile(d.earned().allTime(), T.tr("stats.redeemed.earned")),
+                readonlyTile(d.redeemed(), T.tr("stats.redeemed.spent")),
+                readonlyTile(d.balance(), T.tr("stats.redeemed.balance")));
+        Div box = new Div(row);
+        box.add(redemptionList(d.redemptions(), false));
+        return box;
+    }
+
+    /** A number over a caption in the headline tiles' shape — a plain Div with no button role,
+     *  no focus stop and no selected state, because it is a fact and not a picker. */
+    private static Div readonlyTile(long value, String caption) {
+        Div tile = new Div();
+        tile.addClassName("stat-tile");
+        Span number = new Span(String.valueOf(value));
+        number.addClassName("stat-value");
+        Span label = new Span(caption);
+        label.addClassName("stat-label");
+        tile.add(number, label);
+        return tile;
+    }
+
+    /**
+     * The redemptions newest first: day, reward note (or "no note"), 💎 amount — and the member's
+     * name in front of the note on the admin's home-wide list, where {@code named} is true. A
+     * real list element, so a screen reader announces how many rewards there are. When the
+     * service's cap hid older rows, the last line says how many.
+     */
+    private static Div redemptionList(Redemptions redemptions, boolean named) {
+        UnorderedList list = new UnorderedList();
+        list.addClassName("redemptions");
+        LocalDate today = LocalDate.now();
+        for (Redemption r : redemptions.recent()) {
+            ListItem item = new ListItem();
+            item.addClassName("redemption-row");
+            Span on = new Span(dayLabel(r.on(), today));
+            on.addClassName("redemption-date");
+            String reward = r.reward() == null ? T.tr("stats.redeemed.noNote") : r.reward();
+            Span what = new Span(named ? r.member().getName() + " · " + reward : reward);
+            what.addClassName("redemption-reward");
+            Span amount = new Span("💎 " + r.amount());
+            amount.addClassName("redemption-amount");
+            item.add(on, what, amount);
+            list.add(item);
+        }
+        Div box = new Div(list);
+        if (redemptions.earlier() > 0) {
+            Paragraph more = new Paragraph(T.tr("stats.redeemed.earlier", redemptions.earlier()));
+            more.addClassName("feedback-hint");
+            box.add(more);
+        }
+        return box;
+    }
+
+    /** "12.10." for this year, "12.10.2025" for an earlier one — the board's own day format,
+     *  with the year only where it carries information. */
+    private static String dayLabel(LocalDate on, LocalDate today) {
+        return DateTimeFormatter.ofPattern(on.getYear() == today.getYear() ? "d.M." : "d.M.yyyy")
+                .format(on);
     }
 
     private static Paragraph emptyPeriod() {
@@ -274,6 +348,12 @@ class StatsPanel extends VerticalLayout {
                 Charts.horizontalBars(s.perMember())));
         body.add(Charts.card(T.tr("stats.perMemberChores.period", lens),
                 perMemberChores(s.perMemberChores())));
+        if (!s.redemptions().isEmpty()) {
+            // Who redeemed what, for the admin — the same card the member sees, with names, and
+            // hidden the same way for a home that never redeems.
+            body.add(Charts.card(T.tr("stats.redeemed.home"),
+                    redemptionList(s.redemptions(), true)));
+        }
         body.add(Charts.card(T.tr("stats.popularity.period", lens), Charts.horizontalBars(
                 withOtherHelp(s.chorePopularity(), s.otherHelp()))));
 

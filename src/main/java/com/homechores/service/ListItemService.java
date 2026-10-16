@@ -8,6 +8,7 @@ import com.homechores.domain.InputLimits;
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListItemRepository;
 import com.homechores.domain.ListKind;
+import com.homechores.domain.ListReminder;
 import com.homechores.domain.ListReminderRepository;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
@@ -17,6 +18,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -88,16 +90,60 @@ public class ListItemService {
         return items.findById(itemId);
     }
 
-    /** Open lines of one list, in the order they were written. */
+    /** Open lines of one list, in the family's order (see {@link #placeItem}). */
     public List<ListItem> openItems(String homeCode, ListKind kind) {
         return openItems(homeCode, kind, null);
     }
 
-    /** Open lines of one list: a custom list when {@code listId} is set, else the built-in {@code kind}. */
+    /**
+     * Open lines of one list: a custom list when {@code listId} is set, else the built-in
+     * {@code kind}. In the family's order: where a hold-and-drag put them, and for lines nobody
+     * ever dragged, the order they were written in. The panel lays lines with a reminder around
+     * this order by their due time ({@link #displayOrder}).
+     */
     public List<ListItem> openItems(String homeCode, ListKind kind, Long listId) {
         return listId == null
-                ? items.findByHomeCodeAndKindAndListIdIsNullAndDoneAtIsNullOrderByCreatedAtAscIdAsc(homeCode, kind)
-                : inHome(homeCode, items.findByListIdAndDoneAtIsNullOrderByCreatedAtAscIdAsc(listId));
+                ? items.findByHomeCodeAndKindAndListIdIsNullAndDoneAtIsNullOrderBySortOrderAscCreatedAtAscIdAsc(
+                        homeCode, kind)
+                : inHome(homeCode, items.findByListIdAndDoneAtIsNullOrderBySortOrderAscCreatedAtAscIdAsc(listId));
+    }
+
+    /**
+     * The order a list is shown in: lines whose reminder is due — fired and unanswered, or due
+     * by the end of {@code today} in the viewer's zone — first, soonest first; then the lines
+     * with no reminder, in the family's own order; then lines whose reminder is further off,
+     * soonest first. "Call the plumber, next month" sinks to the bottom until its day comes,
+     * instead of sitting between the milk and the bread; "tomorrow 9:00" waits below the plain
+     * lines until midnight, then leads the list.
+     *
+     * <p>Only the plain lines are the family's to arrange: a reminder pins its line by time, and
+     * the line keeps its own {@code sortOrder} underneath for the day the reminder is answered
+     * or cancelled, when it drops back into the family's order where it was.
+     */
+    public static List<ListItem> displayOrder(List<ListItem> open, Map<Long, ListReminder> reminders,
+                                              LocalDate today, ZoneId zone) {
+        List<ListItem> due = new ArrayList<>();
+        List<ListItem> plain = new ArrayList<>();
+        List<ListItem> later = new ArrayList<>();
+        for (ListItem line : open) {
+            ListReminder r = reminders.get(line.getId());
+            if (r == null) {
+                plain.add(line);
+            } else if (r.isFired() || !r.getDueAt().atZone(zone).toLocalDate().isAfter(today)) {
+                due.add(line);
+            } else {
+                later.add(line);
+            }
+        }
+        Comparator<ListItem> byDue = Comparator.comparing((ListItem l) -> reminders.get(l.getId()).getDueAt())
+                .thenComparing(ListItem::getId);
+        due.sort(byDue);
+        later.sort(byDue);
+        List<ListItem> shown = new ArrayList<>(open.size());
+        shown.addAll(due);
+        shown.addAll(plain);
+        shown.addAll(later);
+        return shown;
     }
 
     /** Lines ticked within the retention window, most recently ticked first. */
@@ -211,6 +257,11 @@ public class ListItemService {
         }
         ListItem line = new ListItem(homeCode, listId == null ? kind : ListKind.TODO, clean, member.getId());
         line.setListId(listId);
+        // After the last open line, in a list that may have been arranged: on one nobody ever
+        // dragged every line sits at 0 and a new 0 would still sort last by createdAt, but after a
+        // drag the numbers are real, and a 0 would surface the new line at the top.
+        line.setSortOrder(openItems(homeCode, line.getKind(), listId).stream()
+                .mapToInt(ListItem::getSortOrder).max().orElse(-1) + 1);
         ListItem saved = items.save(line);
         touchAndBump(homeCode);
         return Optional.of(saved);
@@ -292,6 +343,71 @@ public class ListItemService {
         items.delete(item);
         touchAndBump(item.getHomeCode());
         return true;
+    }
+
+    /**
+     * Puts a dragged line where it was dropped: before {@code beforeItemId} on the same list, or
+     * at the list's end when that is null. Any member of the home may — a shared list is shared,
+     * and whoever is at the store arranges it. The open lines of the list are then written
+     * densely 0..n-1 in the new order, so the first drag on a list is what gives it real
+     * positions (the same lazy renumbering as {@code ChoreService.placeChore}).
+     *
+     * <p>Both ids come from the browser, so both are checked against the <em>session's</em> home,
+     * not trusted from the DOM: a line of another home, a line that is gone, ticked, or a dinner
+     * slot, or a neighbour on a different list, all write nothing. So does a drop that changes
+     * nothing — the caller redraws its preview in that case, since no bump is coming.
+     *
+     * @return true if the order changed
+     * @throws IllegalArgumentException if the member is not in that home
+     */
+    @Transactional
+    public boolean placeItem(String homeCode, Long memberId, Long itemId, Long beforeItemId) {
+        memberOf(homeCode, memberId);
+        if (itemId == null || itemId.equals(beforeItemId)) {
+            return false; // "before itself" is where it already is, not "to the end"
+        }
+        ListItem line = items.findById(itemId).filter(l -> arrangeable(homeCode, l)).orElse(null);
+        if (line == null) {
+            return false;
+        }
+        ListItem before = null;
+        if (beforeItemId != null) {
+            before = items.findById(beforeItemId)
+                    .filter(b -> arrangeable(homeCode, b) && b.getKind() == line.getKind()
+                            && Objects.equals(b.getListId(), line.getListId()))
+                    .orElse(null);
+            if (before == null) {
+                return false; // another list's line, or one that is gone: nowhere to put it
+            }
+        }
+        List<ListItem> open = new ArrayList<>(openItems(homeCode, line.getKind(), line.getListId()));
+        List<Long> was = open.stream().map(ListItem::getId).toList();
+        open.removeIf(l -> l.getId().equals(itemId));
+        int at = open.size();
+        for (int i = 0; before != null && i < open.size(); i++) {
+            if (open.get(i).getId().equals(before.getId())) {
+                at = i;
+            }
+        }
+        open.add(at, line);
+        if (was.equals(open.stream().map(ListItem::getId).toList())) {
+            return false; // let go where it was picked up
+        }
+        List<ListItem> changed = new ArrayList<>();
+        for (int i = 0; i < open.size(); i++) {
+            if (open.get(i).getSortOrder() != i) {
+                open.get(i).setSortOrder(i);
+                changed.add(open.get(i));
+            }
+        }
+        items.saveAll(changed);
+        touchAndBump(homeCode);
+        return true;
+    }
+
+    /** An open grocery or to-do line of this home — what a drag may lift or land beside. */
+    private static boolean arrangeable(String homeCode, ListItem line) {
+        return homeCode.equals(line.getHomeCode()) && !line.isDone() && line.getKind() != ListKind.DINNER;
     }
 
     /** Removes every ticked line from one list. Returns how many went. */

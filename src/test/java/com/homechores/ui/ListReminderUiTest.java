@@ -20,7 +20,6 @@ import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
-import com.vaadin.testbench.unit.SpringUIUnitTest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -38,7 +37,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  * reports itself enabled, and every other UI test runs with push unconfigured.
  */
 @SpringBootTest
-class ListReminderUiTest extends SpringUIUnitTest {
+class ListReminderUiTest extends HomeChoresUiTest {
 
     @Autowired ChoreService service;
     @Autowired ListItemService lists;

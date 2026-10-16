@@ -14,7 +14,6 @@ import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.ComponentUtil;
 import com.vaadin.flow.component.ClickEvent;
 import com.vaadin.flow.component.html.Span;
-import com.vaadin.testbench.unit.SpringUIUnitTest;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
@@ -32,7 +31,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  * control when VAPID is unconfigured, which is exactly the state {@code HomeUiTest} runs in.
  */
 @SpringBootTest
-class SnoozeUiTest extends SpringUIUnitTest {
+class SnoozeUiTest extends HomeChoresUiTest {
 
     @Autowired ChoreService service;
     @Autowired ChoreReminderService snoozes;

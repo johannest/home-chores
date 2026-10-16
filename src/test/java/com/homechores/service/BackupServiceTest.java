@@ -262,4 +262,30 @@ class BackupServiceTest {
         assertTrue(chores.complete(restored.get(0).getId(), chores.membersOf(code).get(0).getId())
                 .allowed(), "no tag means doable today");
     }
+
+    /** A list the family arranged comes back arranged; a file from before lines could be
+     *  arranged comes back in writing order, the order it was shown in then. */
+    @Test
+    void anArrangedList_survivesTheRoundTrip_andAnOlderFileKeepsWritingOrder() {
+        Member alex = chores.createHome("Listful", "Alex");
+        String code = alex.getHomeCode();
+        ListItem milk = lists.add(code, ListKind.GROCERY, alex.getId(), "Milk").orElseThrow();
+        lists.add(code, ListKind.GROCERY, alex.getId(), "Bread");
+        ListItem eggs = lists.add(code, ListKind.GROCERY, alex.getId(), "Eggs").orElseThrow();
+        assertTrue(lists.placeItem(code, alex.getId(), eggs.getId(), milk.getId()));
+
+        String json = backup.export(code);
+        assertTrue(json.contains("\"sortOrder\""));
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        assertEquals(List.of("Eggs", "Milk", "Bread"),
+                lists.openItems(code, ListKind.GROCERY).stream().map(ListItem::getText).toList(),
+                "the dragged order is back");
+
+        String old = json.replaceAll(",\\s*\"sortOrder\"\\s*:\\s*\\d+", "");
+        assertFalse(old.contains("sortOrder"), "precondition: key stripped");
+        backup.restore(old.getBytes(StandardCharsets.UTF_8), code);
+        assertEquals(List.of("Milk", "Bread", "Eggs"),
+                lists.openItems(code, ListKind.GROCERY).stream().map(ListItem::getText).toList(),
+                "no order in the file: writing order, as that list was shown");
+    }
 }

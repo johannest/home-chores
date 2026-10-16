@@ -19,15 +19,16 @@ import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.menubar.MenuBar;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
-import com.vaadin.testbench.unit.SpringUIUnitTest;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /** Admin → Lists: ordering the Lists tab and switching the default lists off. */
 @SpringBootTest
-class ListOrderUiTest extends SpringUIUnitTest {
+class ListOrderUiTest extends HomeChoresUiTest {
 
     @Autowired ChoreService service;
     @Autowired ListItemService lists;
@@ -90,6 +91,22 @@ class ListOrderUiTest extends SpringUIUnitTest {
         ComponentUtil.fireEvent(item, new ClickEvent<>(item));
     }
 
+    /**
+     * Waits until the redraw another phone's change causes has landed: the shared revision
+     * signal confirms the bump, and the view's effect runs, through the signals test environment
+     * ({@link HomeChoresUiTest}), whose queue {@code runPendingSignalsTasks} drains on this
+     * thread. Polling for the outcome keeps the wait as short as the redraw, and bounded.
+     */
+    private void awaitRedraw(BooleanSupplier redrawn) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!redrawn.getAsBoolean()) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("the other phone's change never redrew this UI");
+            }
+            runPendingSignalsTasks(50, TimeUnit.MILLISECONDS);
+        }
+    }
+
     @Test
     void theCardListsEveryList_withASwitchOnlyForTheBuiltIns() {
         Member alex = signedIn("Alex");
@@ -148,7 +165,7 @@ class ListOrderUiTest extends SpringUIUnitTest {
         mainTab("Lists");
         kindTabs().setSelectedIndex(2); // Dinner
         lists.setListEnabled(alex.getHomeCode(), alex.getId(), ListKind.DINNER, false); // "another phone"
-        runPendingSignalsTasks(); // the shared revision reaches this UI through a queued effect
+        awaitRedraw(() -> kindTabs().getSelectedIndex() == 1);
 
         assertEquals(1, kindTabs().getSelectedIndex());
         assertEquals("To-do", kindTabs().getSelectedTab().getElement().getTextRecursively().trim());
@@ -163,7 +180,7 @@ class ListOrderUiTest extends SpringUIUnitTest {
         mainTab("Lists");
         kindTabs().setSelectedIndex(2); // Groceries, Dinner, Gifts
         lists.deleteList(code, gifts.getId(), alex.getId());
-        runPendingSignalsTasks();
+        awaitRedraw(() -> kindTabs().getSelectedIndex() == 0);
 
         assertEquals(0, kindTabs().getSelectedIndex());
         assertEquals("Groceries", kindTabs().getSelectedTab().getElement().getTextRecursively().trim());
