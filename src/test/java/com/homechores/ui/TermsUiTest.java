@@ -10,7 +10,6 @@ import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.html.H1;
 import com.vaadin.flow.component.html.H2;
 import com.vaadin.flow.component.html.Paragraph;
-import com.vaadin.testbench.unit.SpringUIUnitTest;
 import java.util.List;
 import java.util.Locale;
 import org.junit.jupiter.api.Test;
@@ -19,7 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 
 /** The user agreement reads in the visitor's language, with the real retention windows in it. */
 @SpringBootTest
-class TermsUiTest extends SpringUIUnitTest {
+class TermsUiTest extends HomeChoresUiTest {
 
     @Autowired HomeCleanupService cleanup;
 

@@ -26,6 +26,7 @@ import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Image;
 import com.vaadin.flow.component.html.ListItem;
+import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.menubar.MenuBar;
@@ -35,9 +36,10 @@ import com.vaadin.flow.component.tabs.Tabs;
 import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.server.VaadinSession;
-import com.vaadin.testbench.unit.SpringUIUnitTest;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.Locale;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,7 +47,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class HomeUiTest extends SpringUIUnitTest {
+class HomeUiTest extends HomeChoresUiTest {
 
     @Autowired
     ChoreService service;
@@ -333,6 +335,22 @@ class HomeUiTest extends SpringUIUnitTest {
     }
 
     // ---- tests --------------------------------------------------------------
+
+    /**
+     * Waits until the redraw another phone's change causes has landed: the shared revision
+     * signal confirms the bump, and the view's effect runs, through the signals test environment
+     * ({@link HomeChoresUiTest}), whose queue {@code runPendingSignalsTasks} drains on this
+     * thread. Polling for the outcome keeps the wait as short as the redraw, and bounded.
+     */
+    private void awaitRedraw(BooleanSupplier redrawn) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!redrawn.getAsBoolean()) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("the other phone's change never redrew this UI");
+            }
+            runPendingSignalsTasks(50, TimeUnit.MILLISECONDS);
+        }
+    }
 
     @Test
     void createHome_navigatesToBoard_asAdmin_withFourTabs() {
@@ -1610,6 +1628,141 @@ class HomeUiTest extends SpringUIUnitTest {
 
         assertEquals(theirOrder, service.tasksOf(theirs).stream().map(ChoreTask::getId).toList(),
                 "an admin of one home cannot arrange another home's board");
+    }
+
+    // ---- the admin gate, seen from the member's side ---------------------------------
+
+    /** A wrong PIN marks the field and reveals nothing: no Admin tab, no admin role, and the
+     *  session stays on the member lifetime. */
+    @Test
+    void claimAdmin_withAWrongPin_revealsNothing() {
+        Member admin = service.createHome("Shared", "Alex");
+        String code = admin.getHomeCode();
+        String realPin = service.findHome(code).orElseThrow().getAdminPin();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        SessionContext.signIn(sam.getId(), code);
+        navigate(HomeView.class);
+
+        clickMenuItem("Admin?");
+        setField("Admin PIN", "0000".equals(realPin) ? "1111" : "0000");
+        clickButton("Unlock");
+
+        TextField pin = $(TextField.class).all().stream()
+                .filter(f -> "Admin PIN".equals(f.getLabel()) && usable(f)).findFirst().orElseThrow();
+        assertTrue(pin.isInvalid(), "the dialog stays open and says so");
+        assertEquals(3, tabCount(), "no Admin tab");
+        assertFalse(service.findMember(sam.getId()).orElseThrow().isAdmin());
+        assertEquals(SessionContext.MEMBER_TIMEOUT_SECONDS, maxInactiveInterval());
+    }
+
+    /** Demotion reaches the demoted admin's own phone live: the next redraw drops the Admin tab
+     *  and the panel with it, lands on Chores, and puts the session back on the member lifetime.
+     *  That redraw is the only thing between a demoted member and the admin actions. */
+    @Test
+    void aDemotedAdmin_losesTheAdminTab_live() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        assertTrue(service.setMemberAdmin(sam.getId(), true));
+        SessionContext.signIn(sam.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Admin");
+        assertEquals(4, tabCount());
+        assertEquals(SessionContext.ADMIN_TIMEOUT_SECONDS, maxInactiveInterval());
+
+        assertTrue(service.setMemberAdmin(sam.getId(), false)); // Alex, on another phone
+        awaitRedraw(() -> tabCount() == 3);
+
+        assertEquals(3, tabCount(), "the Admin tab went with the role");
+        assertTrue($(AdminPanel.class).all().stream().noneMatch(this::usable), "and the panel");
+        assertTrue($(Tabs.class).first().getSelectedTab().getElement().getTextRecursively().trim()
+                .startsWith("Chores"), "landed on the board, not on a tab that is gone");
+        assertEquals(SessionContext.MEMBER_TIMEOUT_SECONDS, maxInactiveInterval());
+    }
+
+    /** A member an admin removed, and everyone in a home an admin deleted, is shown out on the
+     *  next redraw rather than left on a board that is no longer theirs. */
+    @Test
+    void aRemovedMember_isShownOut_andSoIsEveryoneWhenTheHomeGoes() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        SessionContext.signIn(sam.getId(), code);
+        navigate(HomeView.class);
+
+        assertTrue(service.removeMember(sam.getId())); // Alex, on another phone
+        awaitRedraw(() -> getCurrentView() instanceof LandingView);
+        assertInstanceOf(LandingView.class, getCurrentView(), "removed: back on the landing page");
+        assertNull(SessionContext.memberId(), "and signed out");
+
+        Member kim = service.joinHome(code, "Kim").orElseThrow();
+        SessionContext.signIn(kim.getId(), code);
+        navigate(HomeView.class);
+        assertTrue(service.deleteHome(code));
+        awaitRedraw(() -> getCurrentView() instanceof LandingView);
+        assertInstanceOf(LandingView.class, getCurrentView(), "the home is gone: so is the board");
+        assertNull(SessionContext.memberId());
+    }
+
+    /** The members card refuses to demote or remove the last admin, so a home can never be
+     *  left with nobody to run it — through the row menu, not only in the service. */
+    @Test
+    void theSoleAdmin_cannotDemoteOrRemoveThemselves_fromTheMembersCard() {
+        Member alex = service.createHome("Solo", "Alex");
+        String code = alex.getHomeCode();
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Admin");
+        openSection("Members");
+
+        clickMenuItem("Demote");
+        assertTrue(service.findMember(alex.getId()).orElseThrow().isAdmin(), "the last admin stays one");
+
+        clickMenuItem("Remove member");
+        clickButton("Confirm");
+        assertTrue(service.findMember(alex.getId()).isPresent(), "and stays a member");
+        assertInstanceOf(HomeView.class, getCurrentView(), "still on the board");
+        assertEquals(4, tabCount(), "still the admin");
+    }
+
+    /** The home-wide numbers are the admin's: a member's Stats has no sub-tabs at all. */
+    @Test
+    void member_getsNoHomeStatsTab() {
+        Member alex = service.createHome("Shared", "Alex");
+        Member sam = service.joinHome(alex.getHomeCode(), "Sam").orElseThrow();
+        SessionContext.signIn(sam.getId(), sam.getHomeCode());
+        navigate(HomeView.class);
+        selectTab("Stats");
+        assertEquals(1, $(Tabs.class).all().stream().filter(this::usable).count(),
+                "only the main tabs: no My stats / Home stats switch for a member");
+        assertFalse($(Tab.class).all().stream().anyMatch(
+                t -> t.getElement().getTextRecursively().contains("Home stats")));
+    }
+
+    /** A blank note reads "(no note)", and past ten rows the card says how many it left out. */
+    @Test
+    void stats_redeemedList_saysNoNote_andCountsTheRowsTheCapHid() {
+        Member alex = service.createHome("Shiny", "Alex");
+        String code = alex.getHomeCode();
+        ChoreTask oven = service.addTask(code, "Clean the oven", "🧽", 0, 20);
+        service.complete(oven.getId(), alex.getId());
+        for (int i = 1; i <= 11; i++) {
+            assertTrue(creditService.redeem(code, alex.getId(), 1, "treat " + i, alex.getId()));
+        }
+        assertTrue(creditService.redeem(code, alex.getId(), 1, "   ", alex.getId()));
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Stats");
+
+        List<ListItem> items = redemptionRows();
+        assertEquals(10, items.size(), "a phone screen's worth");
+        String newest = items.get(0).getElement().getTextRecursively();
+        assertTrue(newest.contains("(no note)"), newest);
+        assertFalse(newest.contains("Redeemed"), "the stored marker never shows as a reward");
+        assertTrue(items.get(9).getElement().getTextRecursively().contains("treat 3"),
+                "treats 1 and 2 are the ones the cap hid");
+        assertTrue($(Paragraph.class).all().stream().filter(this::usable)
+                .anyMatch(p -> "…and 2 earlier".equals(p.getText())), "and the card says so");
     }
 
     private Div boardSections() {

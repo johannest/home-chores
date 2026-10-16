@@ -331,8 +331,10 @@ class ListPanel extends VerticalLayout {
                 .addEventData("event.detail.beforeItemId");
         List<ListItem> shown = ListItemService.displayOrder(open, armed,
                 LocalDate.now(SessionContext.timeZone()), SessionContext.timeZone());
+        // The plain run — what a drag may arrange — in the order shown, for the ↑/↓ on each line.
+        List<ListItem> plain = shown.stream().filter(l -> !armed.containsKey(l.getId())).toList();
         for (ListItem item : shown) {
-            openList.add(itemRow(item, names, armed.get(item.getId())));
+            openList.add(itemRow(item, names, armed.get(item.getId()), plain));
         }
         body.add(openList);
 
@@ -352,7 +354,7 @@ class ListPanel extends VerticalLayout {
             doneList.addClassName("shared-list");
             doneList.addClassName("done");
             for (ListItem item : done) {
-                doneList.add(itemRow(item, names, null));
+                doneList.add(itemRow(item, names, null, List.of()));
             }
             body.add(doneList);
 
@@ -485,7 +487,10 @@ class ListPanel extends VerticalLayout {
         return row;
     }
 
-    private Div itemRow(ListItem item, Map<Long, String> names, ListReminder reminder) {
+    /** One line. {@code plain} is the run of arrangeable lines in the order shown — the ↑/↓ on a
+     *  plain line name their neighbours from it — and empty for a ticked line. */
+    private Div itemRow(ListItem item, Map<Long, String> names, ListReminder reminder,
+                        List<ListItem> plain) {
         Checkbox tick = new Checkbox();
         tick.setValue(item.isDone());
         tick.setAriaLabel(item.getText());
@@ -528,6 +533,22 @@ class ListPanel extends VerticalLayout {
 
         Div tools = new Div();
         tools.addClassName("row-tools");
+        if (!item.isDone() && reminder == null) {
+            // ↑/↓: the keyboard path to arranging the list — a hold is a thumb's gesture — through
+            // the same place() as a drop, naming the neighbour a drop there would. Disabled at the
+            // ends of the plain run, not hidden, so the row does not reflow as a line moves.
+            int at = 0;
+            while (at < plain.size() && !plain.get(at).getId().equals(item.getId())) {
+                at++;
+            }
+            final int here = at;
+            tools.add(moveButton(VaadinIcon.ARROW_UP, T.tr("list.moveUp"), "list-move-up", here > 0,
+                            () -> place(item.getId(), plain.get(here - 1).getId())),
+                    moveButton(VaadinIcon.ARROW_DOWN, T.tr("list.moveDown"), "list-move-down",
+                            here < plain.size() - 1,
+                            () -> place(item.getId(),
+                                    here + 2 < plain.size() ? plain.get(here + 2).getId() : null)));
+        }
         // Only on open lines and only when push is configured, matching the chore card's ⏰.
         if (!item.isDone() && pushSender.isEnabled()) {
             Button remind = new Button(VaadinIcon.BELL_O.create(), e -> openReminder.run());
@@ -586,11 +607,21 @@ class ListPanel extends VerticalLayout {
         return row;
     }
 
+    private static Button moveButton(VaadinIcon icon, String label, String cls, boolean enabled,
+                                     Runnable move) {
+        Button b = new Button(icon.create(), e -> move.run());
+        b.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_ICON);
+        b.addClassNames("list-move-btn", cls);
+        b.setAriaLabel(label);
+        b.setEnabled(enabled);
+        return b;
+    }
+
     /**
-     * Puts a dragged line where it was dropped: before {@code beforeItemId}, or at the end when
-     * that is null. The ids were read back from the browser, so the service checks both against
-     * this session's home before anything moves; when nothing changed there is no push coming,
-     * so the preview is undone here by redrawing.
+     * Puts a line where it was dropped, or where its ↑/↓ sends it: before {@code beforeItemId},
+     * or at the end when that is null. A drop's ids were read back from the browser, so the
+     * service checks both against this session's home before anything moves; when nothing
+     * changed there is no push coming, so the preview is undone here by redrawing.
      */
     void place(Long itemId, Long beforeItemId) {
         if (itemId == null) {

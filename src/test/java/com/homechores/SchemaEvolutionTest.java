@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.homechores.domain.ChoreTask;
+import com.homechores.domain.ListItem;
+import com.homechores.domain.ListKind;
 import com.homechores.domain.CompletionRepository;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
@@ -15,6 +17,7 @@ import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
 import com.homechores.service.StatsService;
+import jakarta.persistence.EntityManager;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -23,6 +26,7 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -99,6 +103,7 @@ class SchemaEvolutionTest {
     @Autowired MemberRepository members;
     @Autowired CompletionRepository completions;
     @Autowired com.homechores.service.ListItemService lists;
+    @Autowired EntityManager em;
 
     private static final String CODE = "OLDHOME";
 
@@ -223,6 +228,36 @@ class SchemaEvolutionTest {
         assertEquals(board.get(board.size() - 1).getId(), after.get(after.size() - 2).getId());
         for (int i = 0; i < after.size(); i++) {
             assertEquals(i, after.get(i).getSortOrder(), "and the bucket is dense afterwards");
+        }
+    }
+
+    /**
+     * The same invisible upgrade for the lists: {@code sort_order} lands on LIST_ITEM with a
+     * column default, so a line written before lines could be arranged — here, rows inserted
+     * without naming the column, as the pre-upgrade application did — reads back as 0 and sorts
+     * by writing order, and the first drag is what gives the list real positions.
+     */
+    @Test
+    void listLinesFromBeforeTheyCouldBeArranged_keepWritingOrder_untilTheFirstDrag() {
+        Member alex = byName("Alex");
+        Instant t = Instant.parse("2025-06-01T10:00:00Z");
+        for (String text : List.of("Milk", "Bread", "Eggs")) {
+            em.createNativeQuery("insert into list_item (home_code, kind, text, created_at,"
+                            + " created_by_member_id) values (?1, 'GROCERY', ?2, ?3, ?4)")
+                    .setParameter(1, CODE).setParameter(2, text).setParameter(3, t)
+                    .setParameter(4, alex.getId()).executeUpdate();
+            t = t.plusSeconds(60);
+        }
+        List<ListItem> lines = lists.openItems(CODE, ListKind.GROCERY);
+        assertEquals(List.of("Milk", "Bread", "Eggs"), lines.stream().map(ListItem::getText).toList(),
+                "writing order, as that list was always shown");
+        assertTrue(lines.stream().allMatch(l -> l.getSortOrder() == 0), "the column default");
+
+        assertTrue(lists.placeItem(CODE, alex.getId(), lines.get(2).getId(), lines.get(0).getId()));
+        List<ListItem> after = lists.openItems(CODE, ListKind.GROCERY);
+        assertEquals(List.of("Eggs", "Milk", "Bread"), after.stream().map(ListItem::getText).toList());
+        for (int i = 0; i < after.size(); i++) {
+            assertEquals(i, after.get(i).getSortOrder(), "and the list is dense afterwards");
         }
     }
 

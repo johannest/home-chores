@@ -594,6 +594,12 @@ message and shows a matching badge on the card (`LockReason`):
   board's was: the column lands on existing rows at 0 with a default (`ddl-auto=update` on a table
   that already has every family's lines in it), and the first drag on a list is what gives it
   real positions.
+- **Keyboard path.** A hold is a thumb's gesture, so every plain line also carries ↑/↓
+  (`list-move-btn`, labelled "Move up" / "Move down"), disabled at the ends of the plain run as
+  the board's arrows are at the ends of a bucket, and going through the same `placeItem` with the
+  neighbour a drop there would name. Below 480px, where the row has no room for two more 40px
+  targets beside the bell and the trash, they are clipped out of sight rather than removed —
+  still in the tab order and the accessibility tree — and reappear while focused.
 - **Reminders sort themselves** (`ListItemService.displayOrder`): a line with a reminder is not
   the family's to arrange — it is pinned by its due time. Lines whose reminder is **due** (fired
   and unanswered, or due by the end of today in the viewer's zone, the zone the badge is
@@ -1243,9 +1249,23 @@ scales up, not the other way round.
   into an empty group, a no-op drop (same slot, before itself, the last card to the end), another
   home's neighbour refused, another home's *card* refused (the session's home scopes the drop),
   and the rotation invariant again under drags.
-- **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest`,
-  browserless): create-home flow navigates to the board with three tabs; join flow
-  (two tabs, no Admin); PIN claim reveals the Admin tab; admin adds a chore from the
+- **Upgrade path** (`SchemaEvolutionTest`): the whole application booted with the production
+  `ddl-auto=update` against a file database built from `legacy-schema.sql`, a pre-Phase-4
+  FlashChores: the context starts at all, settings added since adopt their documented
+  default on an old home, historic rows still complete, aggregate and export, tables added
+  since are created empty and writable, chores from before groups existed keep their order
+  with the column default 0 until the first move, and list lines written without
+  `sort_order` read in writing order with the default 0 until the first drag renumbers them.
+- **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest` through
+  `HomeChoresUiTest`, which installs TestBench's signals test environment so that another
+  phone's bump of the home reaches the view deterministically through `runPendingSignalsTasks`
+  rather than through `VaadinService`'s thread pool; browserless): create-home flow navigates to the board with four tabs; join flow
+  (three tabs, no Admin); PIN claim reveals the Admin tab, and a wrong PIN marks the field
+  and reveals nothing — no tab, no role, the member lifetime; a demoted admin's own device
+  loses the Admin tab and the panel on the next redraw and drops back to the member
+  lifetime; a removed member, and everyone in a deleted home, is shown out to the landing
+  page signed out; the members card refuses to demote or remove the last admin; a member's
+  Stats has no Home stats switch; admin adds a chore from the
   Admin panel; members never see the Admin tab; the sign-back-in dialog matches a member by
   nickname and signs in as the existing member without duplicating them (gate off) and
   raises a pending request instead of signing in (gate on); a first-time join with the
@@ -1261,7 +1281,8 @@ scales up, not the other way round.
   its card and only there; the 💎 card on My stats appears once a diamond was earned and is not a
   picker; the 💎 redeemed card appears once something was redeemed, with earned · redeemed ·
   balance as plain tiles and the reward note in the list, and the admin's Home stats list the same
-  row with the member's name; the admin's Home stats fold each member's own chores and keep an open fold open across
+  row with the member's name, a blank note reads "(no note)" and past ten rows the card counts
+  the ones it left out; the admin's Home stats fold each member's own chores and keep an open fold open across
   a redraw; and the session lifetime is the member's until the PIN is entered, and the admin's
   from then on.
 - **Statistics** (`StatsServiceTest`): my/home aggregates; 💎 earned follows an undo and ignores
@@ -1300,7 +1321,11 @@ scales up, not the other way round.
   `ListEditUiTest`: tapping the text edits, the swipe tray edits and deletes, the reminder badge
   opens its time; rows with a reminder sort by due date and carry no id while plain rows do, the
   list is `draggable` for a member, a drop through the panel reorders the rows and the family's
-  order, and a drop beside an id that is not ours moves nothing. `BackupServiceTest`: an arranged
+  order, a drop beside an id that is not ours moves nothing, a drop naming another home's line
+  (dragged or as the neighbour) moves nothing in either home, a ticked line carries no id and
+  sits in a section that is no drop target, and a custom list is arranged the same way but
+  never beside a To-do neighbour; ↑/↓ sit on the plain lines only, are disabled at the ends of
+  the plain run, and move a line through the same path as a drop. `BackupServiceTest`: an arranged
   list comes back arranged, and a file from before lines could be arranged comes back in writing
   order.
 - **List-line reminders** (`ListReminderServiceTest`, sender mocked): fires once to every device

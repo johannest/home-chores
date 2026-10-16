@@ -1242,6 +1242,22 @@ body.hold-dragging {
 .list-row:first-of-type { border-top: none; }
 .list-row .grow { flex: 1; min-width: 0; }
 
+/* ↑/↓ on a plain list line: the keyboard path to arranging a list, the way the Admin tab's
+   arrows are the board's. On a phone the row has no room for two more 40px targets beside the
+   bell and the trash, and a thumb holds and drags instead — so below 480px they are clipped out
+   of sight (not display:none: still in the tab order and the accessibility tree) and come back
+   while focused, for whoever tabbed to them. */
+@media (max-width: 479px) {
+    .list-row .list-move-btn:not(:focus-visible) {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+}
+
 /* A chore row carries four controls now (↑ ↓ ✎ 🗑). Grouping them means that on a 360px phone,
    where .list-row wraps, the cluster drops under the name as a block — loose buttons would split
    three-and-one across the wrap, which reads as broken rather than as wrapped. */

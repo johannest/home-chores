@@ -25,12 +25,13 @@ import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.menubar.MenuBar;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
-import com.vaadin.testbench.unit.SpringUIUnitTest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.Locale;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,7 +45,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  * {@link ListReminderUiTest}).
  */
 @SpringBootTest
-class ListEditUiTest extends SpringUIUnitTest {
+class ListEditUiTest extends HomeChoresUiTest {
 
     @Autowired ChoreService service;
     @Autowired ListItemService lists;
@@ -121,6 +122,22 @@ class ListEditUiTest extends SpringUIUnitTest {
                 .filter(i -> text.equals(i.getElement().getTextRecursively().trim()))
                 .findFirst().orElseThrow(() -> new AssertionError("No menu item: " + text));
         ComponentUtil.fireEvent(item, new ClickEvent<>(item));
+    }
+
+    /**
+     * Waits until the redraw another phone's change causes has landed: the shared revision
+     * signal confirms the bump, and the view's effect runs, through the signals test environment
+     * ({@link HomeChoresUiTest}), whose queue {@code runPendingSignalsTasks} drains on this
+     * thread. Polling for the outcome keeps the wait as short as the redraw, and bounded.
+     */
+    private void awaitRedraw(BooleanSupplier redrawn) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!redrawn.getAsBoolean()) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("the other phone's change never redrew this UI");
+            }
+            runPendingSignalsTasks(50, TimeUnit.MILLISECONDS);
+        }
     }
 
     @Test
@@ -215,7 +232,7 @@ class ListEditUiTest extends SpringUIUnitTest {
         Member sam = service.joinHome(code, "Sam").orElseThrow();
 
         lists.deleteList(code, gifts.getId(), sam.getId()); // bumps the home: the board redraws
-        runPendingSignalsTasks(); // another session's change arrives through a queued effect
+        awaitRedraw(() -> kindTabs().getSelectedIndex() == 1);
 
         assertEquals(1, kindTabs().getSelectedIndex());
     }
@@ -305,6 +322,7 @@ class ListEditUiTest extends SpringUIUnitTest {
                 "only the plain lines carry the id a hold can lift by");
 
         $(ListPanel.class).first().place(eggs.getId(), milk.getId());
+        awaitRedraw(() -> rowTexts().equals(List.of("Taxes", "Eggs", "Milk", "Call the plumber")));
         assertEquals(List.of("Taxes", "Eggs", "Milk", "Call the plumber"), rowTexts(), "eggs before milk");
         assertEquals(List.of("Eggs", "Milk"), lists.openItems(code, ListKind.TODO).stream()
                 .filter(l -> !l.equals(plumber) && !l.getId().equals(taxes.getId()) && !l.getId().equals(plumber.getId()))
@@ -313,6 +331,87 @@ class ListEditUiTest extends SpringUIUnitTest {
         $(ListPanel.class).first().place(milk.getId(), 999_999L);
         assertEquals(List.of("Taxes", "Eggs", "Milk", "Call the plumber"), rowTexts(),
                 "a neighbour that is not ours moves nothing, and the preview is redrawn");
+    }
+
+    /** Both ids of a drop come from the browser. Another home's line — dragged, or named as the
+     *  neighbour — moves nothing in either home; a ticked line sits in a section that is no drop
+     *  target and cannot be dragged back; and a custom list is arranged the same way, without a
+     *  neighbour from the built-in list. */
+    @Test
+    void aDropNamingAnotherHomesLine_movesNothing_andACustomListArrangesToo() {
+        Member alex = signedIn("Alex");
+        String code = alex.getHomeCode();
+        ListItem milk = lists.add(code, ListKind.TODO, alex.getId(), "Milk").orElseThrow();
+        ListItem eggs = lists.add(code, ListKind.TODO, alex.getId(), "Eggs").orElseThrow();
+        Member kim = service.createHome("Elsewhere", "Kim");
+        String theirCode = kim.getHomeCode();
+        ListItem theirs = lists.add(theirCode, ListKind.TODO, kim.getId(), "Theirs").orElseThrow();
+        lists.add(theirCode, ListKind.TODO, kim.getId(), "Theirs too");
+        openLists(1);
+        ListPanel panel = $(ListPanel.class).first();
+
+        panel.place(theirs.getId(), milk.getId());
+        panel.place(eggs.getId(), theirs.getId());
+        assertEquals(List.of("Milk", "Eggs"), rowTexts(), "nothing moved here");
+        assertEquals(List.of("Theirs", "Theirs too"), lists.openItems(theirCode, ListKind.TODO).stream()
+                .map(ListItem::getText).toList(), "nor there");
+
+        lists.setDone(milk.getId(), alex.getId(), true);
+        awaitRedraw(() -> rows().stream().anyMatch(r -> r.getClassNames().contains("done")));
+        Div ticked = rows().stream().filter(r -> r.getClassNames().contains("done")).findFirst().orElseThrow();
+        assertFalse(ticked.getElement().hasAttribute("data-item-id"), "a ticked line cannot be lifted");
+        assertFalse(((Div) ticked.getParent().orElseThrow()).getClassNames().contains("draggable"),
+                "and the Done section is no drop target");
+        panel.place(milk.getId(), eggs.getId());
+        assertEquals(List.of("Eggs"), lists.openItems(code, ListKind.TODO).stream()
+                .map(ListItem::getText).toList(), "a ticked line is not arranged");
+
+        CustomList gifts = lists.createList(code, alex.getId(), "Gifts").orElseThrow();
+        ListItem socks = lists.add(code, ListKind.TODO, gifts.getId(), alex.getId(), "Socks").orElseThrow();
+        ListItem book = lists.add(code, ListKind.TODO, gifts.getId(), alex.getId(), "Book").orElseThrow();
+        panel.show(ListKind.TODO, gifts.getId());
+        assertEquals(List.of("Socks", "Book"), rowTexts());
+        assertTrue(((Div) rows().get(0).getParent().orElseThrow()).getClassNames().contains("draggable"));
+        panel.place(book.getId(), socks.getId());
+        awaitRedraw(() -> rowTexts().equals(List.of("Book", "Socks")));
+        assertEquals(List.of("Book", "Socks"), rowTexts(), "a custom list is the family's to arrange too");
+        panel.place(socks.getId(), eggs.getId());
+        assertEquals(List.of("Book", "Socks"), rowTexts(), "a neighbour on the To-do list is no neighbour here");
+    }
+
+    /** ↑/↓ are the keyboard path to arranging a list: on the plain lines only, disabled at the
+     *  ends of the plain run, and a press moves the line the way a drop there would. */
+    @Test
+    void theArrows_sitOnPlainLinesOnly_stopAtTheEnds_andMoveALine() {
+        Member alex = signedIn("Alex");
+        String code = alex.getHomeCode();
+        ListItem milk = lists.add(code, ListKind.TODO, alex.getId(), "Milk").orElseThrow();
+        lists.add(code, ListKind.TODO, alex.getId(), "Eggs");
+        lists.add(code, ListKind.TODO, alex.getId(), "Bread");
+        ListItem taxes = lists.add(code, ListKind.TODO, alex.getId(), "Taxes").orElseThrow();
+        reminders.schedule(taxes.getId(), alex.getId(), Instant.now().plus(Duration.ofMinutes(5)), Locale.ENGLISH);
+        lists.setDone(milk.getId(), alex.getId(), true);
+        openLists(1);
+        assertEquals(List.of("Taxes", "Eggs", "Bread", "Milk"), rowTexts());
+
+        assertTrue($(Button.class, rows().get(0)).all().stream().noneMatch(b -> b.hasClassName("list-move-btn")),
+                "a line pinned by its reminder has no arrows");
+        assertTrue($(Button.class, rows().get(3)).all().stream().noneMatch(b -> b.hasClassName("list-move-btn")),
+                "nor has a ticked line");
+        assertFalse(button(rows().get(1), "list-move-up").isEnabled(), "the first plain line cannot go up");
+        assertTrue(button(rows().get(1), "list-move-down").isEnabled());
+        assertTrue(button(rows().get(2), "list-move-up").isEnabled());
+        assertFalse(button(rows().get(2), "list-move-down").isEnabled(), "the last plain line cannot go down");
+        assertEquals("Move up", button(rows().get(2), "list-move-up").getAriaLabel().orElseThrow());
+
+        test(button(rows().get(1), "list-move-down")).click();
+        awaitRedraw(() -> rowTexts().equals(List.of("Taxes", "Bread", "Eggs", "Milk")));
+        assertEquals(List.of("Taxes", "Bread", "Eggs", "Milk"), rowTexts(), "down past the bread");
+        test(button(rows().get(2), "list-move-up")).click();
+        awaitRedraw(() -> rowTexts().equals(List.of("Taxes", "Eggs", "Bread", "Milk")));
+        assertEquals(List.of("Taxes", "Eggs", "Bread", "Milk"), rowTexts(), "and back up");
+        assertEquals(List.of("Eggs", "Bread", "Taxes"), lists.openItems(code, ListKind.TODO).stream()
+                .map(ListItem::getText).toList(), "written through to the family's order");
     }
 
     private List<String> rowTexts() {
