@@ -320,7 +320,18 @@ class ListPanel extends VerticalLayout {
 
         Div openList = new Div();
         openList.addClassName("shared-list");
-        for (ListItem item : open) {
+        // Due reminders first, the family's own order, then the far-off reminders — and the
+        // hold-and-drag (list-drag.js) for the plain lines in between, for everyone: a shared
+        // list is shared. The class is a hint to the browser; placeItem re-checks the member.
+        openList.addClassName("draggable");
+        openList.getElement().addEventListener("list-place", e -> place(
+                        ClientId.parse(e.getEventData().path("event.detail.itemId").asString()),
+                        ClientId.parse(e.getEventData().path("event.detail.beforeItemId").asString())))
+                .addEventData("event.detail.itemId")
+                .addEventData("event.detail.beforeItemId");
+        List<ListItem> shown = ListItemService.displayOrder(open, armed,
+                LocalDate.now(SessionContext.timeZone()), SessionContext.timeZone());
+        for (ListItem item : shown) {
             openList.add(itemRow(item, names, armed.get(item.getId())));
         }
         body.add(openList);
@@ -567,8 +578,27 @@ class ListPanel extends VerticalLayout {
         row.addClassName("list-item");
         if (item.isDone()) {
             row.addClassName("done");
+        } else if (reminder == null) {
+            // Only a plain open line can be lifted or landed beside: a reminder pins its line by
+            // its due time, and the id is what list-drag.js lifts by.
+            row.getElement().setAttribute("data-item-id", String.valueOf(item.getId()));
         }
         return row;
+    }
+
+    /**
+     * Puts a dragged line where it was dropped: before {@code beforeItemId}, or at the end when
+     * that is null. The ids were read back from the browser, so the service checks both against
+     * this session's home before anything moves; when nothing changed there is no push coming,
+     * so the preview is undone here by redrawing.
+     */
+    void place(Long itemId, Long beforeItemId) {
+        if (itemId == null) {
+            return;
+        }
+        if (!lists.placeItem(homeCode, memberId, itemId, beforeItemId)) {
+            refresh();
+        }
     }
 
     private void editDialog(ListItem item) {

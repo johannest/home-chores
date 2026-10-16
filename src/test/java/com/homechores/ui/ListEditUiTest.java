@@ -281,4 +281,43 @@ class ListEditUiTest extends SpringUIUnitTest {
                 picker.getValue(), "on the reminder's own time, not tomorrow 9:00");
         assertTrue($(Button.class, d).all().stream().anyMatch(b -> "Update reminder".equals(b.getText())));
     }
+
+    /** Lines with a reminder sort by when they are due — soon ones up, far ones down — and only
+     *  the plain lines between them can be lifted; a drop through the panel rearranges them. */
+    @Test
+    void remindersSortByDueDate_andHoldingAndDraggingAPlainLine_reordersIt() {
+        Member alex = signedIn("Alex");
+        String code = alex.getHomeCode();
+        ListItem milk = lists.add(code, ListKind.TODO, alex.getId(), "Milk").orElseThrow();
+        ListItem plumber = lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber").orElseThrow();
+        ListItem eggs = lists.add(code, ListKind.TODO, alex.getId(), "Eggs").orElseThrow();
+        ListItem taxes = lists.add(code, ListKind.TODO, alex.getId(), "Taxes").orElseThrow();
+        reminders.schedule(plumber.getId(), alex.getId(), Instant.now().plus(Duration.ofDays(20)), Locale.ENGLISH);
+        reminders.schedule(taxes.getId(), alex.getId(), Instant.now().plus(Duration.ofMinutes(5)), Locale.ENGLISH);
+        openLists(1);
+
+        assertEquals(List.of("Taxes", "Milk", "Eggs", "Call the plumber"), rowTexts(),
+                "due in five minutes leads, due in twenty days trails, the plain lines between");
+        Div list = (Div) rows().get(0).getParent().orElseThrow();
+        assertTrue(list.getClassNames().contains("draggable"), "anyone in the home may arrange it");
+        assertEquals(List.of(false, true, true, false),
+                rows().stream().map(r -> r.getElement().hasAttribute("data-item-id")).toList(),
+                "only the plain lines carry the id a hold can lift by");
+
+        $(ListPanel.class).first().place(eggs.getId(), milk.getId());
+        assertEquals(List.of("Taxes", "Eggs", "Milk", "Call the plumber"), rowTexts(), "eggs before milk");
+        assertEquals(List.of("Eggs", "Milk"), lists.openItems(code, ListKind.TODO).stream()
+                .filter(l -> !l.equals(plumber) && !l.getId().equals(taxes.getId()) && !l.getId().equals(plumber.getId()))
+                .map(ListItem::getText).toList(), "written through to the family's order");
+
+        $(ListPanel.class).first().place(milk.getId(), 999_999L);
+        assertEquals(List.of("Taxes", "Eggs", "Milk", "Call the plumber"), rowTexts(),
+                "a neighbour that is not ours moves nothing, and the preview is redrawn");
+    }
+
+    private List<String> rowTexts() {
+        return rows().stream().map(r -> $(Div.class, r).all().stream()
+                .filter(d -> d.getClassNames().contains("list-text")).findFirst().orElseThrow().getText())
+                .toList();
+    }
 }

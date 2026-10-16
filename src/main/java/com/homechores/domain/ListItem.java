@@ -61,6 +61,20 @@ public class ListItem {
      *  lines. Nullable, so adding it to an existing table needs no default. */
     private Long listId;
 
+    /**
+     * The family's own order of the open lines on a list, ascending; set by a hold-and-drag on
+     * the list, left as it was by everything else. Lines with a reminder are shown around this
+     * order by their due time (see {@code ListItemService.displayOrder}); the number is still
+     * theirs, for the day the reminder is gone.
+     *
+     * <p>The column default matters, as on {@link ChoreTask#getSortOrder()}: {@code ddl-auto=update}
+     * adds this to a table that already has every family's lines in it, and H2 refuses a plain
+     * {@code not null} column there. Existing lines adopt 0 and the open-line queries tie-break
+     * on {@code createdAt}, so a family that never drags keeps the writing order they had.
+     */
+    @Column(columnDefinition = "integer not null default 0")
+    private int sortOrder = 0;
+
     protected ListItem() {
     }
 
@@ -137,6 +151,14 @@ public class ListItem {
 
     public void setListId(Long listId) {
         this.listId = listId;
+    }
+
+    public int getSortOrder() {
+        return sortOrder;
+    }
+
+    public void setSortOrder(int sortOrder) {
+        this.sortOrder = sortOrder;
     }
 
     public boolean isDone() {

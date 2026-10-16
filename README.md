@@ -37,7 +37,7 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Chore groups & order** | Admins can create groups (🍳 Kitchen, 🧺 Laundry) that become headings on the board, and arrange them: **hold a card on the board and drag it** to where it belongs (into another group too), or use the ↑/↓ items in the Admin tab. Ungrouped chores sit under *Other chores*. Deleting a group keeps its chores. Rearranging is purely cosmetic: it never changes who the daily rotation assigns what to. |
 | **Admin CRUD** | Under the **Admin** tab: add/edit/delete chores (name, emoji, group, interval, credits, hours), rename/remove members, promote/demote admins, rename the home, change the PIN. |
 | **Optional approval** | Admins can require approval. Completions then wait as **pending** until an admin **approves** (counts) or **rejects** (discarded). A badge shows the pending count. |
-| **Shared lists** | A **Lists** tab with **Groceries**, **To-do** and **Dinner** for the whole family. Anyone adds a line, whoever is at the store ticks it off — nothing here is a chore, so ticking earns no credits and starts no streak. Ticked lines show struck through with who ticked them, can be unticked, and vanish after 24 h (or on **Clear done**). **Dinner** is a sliding window of today plus a full week: one free-text slot per day, labelled with the weekday, today highlighted; as days pass a new empty slot appears at the far end, and a Sunday plan still reaches next Sunday. Included in backups. |
+| **Shared lists** | A **Lists** tab with **Groceries**, **To-do** and **Dinner** for the whole family. Anyone adds a line, whoever is at the store ticks it off — nothing here is a chore, so ticking earns no credits and starts no streak. Ticked lines show struck through with who ticked them, can be unticked, and vanish after 24 h (or on **Clear done**). **Hold a line and drag it** to arrange the list, the way the board is arranged; a line with a reminder sorts itself instead — due today it leads the list, due next month it waits at the bottom. **Dinner** is a sliding window of today plus a full week: one free-text slot per day, labelled with the weekday, today highlighted; as days pass a new empty slot appears at the far end, and a Sunday plan still reaches next Sunday. Included in backups. |
 | **List reminders** | Tap 🔔 on a to-do or grocery line and pick *in 1 hour / tomorrow 9:00 / next week / next month*, or a date and time — one push notification naming the line goes to **everyone in the home**, and the line shows when it will fire. When it does, opening the app (or tapping the notification) shows the reminder with the same choices to **snooze** it, plus **Done** and **Dismiss** — so it works on iPhone too, where notifications have no buttons. Anyone can move or cancel it; ticking the line off clears it. Needs the same VAPID keys as the other reminders. |
 | **Statistics & charts** | The **Stats** tab opens on four counts side by side — **today, this week, this month, all time** — and tapping a count picks that period for the charts below. Personal charts (chores by type, **💎 diamonds earned** today / this week / this month / all time with a 7-day trend, **💎 diamonds redeemed** — earned · redeemed · balance, then each reward the admin noted — feedback split, 7-day trend) plus **12-week and 12-month trends** for the longer view. Admins also get **Home stats**: per-member totals, **what each member did** (every member's own chores-by-type chart, folded), **redeemed rewards** (who redeemed what, by name), chore popularity, feedback per chore, 14-day activity, daily-goal adherence. Charts are dependency-free (no licensed add-on). |
 | **Delete the home** | A **Danger zone** at the bottom of the Admin tab wipes the whole family — members, chores, completions, credits, settings. Confirmed by typing the home code, and it prompts for a backup first. Everyone still on the board is signed out live. |
@@ -356,6 +356,7 @@ src/main/java/com/homechores/
     ├── DeviceIdentity.java       # member id kept in the browser's local storage
     ├── HomeView.java             # header + Chores / Stats / Admin tab host, share links
     ├── ChoresPanel.java          # daily ring, leaderboard, chore cards + badges
+    ├── ClientId.java             # parses an id read back from a browser event (drops)
     ├── StatsPanel.java           # personal + home charts
     ├── AdminPanel.java           # approvals, settings, members, chores, rewards, backup,
     │                             #   danger zone (delete the whole home)
@@ -376,7 +377,9 @@ src/main/resources/
 └── META-INF/resources/icons/     # PWA icons + iOS splash screens (generated set)
 src/main/frontend/confetti.js     # self-contained confetti (no CDN)
 src/main/frontend/list-swipe.js   # swipe-to-reveal actions on list lines
-src/main/frontend/board-drag.js   # hold-and-drag to arrange the board (admins)
+src/main/frontend/hold-drag.js    # the hold-and-drag gesture: lift, preview, drop event
+src/main/frontend/board-drag.js   # …configured for the board's chore cards (admins)
+src/main/frontend/list-drag.js    # …configured for the lines of a shared list (everyone)
 src/test/java/com/homechores/     # JUnit service tests + Vaadin UI unit tests
 ```
 

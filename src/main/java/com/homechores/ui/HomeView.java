@@ -52,6 +52,7 @@ import java.util.Optional;
 @JsModule("./confetti.js")
 @JsModule("./list-swipe.js")
 @JsModule("./board-drag.js")
+@JsModule("./list-drag.js")
 public class HomeView extends VerticalLayout implements BeforeEnterObserver {
 
     private enum PanelTab { CHORES, LIST, STATS, ADMIN }

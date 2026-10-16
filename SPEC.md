@@ -255,6 +255,12 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   redemption with the reward the admin noted ("movie night") — so a balance near zero is not read
   as "never has any diamonds". As an admin, Home stats list the whole family's redemptions by
   name, newest first.
+- **US-59 Arrange a list, and let reminders sort themselves.** As a family member, I can hold a
+  line on a shared list and drag it to where it belongs, the way the admin arranges the board, so
+  the shopping list reads in the order of the aisles. A line I set a reminder on sorts itself by
+  when it is due instead: due today or already nagging, it leads the list; due next week or next
+  month, it waits at the bottom — "call the plumber, next month" stops sitting between the milk
+  and the bread.
 - **US-52 See what I did today, this week, this month.** As a family member, my statistics open on
   a row of four counts — today, this week, this month, all time — and I can narrow the charts to
   any of them, so "am I keeping up?" is answerable at a glance instead of inferable from a 7-day
@@ -435,8 +441,9 @@ and the next interaction signs the phone straight back in.
 - **Order** is `ChoreTask.sortOrder`, dense 0..n-1 within each group, arranged with ↑/↓ in the
   Admin tab or by **holding and dragging a card on the board**. Arrows are disabled at the ends
   of a bucket, not hidden, so rows do not reflow as things move; they stay as the keyboard path.
-- **Hold-and-drag** (`board-drag.js`, admins only): hold a chore card still for 450 ms and it
-  lifts (a swell at 60 % of the hold says the hold is being noticed; a short vibration where the
+- **Hold-and-drag** (`board-drag.js`, admins only — a configuration of the shared
+  `hold-drag.js`, which `list-drag.js` reuses for shared lists, §4.4e): hold a chore card still
+  for 450 ms and it lifts (a swell at 60 % of the hold says the hold is being noticed; a short vibration where the
   device has one); drag it and the other cards reflow around the slot, like apps on a phone's
   home screen; let go and it stays. Dropping it in another section moves it into that group.
   Not HTML5 drag-and-drop, which does not fire on mobile touch: pointer events, with a
@@ -562,7 +569,7 @@ message and shows a matching badge on the card (`LockReason`):
 - A **Lists** tab between Chores and Stats, for everyone. Three sub-tabs, **Groceries**,
   **To-do** and **Dinner**, backed by one table (`ListItem`: `homeCode`, `kind`
   GROCERY/TODO/DINNER, `text` ≤ 160, `createdAt`, `createdByMemberId`, `doneAt`,
-  `doneByMemberId`, nullable `day` for dinners).
+  `doneByMemberId`, nullable `day` for dinners, `sortOrder`).
 - **Not chores.** Ticking a line creates no `Completion`, earns no credits, starts no streak
   and needs no approval — whoever is at the store ticks the milk off. That is why the feature
   lives in its own `ListItemService` rather than in `ChoreService`.
@@ -572,6 +579,33 @@ message and shows a matching badge on the card (`LockReason`):
 - Quick entry: a text box with Enter-to-add at the top of the list; the half-typed draft is a
   panel field, so another phone's edit re-rendering the panel does not lose it. Blank lines
   add nothing; long lines are clipped (`InputLimits.LIST_ITEM`).
+- **Order.** Open lines are shown in the family's own order, `ListItem.sortOrder` ascending
+  with `createdAt` as the tie-break — so a list nobody has arranged (every line at 0) reads in
+  writing order, exactly as before. **Hold-and-drag** (`list-drag.js`, the same gesture as the
+  board's, §4.2b, from the shared `hold-drag.js`) rearranges it, for *everyone* in the home: a
+  shared list is shared, and whoever is at the store arranges it. The drop dispatches
+  `list-place` on `.shared-list` with the dragged line's id and the next arrangeable line's id
+  (blank = the end); `ListItemService.placeItem` checks both ids against the *session's* home —
+  the ids come from the browser — refuses a line that is gone, ticked, a dinner slot, another
+  home's, or a neighbour on another list, renumbers the list's open lines densely 0..n-1 and bumps
+  the home; a drop that changes nothing writes nothing and the panel redraws so the preview snaps
+  back. A new line gets the position after the last one, so it still lands at the bottom of an
+  arranged list; ticking and unticking keep a line's number. The upgrade is invisible, as the
+  board's was: the column lands on existing rows at 0 with a default (`ddl-auto=update` on a table
+  that already has every family's lines in it), and the first drag on a list is what gives it
+  real positions.
+- **Reminders sort themselves** (`ListItemService.displayOrder`): a line with a reminder is not
+  the family's to arrange — it is pinned by its due time. Lines whose reminder is **due** (fired
+  and unanswered, or due by the end of today in the viewer's zone, the zone the badge is
+  formatted in) lead the list, soonest first; then the plain lines in the family's order; then
+  lines whose reminder is further off, soonest first. "Tomorrow 9:00" waits below the plain lines
+  until midnight and then leads; "next month" sits at the bottom until its day comes. A pinned
+  line carries no `data-item-id`, so it can be neither lifted nor landed on, and the drag's run of
+  landable lines is bounded by the pinned ones above and below. Underneath, the line keeps its own
+  `sortOrder`, so once the reminder is answered or cancelled it drops back into the family's order
+  where it was. The swipe (`list-swipe.js`) and the hold coexist on the same row: a finger that
+  moves within the 450 ms hold swipes or scrolls and never lifts, and once a line is lifted the
+  swipe script stands down for that gesture.
 - Ticked lines sink to a **Done (n)** section, struck through, with who ticked them and when.
   Ticking an already ticked line keeps the original ticker (two phones racing must not flip
   it). Unticking clears both stamps.
@@ -904,7 +938,8 @@ message and shows a matching badge on the card (`LockReason`):
   shared: one `ListReminder` per line, pushed to every subscribed device in the home (each in its
   own member's language via `Member.reminderLocale`), badged under the line for everyone
   ("⏰ 9:00", "⏰ 19.9. 9:00", "⏰ in 12d" — absolute, never relative, for the reason the chore
-  badge is), and movable or cancellable by anyone in the home. Because it is the family's
+  badge is), and movable or cancellable by anyone in the home. The reminder also decides where
+  the line sits on its list — due ones lead, far-off ones trail (§4.4e). Because it is the family's
   business, arming, answering and firing all **bump `HomeState`** — again unlike the chore snooze.
   Upserted per line in the service, not with a unique index (`ddl-auto=update`, §4.13b).
 - **Fired is not finished.** Vaadin's generated service worker answers a notification tap by
@@ -1251,6 +1286,23 @@ scales up, not the other way round.
   reminder. Plus `SnoozeUiTest` (push mocked as configured): a chip on every chore card and none on
   the 🙋/＋ tiles, no chips at all without VAPID keys, the dialog offers every offset, and an armed
   reminder badges its own card and only that one.
+- **Shared lists** (`ListItemServiceTest`): writing order per list and clipping; blank lines and
+  strangers refused; ticking stamps who and when, unticking clears, nothing becomes a chore; done
+  lines hide after a day and the purge reclaims them; clear-done per list; delete for any member
+  and no outsider; dinner upsert, inclusive window, weekly purge; every edit bumps the home.
+  **Arranging**: a drop lands before its neighbour or at the end, a drop that changes nothing or
+  "before itself" says so, a new line still goes last on an arranged list, and ticking plus
+  unticking keeps a line's place; a stranger is refused, and another home's line (dragged or as the
+  neighbour), a neighbour on another list, a ticked line and a dinner slot all move nothing.
+  **Display order**: due reminders lead soonest first, far-off ones trail soonest first, the plain
+  lines keep the family's order between them, "tomorrow 9:00" is below the plain lines today and
+  above them tomorrow, and with no reminders the display order is the family's order. Plus
+  `ListEditUiTest`: tapping the text edits, the swipe tray edits and deletes, the reminder badge
+  opens its time; rows with a reminder sort by due date and carry no id while plain rows do, the
+  list is `draggable` for a member, a drop through the panel reorders the rows and the family's
+  order, and a drop beside an id that is not ours moves nothing. `BackupServiceTest`: an arranged
+  list comes back arranged, and a file from before lines could be arranged comes back in writing
+  order.
 - **List-line reminders** (`ListReminderServiceTest`, sender mocked): fires once to every device
   in the home and is then marked fired rather than deleted, never sent twice; nothing before its
   time; scheduling twice moves the one reminder and anyone in the home may move it; snoozing a

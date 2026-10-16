@@ -8,12 +8,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 public interface ListItemRepository extends JpaRepository<ListItem, Long> {
 
-    /** Open lines of one list, oldest first — the order people wrote them in. */
-    List<ListItem> findByHomeCodeAndKindAndListIdIsNullAndDoneAtIsNullOrderByCreatedAtAscIdAsc(
+    /** Open lines of one list in the family's order: dragged positions first, and among lines
+     *  never dragged (all at 0), the order people wrote them in. */
+    List<ListItem> findByHomeCodeAndKindAndListIdIsNullAndDoneAtIsNullOrderBySortOrderAscCreatedAtAscIdAsc(
             String homeCode, ListKind kind);
 
-    /** Open lines of one of the home's own lists. */
-    List<ListItem> findByListIdAndDoneAtIsNullOrderByCreatedAtAscIdAsc(Long listId);
+    /** Open lines of one of the home's own lists, in the same order. */
+    List<ListItem> findByListIdAndDoneAtIsNullOrderBySortOrderAscCreatedAtAscIdAsc(Long listId);
 
     /** Recently ticked lines of one list, most recently ticked first. The cutoff is how the
      *  24-hour retention is applied at read time; the sweep only deletes what this already hides. */
