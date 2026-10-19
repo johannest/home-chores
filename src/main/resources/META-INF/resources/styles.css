@@ -168,6 +168,30 @@ vaadin-select::part(label) {
     max-width: 220px;
 }
 
+/* The same card, drawn by loading-overlay.js on every page for a request that is taking long
+   (from the indicator's second stage, 1.5 s — LoadingOverlayInitListener). It is a popover so
+   that it covers an open dialog too; the browser's popover defaults (fit-content box, border,
+   padding, hidden only while closed) are undone here so .restore-overlay's full-bleed card is
+   what shows. */
+.loading-overlay:not(:popover-open) {
+    display: none;
+}
+.loading-overlay {
+    width: auto;
+    height: auto;
+    margin: 0;
+    border: 0;
+    padding: env(safe-area-inset-top) 0 0;
+    overflow: hidden;
+    color: inherit;
+}
+
+/* The bar for the first stage, moved out from under the camera island: with viewport-fit=cover
+   the viewport's top edge is the phone's, not the status bar's. */
+vaadin-connection-indicator .v-loading-indicator {
+    top: env(safe-area-inset-top, 0px);
+}
+
 .brand-title {
     display: inline-flex;
     align-items: center;

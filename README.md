@@ -45,7 +45,7 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Backup / restore** | Admins can download a JSON backup of the whole family (settings, members, chores, groups and their order, completions, credits, spree tiers) and restore from one (replaces current data after a confirmation). |
 | **Live sync** | Vaadin **Signals**: each home has a revision signal (`HomeState`) that every open UI observes via `Signal.effect`, delivered over server push (long-polling). Completions, approvals, leaderboard, badges and pending counts update on everyone's screen instantly. |
 | **Languages** | English (default), Finnish, Swedish. The browser language picks the initial locale; the header switcher stores the choice in a `lang` cookie. Default chores are seeded in the creator's language. |
-| **Built for phones** | Laid out for a ~360px column first: no horizontal scrolling anywhere, safe-area padding for the notch and home indicator, `100dvh` against iOS Safari's collapsing URL bar, 40px touch targets, and no sticky `:hover` states after a tap. The board header collapses Copy/Share to icons and stacks onto two rows so chores are visible without scrolling. See SPEC §4.15.1. |
+| **Built for phones** | Laid out for a ~360px column first: no horizontal scrolling anywhere, safe-area padding for the notch and home indicator, `100dvh` against iOS Safari's collapsing URL bar, 40px touch targets, and no sticky `:hover` states after a tap. The board header collapses Copy/Share to icons and stacks onto two rows so chores are visible without scrolling. A request that takes longer than **1.5 s** covers the page with the same *Getting your chores…* card the app starts with, so the first tap after a session expired reads as a reload rather than a dead app. See SPEC §4.15.1 and §4.1.2. |
 | **PWA install** | Installable on Android (install prompt) and iPhone (Share → *Add to Home Screen*): branded icon, standalone display, themed splash screens, offline fallback page. |
 | **Privacy page** | A plain-language privacy notice at `/privacy` and a brief user agreement at `/terms` (consented via a checkbox on the create/join forms), both linked from the landing page. |
 | **Themes & colours** | Follows the OS theme automatically (`@ColorScheme(SYSTEM)` + CSS `light-dark()`), and one palette-glyph menu in the header holds both axes: auto/light/dark **and** a brand colour — **green, pink, blue or grey**. Both are per device (localStorage), applied before Vaadin loads so there's no flash. A palette is three CSS custom properties, so it composes with light/dark instead of duplicating it. |
@@ -368,6 +368,8 @@ src/main/java/com/homechores/
     ├── Celebrations.java         # confetti + congratulation + feedback dialogs
     ├── PrivacyView.java          # /privacy notice
     ├── LanguageSwitcher.java     # en/fi/sv select, persisted in a cookie
+    ├── SessionExpiryInitListener.java  # silent expiry: back to the landing page, which restores
+    ├── LoadingOverlayInitListener.java # the "Getting your chores…" card for a slow request
     ├── SessionContext.java       # who am I / which home / my time zone (VaadinSession)
     │                             #   — short-lived; DeviceIdentity is what outlives it
     └── T.java                    # small translation helper
@@ -376,6 +378,7 @@ src/main/resources/
 ├── META-INF/resources/styles.css # app styling (Lumo tweaks + components)
 └── META-INF/resources/icons/     # PWA icons + iOS splash screens (generated set)
 src/main/frontend/confetti.js     # self-contained confetti (no CDN)
+src/main/frontend/loading-overlay.js # the loading card, built from the landing restore card's classes
 src/main/frontend/list-swipe.js   # swipe-to-reveal actions on list lines
 src/main/frontend/hold-drag.js    # the hold-and-drag gesture: lift, preview, drop event
 src/main/frontend/board-drag.js   # …configured for the board's chore cards (admins)
@@ -419,8 +422,8 @@ accessibility, and QA. The checklist each one walks through lives in [`CLAUDE.md
 - Members are identified per device (a phone = a member): the member id lives in the
   browser's local storage and is restored into a fresh session on every visit. Two people
   on the *same* browser share one identity — fine for real use where everyone has their
-  own phone. Server sessions are deliberately left at Spring's 30-minute default, so an
-  idle phone costs the server nothing.
+  own phone. Server sessions are deliberately short — 5 minutes for a member, 20 for an
+  admin (SPEC §4.1.2) — so an idle phone costs the server nothing.
 - Clearing browsing data is the one thing local storage doesn't survive; the
   "I'm already a member" flow on the Join tab is the recovery path. It's gated by
   `Home.approveRejoin` (default on) because the home code travels in join links — without
@@ -435,3 +438,6 @@ accessibility, and QA. The checklist each one walks through lives in [`CLAUDE.md
 - Possible next steps: weekly/monthly leaderboards, real accounts.
 - A mobile UX review from 2026-09-16 with a prioritised fix list lives in
   `docs/UX-REVIEW-2026-09-16.md`.
+- What happens when a phone comes back to an expired session, measured, and the options
+  for making that reload shorter (identity cookie, static restore card, one render per
+  load, keep-alive while visible) are in `docs/SESSION-REVIVE-2026-10-19.md`.

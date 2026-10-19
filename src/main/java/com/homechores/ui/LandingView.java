@@ -155,7 +155,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         H1 title = brandTitle();
         ProgressBar bar = new ProgressBar();
         bar.setIndeterminate(true);
-        Paragraph text = new Paragraph(T.tr("landing.restoring"));
+        Paragraph text = new Paragraph(T.tr("app.loading"));
         text.addClassName("brand-sub");
         restoring.add(title, bar, text);
     }

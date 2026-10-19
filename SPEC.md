@@ -283,6 +283,11 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   and put chores in them, so a long board reads as sections instead of one wall of cards.
   Chores I do not group sit under "Other chores" at the bottom. Deleting a group keeps its
   chores and their history; it is a label, not a container.
+- **US-60 A slow answer looks like loading, not like a broken app.** As a family member whose
+  tap is taking long — typically the first tap after my phone spent a while in my pocket and the
+  server let my session go — I see the same full-screen "Getting your chores…" card the app shows
+  while it starts, instead of a 4px bar hidden under the camera island, so I know to wait rather
+  than tap again or give up.
 
 ### Phase 5
 
@@ -420,6 +425,19 @@ and the next interaction signs the phone straight back in.
   so it is disabled and `sessionExpiredURL` points at `/`. The browser reloads the landing
   page, which restores the stored identity and returns to the board. A device waiting on a
   rejoin approval re-reads its token the same way and goes back to waiting.
+- **A long wait is shown as loading** (`LoadingOverlayInitListener`, `loading-overlay.js`).
+  Vaadin's loading indicator is a 4px bar along the top of the viewport — under a phone's camera
+  island — so a tap that takes seconds looks like a tap that did nothing. From the indicator's
+  second stage on, **1.5 s** into a request (`LoadingOverlayInitListener.OVERLAY_DELAY_MS`, after
+  the bar's own first stage), the page is covered by the landing page's restore card: built
+  client-side on every page from the same CSS classes, raised as a manual **popover** — the
+  browser's top layer, so it covers a dialog left open too — while the bar is in its second or
+  third stage, and given its text (`app.loading`, the key the landing card reads) by the server
+  in the UI's language. The first tap on an expired session therefore reads as the
+  app reloading, which is what it is, and a wait that ends in a reload runs straight into the
+  landing page's own copy of the card. An ordinary redraw — tens of milliseconds plus a round
+  trip — never reaches it. While the connection itself is down the card yields to Vaadin's
+  "Connection lost" message, and the first-stage bar is moved below `env(safe-area-inset-top)`.
 
 ### 4.2 Chores (CRUD — admin)
 - Create: name (required) + emoji (optional, default ✅) + **repeat every N days**
@@ -1130,7 +1148,8 @@ scales up, not the other way round.
   `max(<pad>, env(safe-area-inset-*))` on all four sides — top included, or the header
   slides under the iPhone camera island / Dynamic Island — to clear the notch and home
   indicator, and heights use `100dvh` (with a `100vh` fallback) to track iOS Safari's
-  collapsing URL bar. The fixed `.restore-overlay` pads its own top the same way.
+  collapsing URL bar. The fixed `.restore-overlay` (and the loading card built from it, §4.1.2)
+  pads its own top the same way.
 - **Header (≤640px).** The identity block and the action cluster each take a full row
   rather than pushing each other off-screen; the home name is one ellipsised line. Copy
   and Share collapse to icons — their glyphs are self-explanatory and they sit beside the
@@ -1284,7 +1303,11 @@ scales up, not the other way round.
   row with the member's name, a blank note reads "(no note)" and past ten rows the card counts
   the ones it left out; the admin's Home stats fold each member's own chores and keep an open fold open across
   a redraw; and the session lifetime is the member's until the PIN is entered, and the admin's
-  from then on.
+  from then on. `LoadingOverlayUiTest`: the loading card gets its text in the UI's language
+  (Finnish, English, Swedish) from the same key as the landing page's restore card, appears at
+  the indicator's second stage set to 1.5 s with the thin bar still first, and every new UI is
+  configured by the init listener. The card itself — covering the page at 1.5 s, yielding to the
+  connection-lost message — is browser behaviour, verified by hand in the browser pane.
 - **Statistics** (`StatsServiceTest`): my/home aggregates; 💎 earned follows an undo and ignores
   redemptions, bucketed by the day the credit landed; 💎 redeemed lists the member's redemptions
   newest first with the note as the reward and a blank note as none, and earned − redeemed is the
