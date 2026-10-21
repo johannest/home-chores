@@ -196,7 +196,10 @@ payload — fine because the endpoint is loopback-only). Database row counts per
 (`vaadin.observability.database`) are left off. In development mode the kit also adds an
 **Observability** panel to Vaadin Copilot with the same findings and live meters.
 
-### Production runbook: Apache 2 in front, fat jar on 8080
+### Production runbook: the reverse proxy in front, fat jar on 8080
+
+The host runs LiteSpeed Enterprise under cPanel, which reads Apache-style config and
+`.htaccess`, so the directives below are written as Apache's.
 
 Nothing here changes how 8080 is served. The only new thing on the host is a loopback-only
 listener on 8090 for Actuator.
@@ -300,51 +303,84 @@ new properties. The Apache deny rule is harmless on the old version and can stay
 14. **Rate-limit the public port.** The in-app `RateLimiter` guards the three landing-page
     actions, but every `GET /` still builds a session and a UI that lives three minutes, and
     nothing in the app bounds how many of those a stranger can open. Put a coarse per-IP limit
-    in front: Cloudflare's free rate rule (step 4 below) or, without Cloudflare, `mod_evasive`
-    or `mod_qos` on Apache (LiteSpeed: per-client throttling in the vhost) at around 60
-    requests per 10 s per IP — generous for a phone, far below a script. Then confirm one
-    phone still works normally after the rule is on.
+    in front: Cloudflare's free rate rule (step 6 of the next section) — on a cPanel host that
+    is the one you control — at around 60 requests per 10 s per IP, generous for a phone and
+    far below a script. Then confirm one phone still works normally after the rule is on.
 
-### Behind Cloudflare (free tier)
+### Behind Cloudflare (free tier): step by step
 
-The app is Cloudflare-ready (the repo side is `vaadin.pushLongPollingSuspendTimeout=45000`
-in `application.properties` — Cloudflare kills idle requests at ~100 s and Apache's
-`ProxyTimeout` defaults to 60 s, and the suspended long-poll would otherwise sit open
-until one of them cuts it). Everything else is dashboard/proxy work:
+The origin is LiteSpeed Enterprise on a cPanel host (it reads Apache-style config, which is
+why the runbook above speaks Apache), proxying to the jar on `127.0.0.1:8080`. Three things
+are already on the app's side: the long-poll resumes every 45 s
+(`vaadin.pushLongPollingSuspendTimeout`, under Cloudflare's ~100 s idle cut), Cloudflare's
+edge addresses are trusted in the forwarded chain (`server.tomcat.remoteip.trusted-proxies`,
+so the rate limiter sees the visitor and not the edge), and the session cookie carries
+`SameSite=Lax`. Everything else is the Cloudflare dashboard and one `.htaccess`:
 
-1. **DNS & TLS**: proxy (orange-cloud) the apex + `www`; topology stays
-   CF → your TLS reverse proxy → `127.0.0.1:8080`. Set SSL mode to **Full (strict)** and
-   install a free Cloudflare **Origin CA certificate** on the proxy (or keep Let's
-   Encrypt via DNS-01). Recommended: firewall port 443 to [Cloudflare's IP
-   ranges](https://www.cloudflare.com/ips/) so the origin can't be reached around CF.
-2. **Real client IP — required, or the in-app rate limiter breaks.** Restore it at the
-   reverse proxy from `CF-Connecting-IP`; for nginx:
-   ```
-   # one line per range from https://www.cloudflare.com/ips/ (refresh occasionally)
-   set_real_ip_from 173.245.48.0/20;
-   # ... all other Cloudflare ranges ...
-   real_ip_header CF-Connecting-IP;
-   ```
-   `set_real_ip_from` means the header is only honored when the TCP peer really is
-   Cloudflare, so it can't be spoofed by direct hits. The app then needs no changes
-   (`server.forward-headers-strategy=native` keeps working). Without this, every visitor
-   shares a few CF edge IPs and one spammer's rate limit throttles everyone.
-3. **Cache Rules** (3 of the 10 free): `/VAADIN/build/*` → cache, edge TTL 1 year
+1. **Add the site.** Cloudflare → *Add a site* → the Free plan. It imports the DNS records;
+   check them: `A` apex → the origin's IP and `CNAME www` → apex, both **proxied** (orange
+   cloud); anything for mail (`MX`, `mail.`) stays **DNS only** (grey). Then change the
+   nameservers at the registrar to the two Cloudflare gives you and wait for the zone to
+   show *Active* (minutes to a day).
+2. **TLS.** *SSL/TLS → Overview*: **Full (strict)**. *Edge Certificates*: **Always Use
+   HTTPS** on, **Minimum TLS Version** 1.2. The origin certificate can stay as it is —
+   cPanel's AutoSSL keeps renewing through the proxy — or be a free Cloudflare **Origin CA**
+   certificate installed in cPanel → *SSL/TLS → Manage*. Leave Cloudflare's own HSTS off:
+   the origin already sends it (runbook step 13).
+3. **Real visitor IP.** On LiteSpeed 5.4.9 and later Cloudflare's ranges are trusted
+   automatically once the server-level setting *Use Client IP in Header* is **Trusted IP
+   only** (WebAdmin → *Configuration → Server → General*). That setting is the hosting
+   provider's, so ask them to confirm it — it is what makes LiteSpeed's own logs and
+   throttles see visitors rather than edges. The app does not depend on it: whatever
+   LiteSpeed forwards, Tomcat resolves the chain with the trusted-proxies list above. Step 8
+   proves it either way.
+4. **Switch Rocket Loader off** (*Speed → Optimization → Content Optimization*): it defers
+   every script and breaks the Vaadin bootstrap. *Caching → Configuration → Browser Cache
+   TTL*: **Respect Existing Headers**.
+5. **Cache Rules** (3 of the 10 free): `/VAADIN/build/*` → cache, edge TTL 1 year
    (content-hashed bundles; never cache `/VAADIN/` more broadly — the push endpoint lives
    under it); `/icons/*` and `/avatars/*` → cache, 1 month; **bypass** `/sw.js`,
    `/styles.css`, `/manifest.webmanifest` (stable un-hashed URLs — a stale edge-cached
    `sw.js` is the classic broken-PWA-update failure). Do not enable "Cache Everything".
-4. **Protection**: the Free Managed WAF ruleset is on by default. Bot Fight Mode is worth
-   a trial but is zone-wide and unscopable — if installed-PWA requests start getting
-   challenged, turn it off. Configure the one free **rate-limiting rule** as a coarse
-   backstop only, e.g. `POST` to `/` above ~60 requests/10 s per IP → block; anything
-   more aggressive breaks the app's own UIDL/heartbeat traffic (the real business limits
-   live in the in-app `RateLimiter`). "Under Attack" mode is the emergency lever; it
-   temporarily breaks already-open boards until reload. Cloudflare Turnstile on the
-   create-home form is a possible later addition.
-5. **Verify after cutover**: two devices on different networks get *separate* rate-limit
-   buckets (create 10 homes from one network — the other must not be blocked), push still
-   updates a second device live, and the PWA updates after a redeploy.
+6. **Protection.** The Free Managed WAF ruleset is on by default. The one free
+   **rate-limiting rule** is runbook step 14: *Security → WAF → Rate limiting rules*,
+   when `URI Path equals /` and `Request Method equals POST`, more than **60** requests per
+   **10 seconds** per IP → **Block** for 10 seconds. A coarse backstop only: anything
+   tighter breaks the app's own UIDL and heartbeat traffic (the business limits live in the
+   in-app `RateLimiter`). Bot Fight Mode is worth a trial but is zone-wide and unscopable —
+   if installed-PWA requests start getting challenged, turn it off. "Under Attack" mode is
+   the emergency lever; it breaks already-open boards until reload.
+7. **Lock the origin to Cloudflare** (recommended; skip if the host's AutoSSL breaks on it).
+   A shared cPanel host has no firewall you control, but LiteSpeed honours `.htaccess`, so
+   in the site's document root:
+   ```apache
+   # Only Cloudflare (https://www.cloudflare.com/ips, refresh occasionally) and the host itself.
+   <RequireAny>
+       Require ip 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18
+       Require ip 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17
+       Require ip 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22
+       Require ip 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32
+       Require ip 2a06:98c0::/29 2c0f:f248::/32
+       Require ip 127.0.0.1 <the server's own public IP>
+   </RequireAny>
+   ```
+   The server's own IP is for cPanel's AutoSSL self-check and anything local. With this, the
+   WAF and the rate rule cannot be walked around, and a forged forwarded-for header can only
+   arrive through Cloudflare, which overwrites it.
+8. **Verify.** From a laptop, not the host:
+   ```bash
+   curl -sI https://flashchores.com/ | grep -iE 'server:|cf-ray|set-cookie|strict-transport'
+   ```
+   must show `server: cloudflare`, a `cf-ray`, the cookie with `Secure; HttpOnly;
+   SameSite=Lax`, and HSTS. Then the three live checks: two devices on different networks
+   get *separate* rate-limit buckets (create 10 homes from one network — the other must not
+   be blocked; if it is, step 3 or the trusted-proxies list is wrong), a chore ticked on one
+   phone appears on the other without a reload, and a board left open for ten minutes keeps
+   its push connection (no reconnect notices). After the next deploy, confirm the installed
+   PWA picks the new version up.
+9. **Keep it current.** When Cloudflare's published ranges change (rare), update both the
+   `.htaccess` list and `server.tomcat.remoteip.trusted-proxies`; the regex in
+   `application.properties` names the date it was generated.
 
 ## Project structure
 
@@ -425,7 +461,9 @@ in-memory H2 database; UI tests use Vaadin's browserless **UI Unit Testing**
 test base class's `test(Chart)` overload resolves during JUnit scanning — the app never
 uses Charts.)* `ArchitectureTest` (ArchUnit) pins the package layering and the coding
 conventions listed in SPEC §6, so a stray repository in a view or a Vaadin import in a
-service fails the build rather than a review.
+service fails the build rather than a review. `TrustedProxiesTest` reads the Cloudflare edge
+regex out of the production `application.properties` the way Tomcat will, since a
+`.properties` file eats single backslashes.
 
 ### Code review
 

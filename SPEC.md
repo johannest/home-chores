@@ -1258,7 +1258,17 @@ scales up, not the other way round.
   long enough not to be guessable. **HTTPS is required in production**: the app binds
   loopback and expects a TLS-terminating reverse proxy — enforce HTTPS + HSTS there and send
   `X-Forwarded-Proto`, which is what makes Tomcat mark the session cookie `Secure`; the app
-  itself adds `SameSite=Lax` (§4.1.2).
+  itself adds `SameSite=Lax` (§4.1.2). Behind Cloudflare the edges are trusted in the
+  forwarded-for chain (`server.tomcat.remoteip.trusted-proxies`), so the client the rate
+  limiter keys on is the visitor, not the edge, whatever the proxy forwards.
+- **Response headers** (`SecurityHeadersInitListener`, on every request the app serves, so
+  they hold without the proxy): `X-Frame-Options: DENY` against click-jacking of the
+  authenticated board, `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+  strict-origin-when-cross-origin` so the invite URL (which carries the home code) never
+  reaches a third-party site as a referrer, and a `Permissions-Policy` that switches off
+  camera, microphone, geolocation, payment and USB — the clipboard, the share sheet and
+  notifications, which the app uses, are left alone. No CSP: Vaadin bootstraps with inline
+  scripts and `index.html` carries one, so a nonce-based policy is a project of its own.
 - **Identity storage**: the browser holds `memberId|homeCode|secret` — a per-device 128-bit
   secret whose SHA-256 the server checks on every restore — and, while a join/rejoin is
   pending, a separate 128-bit device token. No personal data. The secret *is* the
@@ -1421,6 +1431,13 @@ scales up, not the other way round.
 - **Message-bundle parity** (`MessageParityTest`): the three properties files carry identical key
   sets, and no parameterized value hides a lone apostrophe. A missing key fails nothing at
   runtime — it simply renders as the key — so it needs a test rather than a reviewer.
+- **Response headers** (`SecurityHeadersInitListenerTest`): the one handler sets all four
+  headers and returns the request to the normal chain. **Push endpoints**
+  (`PushEndpointsTest`): IPv6 unique-local, link-local, loopback and multicast literals are
+  private; public IPv6 and IPv4 addresses are not.
+- **Trusted proxies** (`TrustedProxiesTest`): the Cloudflare edge regex in
+  `application.properties` is read from the production file the way Tomcat will read it (a `.properties` file unescapes
+  backslashes) and matches edge addresses but not a visitor or the loopback proxy.
 - **Architecture rules** (`ArchitectureTest`, ArchUnit over the compiled main classes): the
   layering `ui → service → domain` with `i18n` a leaf and `maintenance` depended on by nothing;
   no package cycles; `domain` free of in-house and Vaadin dependencies; services free of Vaadin

@@ -115,13 +115,19 @@ public final class PushEndpoints {
     }
 
     /** Addresses that belong to the host or its network rather than the public internet. */
-    private static boolean isPrivate(InetAddress address) {
+    static boolean isPrivate(InetAddress address) {
         if (address.isAnyLocalAddress() || address.isLoopbackAddress()
                 || address.isLinkLocalAddress() || address.isSiteLocalAddress()
                 || address.isMulticastAddress()) {
             return true;
         }
         byte[] b = address.getAddress();
+        if (b.length == 16) {
+            // Unique local addresses, fc00::/7 — the IPv6 private network. The java.net
+            // predicate above knows only the deprecated site-local fec0::/10, so a name
+            // whose AAAA record points at fd00::1 would otherwise pass.
+            return (b[0] & 0xfe) == 0xfc;
+        }
         if (b.length == 4) {
             int first = b[0] & 0xff;
             int second = b[1] & 0xff;

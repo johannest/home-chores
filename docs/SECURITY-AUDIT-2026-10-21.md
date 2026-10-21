@@ -11,8 +11,8 @@ was changed by the audit.
 
 ## Verdict
 
-*Update, the same day:* the blocker and all eight should-fix items were fixed (and N-3 and N-6
-with them, as they fell inside the same code); each item below says how. The host check
+*Update, the same day:* the blocker and all eight should-fix items were fixed (and N-2, N-3,
+N-4, N-6 and N-8 after them); each item below says how. The host check
 (`curl -sI https://flashchores.com/`) showed `Secure; HttpOnly` on the cookie and HSTS already
 sent by the proxy, so SF-5 reduced to adding `SameSite` and writing the verify step down.
 Suite after the fixes: **497 tests, 0 failures** (`mvn clean test`, Java 25), up from 476.
@@ -167,18 +167,20 @@ should-fix items, of which the stale-admin dialog (SF-1) and the two cookie/prox
 - [ ] **N-1** No session-id rotation on sign-in (`SessionContext.signIn:66`; no
   `reinitializeSession` anywhere). Fixation needs an attacker able to plant a cookie first
   (XSS or a sibling subdomain), neither present; hygiene only. **Confirmed** absent.
-- [ ] **N-2** `SecurityHeadersInitListener` sets only `X-Frame-Options` and `nosniff`.
+- [x] **N-2** `SecurityHeadersInitListener` sets only `X-Frame-Options` and `nosniff`.
   `Referrer-Policy: strict-origin-when-cross-origin` and a `Permissions-Policy` cost a line
   each and keep `/?join=CODE` out of third-party referrers when a member taps an external
   link from the board. A full CSP is not recommended untested: Vaadin bootstraps with inline
   scripts and `index.html:66` has one too.
+  *Fixed*: both headers added, pinned by `SecurityHeadersInitListenerTest`; CSP left out as said.
 - [x] **N-3** `PushReminderService.removeSubscription:253` deletes by a client-supplied
   endpoint with no member scope. Endpoints are unguessable, so only someone already holding
   another device's endpoint could unsubscribe it; `deleteByEndpointAndMemberId` closes it.
   *Fixed* with SF-8.
-- [ ] **N-4** `PushEndpoints.isPrivate` relies on `isSiteLocalAddress`, which for IPv6 covers
+- [x] **N-4** `PushEndpoints.isPrivate` relies on `isSiteLocalAddress`, which for IPv6 covers
   only the deprecated `fec0::/10`, not ULA `fc00::/7`; an endpoint whose AAAA record points
   at `fd00::1` passes. Only matters if the host has IPv6-reachable internal services.
+  *Fixed*: fc00::/7 refused, pinned in `PushEndpointsTest`.
 - [ ] **N-5** DNS-rebinding window: `resolvesToPublicAddress` resolves, then the HTTP client
   resolves again. The JDK's positive cache narrows it; the payload is encrypted bytes POSTed
   with nothing read back, so impact is low.
@@ -191,9 +193,11 @@ should-fix items, of which the stale-admin dialog (SF-1) and the two cookie/prox
   subscribes from one endpoint, and there is no custom `ErrorHandler`, so an uncaught one
   would print an endpoint at WARN. Near-impossible; a custom error handler that logs the
   class only would close it.
-- [ ] **N-8** README's real-IP recipe for Cloudflare is for nginx while the runbook is Apache
+- [x] **N-8** README's real-IP recipe for Cloudflare is for nginx while the runbook is Apache
   (`mod_remoteip`, `RemoteIPHeader CF-Connecting-IP`, `RemoteIPTrustedProxy` ranges). Without
   it every visitor shares a few Cloudflare edge IPs and 10 creates/h locks out the world.
+  *Fixed*: the host is LiteSpeed on cPanel; the README section is now a step-by-step for it, and
+  the app trusts Cloudflare's edges in the forwarded chain itself.
 - [ ] **N-9** A stranger holding a home code can redraw every board in that home via
   `requestJoin` (`ChoreService.java:231`) and `cancelRejoin` (`:457`); bounded at 20 + 20 per
   hour per IP, so no real amplification. Likewise five wrong PINs lock a home's PIN check for
