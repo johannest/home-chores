@@ -1,0 +1,9 @@
+{
+  "name": "flashchores-demo-video",
+  "private": true,
+  "type": "module",
+  "description": "Records the FlashChores demo video with Playwright",
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}

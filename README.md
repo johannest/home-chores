@@ -444,6 +444,17 @@ src/main/frontend/hold-drag.js    # the hold-and-drag gesture: lift, preview, dr
 src/main/frontend/board-drag.js   # …configured for the board's chore cards (admins)
 src/main/frontend/list-drag.js    # …configured for the lines of a shared list (everyone)
 src/test/java/com/homechores/     # JUnit service tests + Vaadin UI unit tests
+tools/
+├── flashchores-admin.py          # operator maintenance: list / show / export / delete / restore / purge
+├── release.sh                    # deploy or roll back a release
+├── generate-icons.cjs            # regenerates the PWA icons + iOS splash screens
+├── observability/                # Prometheus + Grafana setup for the Observability Kit
+└── demo-video/                   # the vertical demo video, captioned and narrated
+    ├── run.sh                    # production jar on a throwaway database, then record + mix
+    ├── record.mjs                # Playwright drives the app; each caption waits for its line
+    ├── tts.py                    # speaks the lines with Kokoro, a local neural voice (.venv)
+    ├── requirements.txt          # Kokoro for that venv (plus brew install espeak-ng)
+    └── mix.sh                    # ffmpeg lays the voice under it -> video/flashchores-demo.mp4
 ```
 
 ## Tests
