@@ -26,6 +26,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
+import java.util.List;
+import com.homechores.domain.PushSubscription;
 
 /**
  * The daily "no chores logged yet" reminder sweep. The sender is mocked — these tests
@@ -210,5 +212,53 @@ class PushReminderServiceTest {
         Member m = service.createHome("Consent", "Alex");
         assertNotNull(members.findById(m.getId()).orElseThrow().getTermsAcceptedAt(),
                 "member creation is checkbox-gated, so creation implies consent");
+    }
+
+
+    /** A sixth device evicts the oldest: a member has a phone and maybe a tablet, and every row
+     *  is a DNS lookup and an HTTP exchange per reminder for the single sweep thread. */
+    @Test
+    void aSixthDevice_evictsTheOldest() {
+        Member m = reminderMember(); // one device already: https://push.example/<id>
+        String first = "https://push.example/" + m.getId();
+        for (int i = 1; i <= PushReminderService.MAX_DEVICES_PER_MEMBER; i++) {
+            reminders.storeSubscription(m.getId(), m.getHomeCode(),
+                    "https://push.example/extra/" + i, "k", "a");
+        }
+
+        List<PushSubscription> mine = subscriptions.findByMemberIdOrderByCreatedAtAscIdAsc(m.getId());
+        assertEquals(PushReminderService.MAX_DEVICES_PER_MEMBER, mine.size());
+        assertTrue(mine.stream().noneMatch(s -> s.getEndpoint().equals(first)), "the first went");
+        assertEquals("https://push.example/extra/1", mine.get(0).getEndpoint(), "oldest first");
+    }
+
+    /** A browser profile hands the same endpoint to whoever signs in on it, so the row follows
+     *  the subscriber — or a shared tablet would carry one family's reminders to the next. */
+    @Test
+    void reSubscribingFromAnotherMembersBrowser_movesTheRowToThem() {
+        Member alex = reminderMember();
+        Member robin = service.createHome("Elsewhere", "Robin");
+        String endpoint = "https://push.example/" + alex.getId();
+
+        reminders.storeSubscription(robin.getId(), robin.getHomeCode(), endpoint, "k2", "a2");
+
+        PushSubscription row = subscriptions.findByEndpoint(endpoint).orElseThrow();
+        assertEquals(robin.getId(), row.getMemberId());
+        assertEquals(robin.getHomeCode(), row.getHomeCode());
+        assertTrue(subscriptions.findByMemberId(alex.getId()).isEmpty(), "and Alex no longer has it");
+    }
+
+    /** Unsubscribing is scoped to the member's own row. */
+    @Test
+    void removingASubscription_onlyTouchesTheMembersOwn() {
+        Member alex = reminderMember();
+        Member robin = service.createHome("Elsewhere", "Robin");
+        String endpoint = "https://push.example/" + alex.getId();
+
+        reminders.removeSubscription(endpoint, robin.getId());
+        assertTrue(subscriptions.findByEndpoint(endpoint).isPresent(), "another member's call changes nothing");
+
+        reminders.removeSubscription(endpoint, alex.getId());
+        assertTrue(subscriptions.findByEndpoint(endpoint).isEmpty());
     }
 }

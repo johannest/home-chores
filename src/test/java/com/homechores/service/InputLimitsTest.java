@@ -121,7 +121,7 @@ class InputLimitsTest {
                 """.formatted(code, LOREM, LOREM, LOREM, LOREM,
                         "08:00-09:00,".repeat(19) + "08:00-09:00");
 
-        backupService.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backupService.restore(json.getBytes(StandardCharsets.UTF_8), code, m.getId());
 
         Home home = service.findHome(code).orElseThrow();
         assertEquals(InputLimits.HOME_NAME, home.getName().length());

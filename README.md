@@ -50,7 +50,7 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Privacy page** | A plain-language privacy notice at `/privacy` and a brief user agreement at `/terms` (consented via a checkbox on the create/join forms), both linked from the landing page. |
 | **Themes & colours** | Follows the OS theme automatically (`@ColorScheme(SYSTEM)` + CSS `light-dark()`), and one palette-glyph menu in the header holds both axes: auto/light/dark **and** a brand colour — **green, pink, blue or grey**. Both are per device (localStorage), applied before Vaadin loads so there's no flash. A palette is three CSS custom properties, so it composes with light/dark instead of duplicating it. |
 | **Remind me later (per chore)** | Tap ⏰ on a chore card and pick *in 1h / 2h / 4h / 8h / a day / a week* — one push notification naming that chore when the time comes. One per chore per person, replaced if you change your mind, and it cancels itself the moment you do the chore (or somebody else does). Needs the same VAPID keys as the daily reminder. |
-| **Chore reminders (opt-in)** | Real Web Push: each member can pick a wall-clock time (their own timezone) and get a notification on subscribed devices if they haven't logged any chores that day. Requires VAPID keys (see below); on iPhone/iPad it works once the PWA is added to the Home Screen (iOS 16.4+). |
+| **Chore reminders (opt-in)** | Real Web Push: each member can pick a wall-clock time (their own timezone) and get a notification on subscribed devices if they haven't logged any chores that day. Requires VAPID keys (see below); on iPhone/iPad it works once the PWA is added to the Home Screen (iOS 16.4+). Each member keeps at most five subscribed devices, and a push the service does not answer within 10 s is given up on rather than waited for. |
 
 ## Running it
 
@@ -109,8 +109,11 @@ wants no auto-deletion sets all three windows to 0.
 `FLASHCHORES_VAPID_PUBLIC`, `FLASHCHORES_VAPID_PRIVATE`, and optionally
 `FLASHCHORES_VAPID_SUBJECT` (a `mailto:` or `https:` URL). Without the keys the whole
 subsystem is inert and the reminder bell never shows. Subscriptions are per device,
-stored server-side, pruned automatically when the push service reports them gone, and
-never included in backups.
+stored server-side, at most five per member (the oldest is evicted), pruned automatically
+when the push service reports them gone, dropped on *Leave*, and never included in backups.
+Sends run over the app's own HTTP client with a hard deadline
+(`homechores.push.send-timeout-ms`, 10 s), so an endpoint that accepts and never answers
+cannot hold the single scheduler thread.
 
 **npm cooldown note:** Vaadin 25.2 skips npm packages published less than a day ago
 (supply-chain cooldown), which can break the frontend install when Vaadin's own
@@ -282,6 +285,26 @@ doubles the writes on a host that counts every byte.
 **Rollback:** stop the app and start the previous jar with the same command; it ignores the
 new properties. The Apache deny rule is harmless on the old version and can stay.
 
+**Before announcing it**
+
+13. **The session cookie and HSTS.** From a laptop, not the host:
+    ```bash
+    curl -sI https://flashchores.com/ | grep -iE 'set-cookie|strict-transport'
+    ```
+    must print `JSESSIONID=…; Path=/; Secure; HttpOnly; SameSite=Lax` and a
+    `strict-transport-security` line. `SameSite` is the app's (`application.properties`);
+    `Secure` appears only when the proxy sends `X-Forwarded-Proto: https` (Apache:
+    `RequestHeader set X-Forwarded-Proto "https"` in the TLS vhost), and HSTS is the proxy's
+    or Cloudflare's to send. Without `Secure`, a phone that follows an `http://` link to the
+    site sends the cookie in the clear; without HSTS, the browser follows such a link at all.
+14. **Rate-limit the public port.** The in-app `RateLimiter` guards the three landing-page
+    actions, but every `GET /` still builds a session and a UI that lives three minutes, and
+    nothing in the app bounds how many of those a stranger can open. Put a coarse per-IP limit
+    in front: Cloudflare's free rate rule (step 4 below) or, without Cloudflare, `mod_evasive`
+    or `mod_qos` on Apache (LiteSpeed: per-client throttling in the vhost) at around 60
+    requests per 10 s per IP — generous for a phone, far below a script. Then confirm one
+    phone still works normally after the rule is on.
+
 ### Behind Cloudflare (free tier)
 
 The app is Cloudflare-ready (the repo side is `vaadin.pushLongPollingSuspendTimeout=45000`
@@ -333,6 +356,7 @@ src/main/java/com/homechores/
 │   ├── ChoreReminder.java        # one-shot "remind me about this chore later"
 │   ├── ListItem.java             # a grocery / to-do line or a dinner slot
 │   ├── ListReminder.java         # the home's reminder about one list line (fired = unanswered)
+│   ├── FeedbackCount.java        # one row of the home's all-time reaction tally, grouped in the DB
 │   ├── CreditEntry / SpreeTier   # credit rewards
 │   ├── RejoinRequest.java        # a device asking to sign back in as an existing member
 │   ├── TimeWindows.java          # availability-hours parsing & evaluation

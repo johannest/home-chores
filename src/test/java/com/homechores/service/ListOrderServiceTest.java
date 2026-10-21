@@ -130,7 +130,7 @@ class ListOrderServiceTest {
         lists.setListEnabled(code, alex.getId(), ListKind.DINNER, false);
 
         String json = backup.export(code);
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
 
         CustomList restored = lists.customLists(code).get(0);
         assertFalse(restored.getId().equals(a.getId()), "precondition: restore issued a new id");

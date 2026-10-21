@@ -320,4 +320,24 @@ class RejoinServiceTest {
         }
         assertTrue(service.claimAdmin(sam.getId(), home.getAdminPin()));
     }
+
+
+    /** Deciding a request is an admin's call, checked for the acting member when the decision
+     *  is made — not inferred from which screen the call came from. */
+    @Test
+    void aNonAdmin_cannotDecideARequest() {
+        Member admin = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(admin.getHomeCode(), "Sam").orElseThrow();
+        Member kim = service.joinHome(admin.getHomeCode(), "Kim").orElseThrow();
+        Member stranger = service.createHome("Other", "Robin");
+        service.requestRejoin(admin.getHomeCode(), sam.getId(), null);
+        RejoinRequest pending = service.pendingRejoins(admin.getHomeCode()).get(0);
+
+        assertFalse(service.decideRejoin(pending.getId(), kim.getId(), true), "a member of the home");
+        assertFalse(service.decideRejoin(pending.getId(), stranger.getId(), true), "an admin elsewhere");
+        assertEquals(RejoinStatus.PENDING,
+                service.pendingRejoins(admin.getHomeCode()).get(0).getStatus(), "still waiting");
+
+        assertTrue(service.decideRejoin(pending.getId(), admin.getId(), true));
+    }
 }

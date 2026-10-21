@@ -924,8 +924,11 @@ class ChoresPanel extends VerticalLayout {
                 name.setErrorMessage(T.tr("board.add.nameRequired"));
                 return;
             }
-            service.addTask(homeCode, name.getValue(), emoji.getValue());
             dialog.close();
+            // The ＋ card only exists for admins, but this dialog outlives a demotion.
+            if (service.isAdminOf(homeCode, memberId)) {
+                service.addTask(homeCode, name.getValue(), emoji.getValue());
+            }
             refresh();
         });
         add.addThemeVariants(ButtonVariant.LUMO_PRIMARY);

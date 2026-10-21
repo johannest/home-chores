@@ -2,6 +2,8 @@ package com.homechores.domain;
 
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 public interface CompletionRepository extends JpaRepository<Completion, Long> {
@@ -53,6 +55,23 @@ public interface CompletionRepository extends JpaRepository<Completion, Long> {
      *  approved ones for counts and the non-rejected ones for the feedback split, and one
      *  query for both beats fetching the whole home and filtering it down to one person. */
     List<Completion> findByMemberId(Long memberId);
+
+    /** A member's completions since a moment, any status — "my stats" under a lens, which
+     *  walks the trend window rather than the member's whole history. */
+    List<Completion> findByMemberIdAndDoneAtGreaterThanEqual(Long memberId, java.time.Instant since);
+
+    /** A home's completions since a moment, any status — the home stats under a lens. */
+    List<Completion> findByHomeCodeAndDoneAtGreaterThanEqual(String homeCode, java.time.Instant since);
+
+    /** The home's all-time reaction tally per chore, grouped in the database. Feedback per
+     *  chore never follows the lens (SPEC §4.9), so it must not depend on how much history
+     *  the lens happens to load; rejected completions count for nothing, as everywhere. */
+    @Query("select new com.homechores.domain.FeedbackCount(c.taskId, c.feedback, count(c))"
+            + " from Completion c"
+            + " where c.homeCode = :homeCode and c.taskId is not null and c.feedback is not null"
+            + " and c.status <> com.homechores.domain.CompletionStatus.REJECTED"
+            + " group by c.taskId, c.feedback")
+    List<FeedbackCount> feedbackByTask(@Param("homeCode") String homeCode);
 
     /** A member's completions with this status on or after a moment — the daily ring's
      *  "done today", which asks about one date and must not read a whole history to

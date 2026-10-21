@@ -58,6 +58,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.Set;
 
 /** Admin-only tools: approvals, settings, members, chores CRUD, backup/restore. */
@@ -554,17 +555,13 @@ class AdminPanel extends VerticalLayout {
         Switch approval = new Switch(T.tr("admin.requireApproval"));
         approval.setValue(home.isRequireApproval());
         approval.addValueChangeListener(e -> {
-            Home h = service.findHome(homeCode).orElseThrow();
-            h.setRequireApproval(e.getValue());
-            service.saveHome(h);
+            updateHome(h -> h.setRequireApproval(e.getValue()));
         });
 
         Switch confirmTaps = new Switch(T.tr("admin.confirmCompletion"));
         confirmTaps.setValue(home.isConfirmCompletion());
         confirmTaps.addValueChangeListener(e -> {
-            Home h = service.findHome(homeCode).orElseThrow();
-            h.setConfirmCompletion(e.getValue());
-            service.saveHome(h);
+            updateHome(h -> h.setConfirmCompletion(e.getValue()));
         });
         Span confirmHint = new Span(T.tr("admin.confirmCompletion.helper"));
         confirmHint.addClassName("sub");
@@ -572,9 +569,7 @@ class AdminPanel extends VerticalLayout {
         Switch otherHelp = new Switch(T.tr("admin.allowOtherHelp"));
         otherHelp.setValue(home.isAllowOtherHelp());
         otherHelp.addValueChangeListener(e -> {
-            Home h = service.findHome(homeCode).orElseThrow();
-            h.setAllowOtherHelp(e.getValue());
-            service.saveHome(h);
+            updateHome(h -> h.setAllowOtherHelp(e.getValue()));
         });
         Span otherHelpHint = new Span(T.tr("admin.allowOtherHelp.helper"));
         otherHelpHint.addClassName("sub");
@@ -586,9 +581,7 @@ class AdminPanel extends VerticalLayout {
         target.setValue(home.getDailyTargetPerMember());
         target.addValueChangeListener(e -> {
             if (e.getValue() != null) {
-                Home h = service.findHome(homeCode).orElseThrow();
-                h.setDailyTargetPerMember(e.getValue());
-                service.saveHome(h);
+                updateHome(h -> h.setDailyTargetPerMember(e.getValue()));
             }
         });
 
@@ -602,9 +595,7 @@ class AdminPanel extends VerticalLayout {
         maxRow.setValue(home.getMaxInARow());
         maxRow.addValueChangeListener(e -> {
             if (e.getValue() != null) {
-                Home h = service.findHome(homeCode).orElseThrow();
-                h.setMaxInARow(e.getValue());
-                service.saveHome(h);
+                updateHome(h -> h.setMaxInARow(e.getValue()));
             }
         });
 
@@ -621,18 +612,14 @@ class AdminPanel extends VerticalLayout {
         style.setValue(home.getDivisionStyle());
         style.addValueChangeListener(e -> {
             if (e.getValue() != null) {
-                Home h = service.findHome(homeCode).orElseThrow();
-                h.setDivisionStyle(e.getValue());
-                service.saveHome(h);
+                updateHome(h -> h.setDivisionStyle(e.getValue()));
             }
         });
 
         Switch enforced = new Switch(T.tr("admin.rotationEnforced"));
         enforced.setValue(home.isRotationEnforced());
         enforced.addValueChangeListener(e -> {
-            Home h = service.findHome(homeCode).orElseThrow();
-            h.setRotationEnforced(e.getValue());
-            service.saveHome(h);
+            updateHome(h -> h.setRotationEnforced(e.getValue()));
         });
 
         Select<Integer> bookingHours = new Select<>();
@@ -643,9 +630,7 @@ class AdminPanel extends VerticalLayout {
         bookingHours.setValue(home.getBookingTimeoutHours());
         bookingHours.addValueChangeListener(e -> {
             if (e.getValue() != null) {
-                Home h = service.findHome(homeCode).orElseThrow();
-                h.setBookingTimeoutHours(e.getValue());
-                service.saveHome(h);
+                updateHome(h -> h.setBookingTimeoutHours(e.getValue()));
             }
         });
 
@@ -673,9 +658,7 @@ class AdminPanel extends VerticalLayout {
         counterReset.setValue(home.getCounterReset());
         counterReset.addValueChangeListener(e -> {
             if (e.getValue() != null) {
-                Home h = service.findHome(homeCode).orElseThrow();
-                h.setCounterReset(e.getValue());
-                service.saveHome(h);
+                updateHome(h -> h.setCounterReset(e.getValue()));
             }
         });
         Button resetNow = new Button(T.tr("admin.resetCounters"), e -> resetCountersDialog());
@@ -684,9 +667,7 @@ class AdminPanel extends VerticalLayout {
         Switch joinGate = new Switch(T.tr("admin.approveJoin"));
         joinGate.setValue(home.isApproveJoin());
         joinGate.addValueChangeListener(e -> {
-            Home h = service.findHome(homeCode).orElseThrow();
-            h.setApproveJoin(e.getValue());
-            service.saveHome(h);
+            updateHome(h -> h.setApproveJoin(e.getValue()));
         });
         Span joinHint = new Span(T.tr("admin.approveJoin.helper"));
         joinHint.addClassName("sub");
@@ -694,9 +675,7 @@ class AdminPanel extends VerticalLayout {
         Switch rejoinGate = new Switch(T.tr("admin.approveRejoin"));
         rejoinGate.setValue(home.isApproveRejoin());
         rejoinGate.addValueChangeListener(e -> {
-            Home h = service.findHome(homeCode).orElseThrow();
-            h.setApproveRejoin(e.getValue());
-            service.saveHome(h);
+            updateHome(h -> h.setApproveRejoin(e.getValue()));
         });
         Span rejoinHint = new Span(T.tr("admin.approveRejoin.helper"));
         rejoinHint.addClassName("sub");
@@ -706,9 +685,7 @@ class AdminPanel extends VerticalLayout {
         homeName.setValue(home.getName());
         Button rename = new Button(T.tr("admin.saveName"), e -> {
             if (!homeName.isEmpty()) {
-                Home h = service.findHome(homeCode).orElseThrow();
-                h.setName(homeName.getValue().trim());
-                service.saveHome(h);
+                updateHome(h -> h.setName(homeName.getValue().trim()));
                 toast(T.tr("admin.nameUpdated"));
             }
         });
@@ -751,9 +728,7 @@ class AdminPanel extends VerticalLayout {
                 pin.setErrorMessage(T.tr("admin.changePin.error"));
                 return;
             }
-            Home h = service.findHome(homeCode).orElseThrow();
-            h.setAdminPin(v);
-            service.saveHome(h);
+            updateHome(h -> h.setAdminPin(v));
             d.close();
             toast(T.tr("admin.pinUpdated"));
             refresh();
@@ -783,6 +758,9 @@ class AdminPanel extends VerticalLayout {
 
             MenuBar actions = rowMenu(
                     new RowAction(T.tr(m.isAdmin() ? "admin.demote" : "admin.makeAdmin"), true, () -> {
+                        if (!stillAdmin()) {
+                            return;
+                        }
                         if (!service.setMemberAdmin(m.getId(), !m.isAdmin())) {
                             toastError(T.tr("admin.lastAdmin"));
                         }
@@ -805,7 +783,7 @@ class AdminPanel extends VerticalLayout {
         name.setMaxLength(InputLimits.MEMBER_NAME);
         name.setValue(m.getName());
         Button save = new Button(T.tr("common.save"), e -> {
-            if (!name.isEmpty()) {
+            if (!name.isEmpty() && stillAdmin()) {
                 service.renameMember(m.getId(), name.getValue());
                 d.close();
                 refresh();
@@ -933,11 +911,15 @@ class AdminPanel extends VerticalLayout {
 
         MenuBar actions = rowMenu(
                 new RowAction(T.tr("admin.moveUp"), !firstInBucket, () -> {
-                    service.moveChore(t.getId(), -1);
+                    if (stillAdmin()) {
+                        service.moveChore(t.getId(), -1);
+                    }
                     refresh();
                 }),
                 new RowAction(T.tr("admin.moveDown"), !lastInBucket, () -> {
-                    service.moveChore(t.getId(), 1);
+                    if (stillAdmin()) {
+                        service.moveChore(t.getId(), 1);
+                    }
                     refresh();
                 }),
                 new RowAction(T.tr("admin.chore.title.edit"), true, () -> choreDialog(t)),
@@ -1097,11 +1079,15 @@ class AdminPanel extends VerticalLayout {
 
             MenuBar actions = rowMenu(
                     new RowAction(T.tr("admin.moveUp"), i > 0, () -> {
-                        service.moveGroup(g.getId(), -1);
+                        if (stillAdmin()) {
+                            service.moveGroup(g.getId(), -1);
+                        }
                         refresh();
                     }),
                     new RowAction(T.tr("admin.moveDown"), i < groups.size() - 1, () -> {
-                        service.moveGroup(g.getId(), 1);
+                        if (stillAdmin()) {
+                            service.moveGroup(g.getId(), 1);
+                        }
                         refresh();
                     }),
                     new RowAction(T.tr("admin.group.title.edit"), true, () -> groupDialog(g)),
@@ -1140,6 +1126,9 @@ class AdminPanel extends VerticalLayout {
             if (name.getValue() == null || name.getValue().isBlank()) {
                 name.setInvalid(true);
                 name.setErrorMessage(T.tr("admin.group.nameRequired"));
+                return;
+            }
+            if (!stillAdmin()) {
                 return;
             }
             if (existing == null) {
@@ -1232,6 +1221,9 @@ class AdminPanel extends VerticalLayout {
             // The Set overload cannot fail — the values come straight from the enum.
             String seasonValue = Seasons.normalize(seasons.getValue());
             Long groupId = group.getValue() == null ? null : group.getValue().getId();
+            if (!stillAdmin()) {
+                return;
+            }
             if (existing == null) {
                 service.addTask(homeCode, name.getValue(), emoji.getValue(), days, credits, windows,
                         seasonValue, groupId);
@@ -1267,7 +1259,9 @@ class AdminPanel extends VerticalLayout {
             label.setText(T.tr("admin.spree.tier", t.getDays(), t.getCredits()));
             label.addClassName("grow");
             Button del = new Button(VaadinIcon.TRASH.create(), e -> {
-                creditService.deleteTier(t.getId());
+                if (stillAdmin()) {
+                    creditService.deleteTier(t.getId());
+                }
                 refresh();
             });
             del.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY,
@@ -1289,7 +1283,7 @@ class AdminPanel extends VerticalLayout {
         cr.setWidth("7.5em");
         Button addTier = new Button(T.tr("admin.spree.add"), e -> {
             if (days.getValue() != null && cr.getValue() != null
-                    && days.getValue() > 0 && cr.getValue() > 0) {
+                    && days.getValue() > 0 && cr.getValue() > 0 && stillAdmin()) {
                 creditService.addTier(homeCode, days.getValue(), cr.getValue());
                 refresh();
             }
@@ -1425,7 +1419,7 @@ class AdminPanel extends VerticalLayout {
     private void confirmRestore(byte[] bytes) {
         confirm(T.tr("admin.restore.title"), T.tr("admin.restore.text"), () -> {
                     try {
-                        var result = backup.restore(bytes, homeCode);
+                        var result = backup.restore(bytes, homeCode, memberId);
                         // Restoring remaps every member id, so the stored identity is stale.
                         DeviceIdentity.forget();
                         SessionContext.signOut();
@@ -1494,6 +1488,9 @@ class AdminPanel extends VerticalLayout {
             // commits and shows every remaining device out with a generic "an admin deleted
             // this home"; stepping off first means this device is no longer listening, so
             // the admin who pressed the button gets their own confirmation instead.
+            if (!stillAdmin()) {
+                return;
+            }
             String name = home.getName();
             UI ui = UI.getCurrent();
             DeviceIdentity.forget();
@@ -1525,13 +1522,40 @@ class AdminPanel extends VerticalLayout {
         return c -> ChoreService.describe(c, c.getTaskId() == null ? null : byId.get(c.getTaskId()));
     }
 
+    /**
+     * Re-reads the session member's role at the moment an admin action is taken. The panel
+     * only exists for admins, but its dialogs hang off the UI and outlive the redraw that
+     * removes the tab, so a demoted admin's open dialog would otherwise still act. The
+     * services that take the acting admin check again; this is the check for the ones that
+     * take only a server-rendered id. (docs/SECURITY-AUDIT-2026-10-21.md, SF-1)
+     */
+    private boolean stillAdmin() {
+        if (service.isAdminOf(homeCode, memberId)) {
+            return true;
+        }
+        toastError(T.tr("admin.noLongerAdmin"));
+        return false;
+    }
+
+    /** One guarded write-through for every settings control: re-read, change, save. */
+    private void updateHome(Consumer<Home> change) {
+        if (!stillAdmin()) {
+            return;
+        }
+        Home h = service.findHome(homeCode).orElseThrow();
+        change.accept(h);
+        service.saveHome(h);
+    }
+
     private void confirm(String title, String text, Runnable onConfirm) {
         Dialog d = new Dialog();
         d.setHeaderTitle(title);
         d.add(new Span(text));
         Button yes = new Button(T.tr("common.confirm"), e -> {
             d.close();
-            onConfirm.run();
+            if (stillAdmin()) {
+                onConfirm.run();
+            }
         });
         yes.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_ERROR);
         d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), yes);
@@ -1544,8 +1568,11 @@ class AdminPanel extends VerticalLayout {
         dialog.setHeaderTitle(T.tr("admin.resetCounters"));
         dialog.add(new Span(T.tr("admin.resetCounters.confirm")));
         Button yes = new Button(T.tr("admin.resetCounters"), e -> {
-            service.resetCounters(homeCode);
             dialog.close();
+            if (!stillAdmin()) {
+                return;
+            }
+            service.resetCounters(homeCode);
             toast(T.tr("admin.resetCounters.done"));
         });
         yes.addThemeVariants(ButtonVariant.LUMO_PRIMARY);

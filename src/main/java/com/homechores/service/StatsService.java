@@ -9,6 +9,7 @@ import com.homechores.domain.CreditEntry;
 import com.homechores.domain.CreditEntryRepository;
 import com.homechores.domain.CreditType;
 import com.homechores.domain.Feedback;
+import com.homechores.domain.FeedbackCount;
 import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
 import com.homechores.domain.Member;
@@ -22,7 +23,6 @@ import java.time.format.TextStyle;
 import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -67,6 +67,33 @@ public class StatsService {
 
     private LocalDate dateOf(Completion c) {
         return c.getDoneAt().atZone(zone()).toLocalDate();
+    }
+
+    /**
+     * The oldest day a lens-bounded read must load: the first month of the month trend, the
+     * longest of the "always all-time" pictures the panel draws from the rows themselves.
+     * Everything older is reached only through count and sum queries — or by the all-time lens,
+     * which loads the ledger whole because that is what it was asked for.
+     */
+    static LocalDate historyStart(LocalDate today) {
+        return today.withDayOfMonth(1).minusMonths(TREND_MONTHS - 1);
+    }
+
+    private static Instant historyFrom(LocalDate today) {
+        return historyStart(today).atStartOfDay(zone()).toInstant();
+    }
+
+    /** The oldest day the 💎 headline tiles and their 7-day chart need: the earliest of this
+     *  week's Monday, the first of the month and six days ago. */
+    private static Instant headlineFrom(LocalDate today) {
+        LocalDate start = Period.WEEK.startOn(today);
+        if (Period.MONTH.startOn(today).isBefore(start)) {
+            start = Period.MONTH.startOn(today);
+        }
+        if (today.minusDays(6).isBefore(start)) {
+            start = today.minusDays(6);
+        }
+        return start.atStartOfDay(zone()).toInstant();
     }
 
     // ---- Chore master of last week -------------------------------------------
@@ -227,27 +254,30 @@ public class StatsService {
      * feedback split — every other member's rows loaded and thrown away. The member's own rows
      * answer both questions: the APPROVED ones drive the counts, the non-REJECTED ones the split.
      *
-     * <p>The period is applied <strong>inside that same pass</strong>, and the four headline
-     * totals are all filled at once. Bounding the query instead would mean one round trip per
-     * lens, against a {@code doneAt} with no index behind it, to avoid a comparison per row that
-     * is already in memory — strictly more work, and it would cost the "one query for the working
-     * set" property {@code BoardRenderCostTest} pins. The trends are likewise derived from the
-     * per-day map rather than re-walked.
+     * <p>The period is applied <strong>inside that same pass</strong>, and the headline totals
+     * for today, this week and this month are filled at once. The pass walks the trend window
+     * ({@link #historyStart}: the twelve months the month trend draws), not the member's whole
+     * history — a Stats tab is redrawn on every change in the home, and what that costs must
+     * not grow with the years. What has to be all-time (the approved total) is a count query,
+     * and only the all-time lens, the member's own choice, loads the ledger whole. The trends
+     * are derived from the per-day map rather than re-walked.
      *
      * <p>{@code byChore} and the feedback split follow the lens; {@code counts} never does — the
      * whole point of the headline row is to compare the periods against each other.
      */
     public MyStats myStats(Long memberId, String homeCode, Period period, Locale locale) {
         Home home = homes.findById(homeCode).orElseThrow();
-        List<Completion> mine = completions.findByMemberId(memberId);
         LocalDate today = LocalDate.now();
+        List<Completion> mine = period == Period.ALL
+                ? completions.findByMemberId(memberId)
+                : completions.findByMemberIdAndDoneAtGreaterThanEqual(memberId, historyFrom(today));
+        long totalApproved = completions.countByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
 
         // One pass: chore tallies, other help, per-day counts, the feedback split and every
         // period total. ("Other help" has no task, so it's counted separately and labelled by
         // the caller — the label is UI wording, not data like a chore name.)
         Map<Long, Long> byTask = new HashMap<>();
         Map<LocalDate, Long> perDay = new HashMap<>();
-        long totalApproved = 0;
         long inPeriod = 0;
         long otherHelp = 0;
         long dayCount = 0;
@@ -273,7 +303,6 @@ public class StatsService {
             if (!approved) {
                 continue; // pending: it has feedback to show, but it counts for nothing yet
             }
-            totalApproved++;
             perDay.merge(on, 1L, Long::sum);
             if (Period.TODAY.includes(on, today)) {
                 dayCount++;
@@ -337,23 +366,23 @@ public class StatsService {
      */
     public DiamondStats diamondStats(Long memberId, LocalDate today) {
         Member member = members.findById(memberId).orElseThrow();
+        // Bounded reads, not the member's whole ledger: the EARNED rows of the headline window
+        // (which covers the 7-day chart), two sums for the all-time totals, and the REDEEMED
+        // rows — all of them, since a redemption is an admin typing into a dialog, so that side
+        // grows by the week where the other grows by the hour.
+        long allTime = credits.sumAmount(memberId, CreditType.EARNED);
+        long redeemed = credits.sumAmount(memberId, CreditType.REDEEMED);
+        List<CreditEntry> spent = credits.findByMemberIdAndTypeOrderByCreatedAtDescIdDesc(
+                memberId, CreditType.REDEEMED);
         Map<LocalDate, Long> perDay = new HashMap<>();
         long dayCount = 0;
         long weekCount = 0;
         long monthCount = 0;
-        long allTime = 0;
-        long redeemed = 0;
-        List<CreditEntry> spent = new ArrayList<>();
-        for (CreditEntry e : credits.findByMemberId(memberId)) {
-            if (e.getType() == CreditType.REDEEMED) {
-                redeemed += e.getAmount();
-                spent.add(e);
-                continue;
-            }
+        for (CreditEntry e : credits.findByMemberIdAndTypeAndCreatedAtGreaterThanEqual(
+                memberId, CreditType.EARNED, headlineFrom(today))) {
             LocalDate on = e.getCreatedAt().atZone(zone()).toLocalDate();
             long n = e.getAmount();
             perDay.merge(on, n, Long::sum);
-            allTime += n;
             if (Period.TODAY.includes(on, today)) {
                 dayCount += n;
             }
@@ -364,8 +393,6 @@ public class StatsService {
                 monthCount += n;
             }
         }
-        spent.sort(Comparator.comparing(CreditEntry::getCreatedAt)
-                .thenComparing(CreditEntry::getId).reversed());
         return new DiamondStats(new PeriodCounts(dayCount, weekCount, monthCount, allTime),
                 daySeries(perDay, today, 7), redeemed, redemptions(spent, id -> member));
     }
@@ -425,39 +452,40 @@ public class StatsService {
         Home home = homes.findById(homeCode).orElseThrow();
         List<Member> memberList = members.findByHomeCodeOrderByJoinedAtAsc(homeCode);
         List<ChoreTask> taskList = tasks.findByHomeCodeOrderBySortOrderAscCreatedAtAscIdAsc(homeCode);
-        List<Completion> all = completions.findByHomeCode(homeCode);
         LocalDate today = LocalDate.now();
+        // The lens decides how much history is walked (see myStats): the trend window, or the
+        // whole ledger only when the admin asks for all time. The facts that are all-time under
+        // every lens — the approved total, the approval queue, which chore the family hates —
+        // are counted in the database so they cannot depend on what the walk loaded.
+        List<Completion> all = period == Period.ALL
+                ? completions.findByHomeCode(homeCode)
+                : completions.findByHomeCodeAndDoneAtGreaterThanEqual(homeCode, historyFrom(today));
+        long allTime = completions.countByHomeCodeAndStatus(homeCode, CompletionStatus.APPROVED);
+        long pending = completions.countByHomeCodeAndStatus(homeCode, CompletionStatus.PENDING);
+        Map<Long, long[]> feedbackByTaskId = new HashMap<>(); // [hate, ok, love]
+        for (FeedbackCount f : completions.feedbackByTask(homeCode)) {
+            long[] split = feedbackByTaskId.computeIfAbsent(f.taskId(), k -> new long[3]);
+            switch (f.feedback()) {
+                case HATE -> split[0] += f.count();
+                case OK -> split[1] += f.count();
+                case LOVE -> split[2] += f.count();
+                default -> { }
+            }
+        }
 
         Map<Long, Long> approvedByMember = new HashMap<>();
         Map<Long, Map<Long, Long>> byMemberByTask = new HashMap<>();
         Map<Long, Long> otherHelpByMember = new HashMap<>();
         Map<Long, Long> todayByMember = new HashMap<>();
         Map<Long, Long> approvedByTask = new HashMap<>();
-        Map<Long, long[]> feedbackByTaskId = new HashMap<>(); // [hate, ok, love]
         Map<LocalDate, Long> perDay = new HashMap<>();
         long otherHelp = 0;
-        long pending = 0;
         long dayCount = 0;
         long weekCount = 0;
         long monthCount = 0;
-        long allTime = 0;
 
         for (Completion c : all) {
-            CompletionStatus status = c.getStatus();
-            if (status == CompletionStatus.PENDING) {
-                pending++;
-            }
-            if (status != CompletionStatus.REJECTED && c.getTaskId() != null
-                    && c.getFeedback() != null) {
-                long[] split = feedbackByTaskId.computeIfAbsent(c.getTaskId(), k -> new long[3]);
-                switch (c.getFeedback()) {
-                    case HATE -> split[0]++;
-                    case OK -> split[1]++;
-                    case LOVE -> split[2]++;
-                    default -> { }
-                }
-            }
-            if (status != CompletionStatus.APPROVED) {
+            if (c.getStatus() != CompletionStatus.APPROVED) {
                 continue;
             }
             LocalDate on = dateOf(c);
@@ -474,7 +502,6 @@ public class StatsService {
             if (Period.MONTH.includes(on, today)) {
                 monthCount++;
             }
-            allTime++;
             if (!period.includes(on, today)) {
                 continue; // outside the lens: still counted in the headline totals above
             }

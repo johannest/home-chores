@@ -223,7 +223,10 @@ public class HomeCleanupService {
             Files.writeString(file, backupService.export(home.getCode()));
             return true;
         } catch (Exception e) {
-            log.warn("Retention: safety export failed, keeping the home ({})", e.getMessage());
+            // The class, never the message: a FileSystemException's message is the path, and
+            // the path carries the home code.
+            log.warn("Retention: safety export to {} failed with {}, keeping the home",
+                    exportDir, e.getClass().getSimpleName());
             return false;
         }
     }

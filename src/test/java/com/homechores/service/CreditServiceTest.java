@@ -84,4 +84,25 @@ class CreditServiceTest {
         c.setDoneAt(when);
         return c;
     }
+
+
+    /** Redeeming is an admin's line in the ledger: refused for a member, for another home's
+     *  admin, and for a member who is not in the home named. */
+    @Test
+    void redeem_refusesANonAdmin_andAMemberOfAnotherHome() {
+        Member alex = chores.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+        ChoreTask hard = chores.addTask(code, "Hard", "💪", 0, 5);
+        chores.complete(hard.getId(), alex.getId());
+        Member sam = chores.joinHome(code, "Sam").orElseThrow();
+        Member robin = chores.createHome("Other", "Robin");
+
+        assertFalse(creditService.redeem(code, alex.getId(), 1, "x", sam.getId()), "a member");
+        assertFalse(creditService.redeem(code, alex.getId(), 1, "x", robin.getId()), "another home's admin");
+        assertFalse(creditService.redeem(robin.getHomeCode(), alex.getId(), 1, "x", robin.getId()),
+                "a member who is not in that home");
+        assertEquals(5, creditService.balance(alex.getId()), "nothing was spent");
+
+        assertTrue(creditService.redeem(code, alex.getId(), 1, "x", alex.getId()));
+    }
 }

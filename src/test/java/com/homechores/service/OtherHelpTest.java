@@ -194,7 +194,7 @@ class OtherHelpTest {
         service.saveHome(home);
 
         String json = backup.export(code);
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
 
         assertFalse(service.findHome(code).orElseThrow().isAllowOtherHelp(), "setting survives");
         Member restored = service.membersOf(code).get(0);

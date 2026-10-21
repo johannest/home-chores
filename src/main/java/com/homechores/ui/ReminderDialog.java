@@ -98,7 +98,7 @@ class ReminderDialog extends Dialog {
     }
 
     private void unsubscribe() {
-        WebPushSubscribe.drop(reminders, status -> {
+        WebPushSubscribe.drop(reminders, memberId, status -> {
             // Clear the reminder regardless: even if the browser had no live subscription
             // (cleared site data), the member asked for it off.
             reminders.saveReminder(memberId, null, null);

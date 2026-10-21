@@ -162,15 +162,20 @@ public class BackupService {
      * own {@code home.code} must match it. Without that check an admin of one home could
      * upload a backup naming a different family's code and overwrite (or hijack) that
      * home — restore is a full wipe-and-replace, so it must never touch another home.
+     * {@code adminId} must be an admin of that home <em>now</em>: the upload card only
+     * exists for admins, but the confirmation it opens outlives a demotion.
      */
     @Transactional
-    public RestoreResult restore(byte[] json, String ownHomeCode) {
+    public RestoreResult restore(byte[] json, String ownHomeCode, Long adminId) {
         Backup b = parse(json);
         String code = b.home.code.trim().toUpperCase();
         String own = ownHomeCode == null ? "" : ownHomeCode.trim().toUpperCase();
         if (!code.equals(own)) {
             throw new IllegalArgumentException("This backup is for a different home (" + code
                     + "). You can only restore your own home's backup.");
+        }
+        if (members.findAdmin(own, adminId).isEmpty()) {
+            throw new IllegalArgumentException("Only an admin of this home can restore it.");
         }
         return apply(b, code);
     }
