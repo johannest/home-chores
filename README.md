@@ -17,7 +17,7 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 |---|---|
 | **Kahoot-style login** | No passwords. *Create a home* → get a 7-character code **and a private admin PIN**. Others *Join a home* with the code and their name, or open a **join link** (`/?join=CODE`) that prefills everything. **Copy link** / **Share** in the header use the clipboard or the native share sheet. |
 | **Stays signed in** | Each phone remembers who it is in **browser local storage**, not in a long-lived server session. Sessions can expire (and the server can restart) without anyone being asked to sign in again. |
-| **Sign back in** | If a phone clears its browsing data, its identity is gone — so the Join tab offers **"I'm already a member"**: pick yourself from the home's member list and keep your chores, credits and streaks instead of becoming a second "Sam". Admins can require approval for this (default on); knowing the **admin PIN** always skips the wait. |
+| **Sign back in** | If a phone clears its browsing data, its identity is gone — so the Join tab offers **"I'm already a member"**: pick yourself from the home's member list and keep your chores, credits and streaks instead of becoming a second "Sam". Admins can require approval for this (default on); knowing the **admin PIN** always skips the wait. A phone whose sign-in was replaced by another device (the same member installed on the home screen *and* opened in Safari, say), or whose member or home is gone, is told why on the join card. |
 | **Confirm before counting** | Tapping a chore asks *"did you just do this?"* first — the cards are big and close together on a phone, and stray taps were counting as done. Admins can switch it off per home for speed. |
 | **Undo a mis-tap** | The celebration dialog offers *"Oops — undo this"*, and a quiet strip on the board lets a member take back their **own** chore for 10 minutes after doing it. Beyond that it's an admin job. |
 | **Admin can unmark** | A **Recent chores** list on the Admin tab unmarks any completion, however old and whoever did it — including one already approved. Any 💎 credits it earned are taken back with it. |
@@ -416,7 +416,8 @@ src/main/java/com/homechores/
 │   └── LocaleInitListener.java   # applies the "lang" cookie to new sessions
 └── ui/
     ├── LandingView.java          # create / join screen (+ admin-PIN reveal, ?join= links,
-    │                             #   identity restore, "sign me back in" picker + waiting)
+    │                             #   identity restore + why it was refused, "sign me back in"
+    │                             #   picker + waiting)
     ├── DeviceIdentity.java       # member (or shared-device) id kept in the browser's local storage
     ├── Viewer.java               # who a board is drawn for: a member, or the shared device
     ├── HomeView.java             # header + Chores / Stats / Admin tab host, share links

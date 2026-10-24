@@ -375,8 +375,19 @@ hold whatever screen the call came from.
   number, so it is the secret — not the id — that proves the device is that member: a
   hand-edited `localStorage` value cannot impersonate anyone. Issuing a new secret on each
   sign-in also cuts any previous device off, so an approved rejoin revokes a lost phone. A
-  stale or unverifiable entry (removed member, restored home, wrong secret) is cleared and
-  the user sent to the landing page. While the browser is being asked, a full-screen
+  stale or unverifiable entry is cleared and the user left on the landing page **with the
+  reason** (`DeviceIdentity.RestoreFailure`, shown in the card's `.auth-notice` with the Join
+  tab in front, where "sign me back in" is): `SECRET_REPLACED` — another browser signed in as
+  this member since, the usual cause when one phone holds the app both installed and in
+  Safari or a chat's in-app browser, each with its own local storage, so they revoke each
+  other in turns; `GONE` — the member is no longer in that home; `HOME_GONE`; `UNREADABLE` —
+  the pre-secret two-part format or a tampered value, which until now read as "never joined".
+  Nothing stored is the ordinary first visit and is not a failure. Each rejection leaves one
+  `INFO` line (`LandingView`): the kind and id, the reason, how the browser is running
+  (`DeviceIdentity.probeContext`: installed `standalone` or plain `browser`, and whether local
+  storage is writable at all) and a short label from the User-Agent (device, OS version,
+  browser and major version, `webview` for an iOS page outside Safari proper) — never a
+  name or a home code, which keeps §4.15. While the browser is being asked, a full-screen
   overlay covers the landing card, so a lookup that never answers leaves a working page.
 - **Leave**, self-removal and backup restore all clear the stored identity.
 - **A member without a device** (`ChoreService.addMemberWithoutDevice(homeCode, name,
@@ -1498,6 +1509,15 @@ scales up, not the other way round.
   a wrong pick is refused in their name; the Stats tab picks whose; a list line from the device
   has no author and no bell; an unpaired device is shown out. `SchemaEvolutionTest`: the table
   is created empty on an upgrade.
+- **A rejected stored identity is explained** (`DeviceIdentityTest`): a current value reads as
+  an identity, nothing stored is not a failure, and the pre-secret pair, a missing code or
+  secret and a non-numeric id read as unreadable; the browser label names the device, OS
+  version, browser and major version (and `webview` for an iOS page without the Safari
+  token), never the whole string. `HomeUiTest`: the current secret signs straight in with the
+  admin's lifetime; a replaced secret, a removed member and an older-version value stay on
+  the landing page signed out, with the matching notice and the Join tab in front; nothing
+  stored shows the plain card with Create in front; an unknown shared device is told it is
+  unpaired.
 - **Stats render cost** (`StatsRenderCostTest`, Hibernate statistics): under the week lens a
   two-year-old completion is counted (all-time total, feedback per chore) but not loaded; the
   all-time lens loads it; the 💎 card loads the headline window and sums the rest.

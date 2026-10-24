@@ -571,6 +571,104 @@ class HomeUiTest extends HomeChoresUiTest {
         assertEquals(1, service.pendingRejoins(admin.getHomeCode()).size());
     }
 
+    // ---- Restoring a stored identity, and explaining why not (§4.1) ------------
+
+    private LandingView landing() {
+        navigate(LandingView.class);
+        return (LandingView) getCurrentView();
+    }
+
+    /** Walked from the view, not queried: {@code $()} skips hidden components, and hidden is
+     *  what the notice must be on a plain first visit. */
+    private Div restoreNotice() {
+        return ((Component) getCurrentView()).getChildren().flatMap(Component::getChildren)
+                .filter(c -> c instanceof Div d && d.hasClassName("auth-notice"))
+                .map(Div.class::cast).findFirst().orElseThrow();
+    }
+
+    @Test
+    void storedIdentity_withTheCurrentSecret_signsStraightIn() {
+        Member admin = service.createHome("Shared", "Alex");
+        String secret = service.issueDeviceSecret(admin.getId());
+
+        landing().restoreMember(DeviceIdentity.parse(admin.getId() + "|" + admin.getHomeCode() + "|" + secret));
+
+        assertInstanceOf(HomeView.class, getCurrentView());
+        assertEquals(admin.getId(), SessionContext.memberId());
+        assertEquals(SessionContext.ADMIN_TIMEOUT_SECONDS, maxInactiveInterval());
+    }
+
+    /** The one-device-per-member rule, explained: the phone whose secret a later sign-in
+     *  replaced is told so and pointed at "sign me back in", not at joining twice. */
+    @Test
+    void storedIdentity_withAReplacedSecret_explainsAndOpensTheJoinTab() {
+        Member admin = service.createHome("Shared", "Alex");
+        String thisPhone = service.issueDeviceSecret(admin.getId());
+        service.issueDeviceSecret(admin.getId()); // another browser signed in as Alex since
+
+        landing().restoreMember(DeviceIdentity.parse(admin.getId() + "|" + admin.getHomeCode() + "|" + thisPhone));
+
+        assertInstanceOf(LandingView.class, getCurrentView(), "not signed in");
+        assertNull(SessionContext.memberId());
+        assertTrue(restoreNotice().isVisible());
+        assertTrue(restoreNotice().getText().startsWith("Another device signed in as you"),
+                restoreNotice().getText());
+        assertEquals(1, $(Tabs.class).first().getSelectedIndex(), "the Join tab, where sign-back-in is");
+    }
+
+    @Test
+    void storedIdentity_ofARemovedMember_saysTheMemberIsGone() {
+        Member admin = service.createHome("Shared", "Alex");
+        Member sam = service.joinHome(admin.getHomeCode(), "Sam").orElseThrow();
+        String secret = service.issueDeviceSecret(sam.getId());
+        assertTrue(service.removeMember(sam.getId()));
+
+        landing().restoreMember(DeviceIdentity.parse(sam.getId() + "|" + admin.getHomeCode() + "|" + secret));
+
+        assertInstanceOf(LandingView.class, getCurrentView());
+        assertNull(SessionContext.memberId());
+        assertEquals("The member or home this device belonged to no longer exists.",
+                restoreNotice().getText());
+    }
+
+    /** A value from before device secrets reads as stale, not as "never joined". */
+    @Test
+    void storedIdentity_fromAnOlderVersion_isExplainedAsStale() {
+        Member admin = service.createHome("Shared", "Alex");
+
+        landing().restoreMember(DeviceIdentity.parse(admin.getId() + "|" + admin.getHomeCode()));
+
+        assertInstanceOf(LandingView.class, getCurrentView());
+        assertNull(SessionContext.memberId());
+        assertTrue(restoreNotice().getText().startsWith("This device's saved sign-in is from an older version"),
+                restoreNotice().getText());
+        assertEquals(1, $(Tabs.class).first().getSelectedIndex());
+    }
+
+    /** A first visit has nothing stored and nothing to explain. */
+    @Test
+    void nothingStored_showsAPlainJoinCard() {
+        LandingView view = landing();
+        view.restoreMember(DeviceIdentity.parse(""));
+        view.restoreSharedDevice(DeviceIdentity.parse(""));
+
+        assertInstanceOf(LandingView.class, getCurrentView());
+        assertFalse(restoreNotice().isVisible());
+        assertEquals(0, $(Tabs.class).first().getSelectedIndex(), "Create stays in front");
+    }
+
+    @Test
+    void storedDeviceIdentity_ofAnUnpairedDevice_saysSo() {
+        Member admin = service.createHome("Shared", "Alex");
+
+        landing().restoreSharedDevice(DeviceIdentity.parse("999999|" + admin.getHomeCode() + "|secret"));
+
+        assertInstanceOf(LandingView.class, getCurrentView());
+        assertNull(SessionContext.deviceId());
+        assertEquals("This shared device was unpaired, or its home no longer exists.",
+                restoreNotice().getText());
+    }
+
     /** The wipe is irreversible, so a wrong code must not delete anything. */
     @Test
     void deleteHome_requiresTheHomeCodeTyped_correctly() {

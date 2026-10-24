@@ -142,6 +142,19 @@ vaadin-select::part(label) {
     padding: var(--lumo-space-xl);
 }
 
+/* Why this device is on the join screen although it had been signed in (§4.1): a stored
+   identity another device replaced, a member or home that is gone, or a value from an old
+   version. Lumo's warning pair, as its warning toast uses, so the contrast is the theme's. */
+.auth-notice {
+    background: var(--lumo-warning-color-10pct);
+    color: var(--lumo-warning-text-color);
+    border-radius: var(--lumo-border-radius-m);
+    padding: var(--lumo-space-s) var(--lumo-space-m);
+    margin: 0 0 var(--lumo-space-m);
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
 /* Covers the landing page while the browser is asked whether it already holds an
    identity, so a returning phone never flashes the join form on its way to the board.
    It's an overlay rather than a hidden form: if that lookup never answers, the user is
