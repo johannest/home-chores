@@ -73,14 +73,14 @@ final class Celebrations {
         // Credit rewards earned by this completion.
         if (o.spreeDays() != null) {
             fireConfetti("big");
-            Notification n = Notification.show(
+            Notification n = Toasts.show(
                     T.tr("celebrate.spree", o.spreeDays(), o.spreeCredits()),
-                    4500, Notification.Position.TOP_CENTER);
+                    4500);
             n.addThemeVariants(NotificationVariant.LUMO_SUCCESS);
         } else if (o.creditsAwarded() > 0) {
-            Notification n = Notification.show(
+            Notification n = Toasts.show(
                     T.tr("celebrate.credits", o.creditsAwarded()),
-                    2500, Notification.Position.TOP_CENTER);
+                    2500);
             n.addThemeVariants(NotificationVariant.LUMO_SUCCESS);
         }
     }

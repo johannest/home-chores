@@ -586,7 +586,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
     }
 
     private void warn(String message) {
-        Notification n = Notification.show(message, 3000, Notification.Position.TOP_CENTER);
+        Notification n = Toasts.show(message, 3000);
         n.addThemeVariants(NotificationVariant.LUMO_ERROR);
     }
 

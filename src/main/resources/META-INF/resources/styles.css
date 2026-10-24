@@ -547,6 +547,14 @@ vaadin-checkbox-group::part(group-field) {
     cursor: not-allowed;
 }
 
+/* Toasts sit at the bottom (Toasts.java); with viewport-fit=cover the bottom of a phone is the
+   home indicator, so the container keeps clear of it — and of the on-screen keyboard, which
+   keyboard-inset.js measures. */
+vaadin-notification-container {
+    padding-bottom: max(var(--lumo-space-s), env(safe-area-inset-bottom),
+            var(--keyboard-inset, 0px));
+}
+
 /* ---- Hold-and-drag (hold-drag.js): the board's cards for admins, a shared list's lines for
    everyone ---- */
 /* pan-y, not none: the page must still scroll under a finger that starts on a card or a line —
@@ -577,15 +585,31 @@ vaadin-checkbox-group::part(group-field) {
 }
 /* Where the card or line will land: it stays in place at reduced presence so the others reflow
    around the slot, exactly as a phone's home screen does. */
-.task-card.drag-placeholder,
-.list-item.drag-placeholder {
+.task-card.drag-placeholder {
     opacity: 0.35;
     border-style: dashed;
     transform: none;
     box-shadow: none;
 }
+/* A line's only border is its top separator, so dashing the border gave a thin top edge and
+   three `medium` (3px) ones — a frame that looked cut off at the top. The slot is drawn inside
+   the row instead: a whole frame that changes no line's height and that no neighbour covers.
+   The words fade, not the frame, so the slot stays visible. */
 .list-item.drag-placeholder {
-    border-top: 1px dashed var(--lumo-contrast-30pct);
+    transform: none;
+    box-shadow: none;
+}
+.list-item.drag-placeholder .swipe-face {
+    opacity: 0.35;
+}
+.list-item.drag-placeholder::after {
+    content: '';
+    position: absolute;
+    inset: 3px 0;
+    z-index: 2; /* above the face, which is z-index 1 */
+    border: 2px dashed var(--lumo-contrast-50pct);
+    border-radius: var(--lumo-border-radius-m);
+    pointer-events: none;
 }
 /* The card or line under the finger: a fixed clone the page scrolls beneath. */
 .drag-ghost {

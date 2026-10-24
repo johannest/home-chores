@@ -748,17 +748,16 @@ class ChoresPanel extends VerticalLayout {
                 dialog.close();
                 outcome.ifPresentOrElse(
                         o -> Celebrations.afterComplete(service, o, this::undoLast),
-                        () -> Notification.show(T.tr("board.otherHelp.off"),
-                                4000, Notification.Position.TOP_CENTER)
+                        () -> Toasts.show(T.tr("board.otherHelp.off"), 4000)
                                 .addThemeVariants(NotificationVariant.LUMO_CONTRAST));
                 refresh();
                 return;
             }
             boolean logged = service.logOtherHelp(homeCode, memberId, what.getValue()).isPresent();
             dialog.close();
-            Notification n = Notification.show(
+            Notification n = Toasts.show(
                     logged ? T.tr("board.otherHelp.sent") : T.tr("board.otherHelp.off"),
-                    4000, Notification.Position.TOP_CENTER);
+                    4000);
             n.addThemeVariants(logged ? NotificationVariant.LUMO_SUCCESS
                     : NotificationVariant.LUMO_CONTRAST);
             refresh();
@@ -855,8 +854,7 @@ class ChoresPanel extends VerticalLayout {
     private void undoLast() {
         service.undoableCompletion(memberId).ifPresentOrElse(completion -> {
             if (service.undoCompletion(completion.getId(), memberId)) {
-                Notification n = Notification.show(T.tr("undo.done"),
-                        3000, Notification.Position.TOP_CENTER);
+                Notification n = Toasts.show(T.tr("undo.done"), 3000);
                 n.addThemeVariants(NotificationVariant.LUMO_SUCCESS);
             }
             refresh();

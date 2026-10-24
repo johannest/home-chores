@@ -25,6 +25,7 @@ import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.vaadin.flow.component.UI;
+import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.VaadinServiceInitListener;
 import com.vaadin.flow.server.VaadinSession;
@@ -230,6 +231,20 @@ class ArchitectureTest {
                 .because("panels, dialogs and helpers are an implementation detail of the views; "
                         + "SessionContext is the one deliberate public facade")
                 .check(classes);
+    }
+
+    /**
+     * index.html ships {@code viewport-fit=cover}, so the top of a phone's screen is the camera
+     * island, and a toast there sat behind it. Toasts go through {@code ui.Toasts}, at the
+     * bottom.
+     */
+    @Test
+    void noToastIsPlacedAtTheTopOfTheScreen() {
+        for (String top : new String[] {"TOP_START", "TOP_CENTER", "TOP_END", "TOP_STRETCH"}) {
+            noClasses().should().accessField(Notification.Position.class, top)
+                    .because("the top of a phone is behind the camera island; use Toasts.show")
+                    .check(classes);
+        }
     }
 
     // ---- General hygiene ---------------------------------------------------------

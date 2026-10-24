@@ -52,8 +52,7 @@ class AvatarPickerDialog extends Dialog {
     private void pick(ChoreService service, Member member, String avatarId, Runnable onChanged) {
         service.setAvatar(member.getId(), avatarId);
         close();
-        Notification n = Notification.show(T.tr("avatar.saved"), 2000,
-                Notification.Position.TOP_CENTER);
+        Notification n = Toasts.show(T.tr("avatar.saved"), 2000);
         n.addThemeVariants(NotificationVariant.LUMO_SUCCESS);
         onChanged.run();
     }

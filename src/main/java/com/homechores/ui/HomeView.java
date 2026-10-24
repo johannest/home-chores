@@ -140,7 +140,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         SessionContext.signOut();
         getUI().ifPresent(ui -> {
             ui.navigate(LandingView.class);
-            Notification.show(T.tr("home.gone"), 5000, Notification.Position.TOP_CENTER);
+            Toasts.show(T.tr("home.gone"), 5000);
         });
     }
 
@@ -426,8 +426,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         Button ok = new Button(T.tr("claim.unlock"), e -> {
             if (service.claimAdmin(memberId, pin.getValue())) {
                 d.close();
-                Notification n = Notification.show(T.tr("claim.success"),
-                        2500, Notification.Position.TOP_CENTER);
+                Notification n = Toasts.show(T.tr("claim.success"), 2500);
                 n.addThemeVariants(NotificationVariant.LUMO_SUCCESS);
                 selected = PanelTab.ADMIN;
                 buildChrome();
@@ -467,7 +466,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     private void copyCode(Home home) {
         UI.getCurrent().getPage().executeJs(
                 "if(navigator.clipboard){navigator.clipboard.writeText($0);}", home.getCode());
-        Notification.show(T.tr("home.code.copied"), 2500, Notification.Position.TOP_CENTER);
+        Toasts.show(T.tr("home.code.copied"), 2500);
     }
 
     private void copyJoinLink(Home home) {
@@ -475,7 +474,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
                 "const url=location.origin+'/?join='+$0;"
                         + "if(navigator.clipboard){navigator.clipboard.writeText(url);}",
                 home.getCode());
-        Notification.show(T.tr("home.link.copied"), 2500, Notification.Position.TOP_CENTER);
+        Toasts.show(T.tr("home.link.copied"), 2500);
     }
 
     /** Opens the native share sheet with the join link (falls back to clipboard). */
@@ -488,8 +487,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
                         + "if(navigator.share){navigator.share({title:'FlashChores',text:msg,url:url}).catch(()=>{});}"
                         + "else if(navigator.clipboard){navigator.clipboard.writeText(msg);}",
                 home.getCode(), text);
-        Notification.show(T.tr("home.share.ready", home.getCode()),
-                2500, Notification.Position.TOP_CENTER);
+        Toasts.show(T.tr("home.share.ready", home.getCode()), 2500);
     }
 
     // ---- Reactive rendering (Vaadin Signals) --------------------------------
