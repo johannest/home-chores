@@ -23,6 +23,7 @@ import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.menubar.MenuBar;
+import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
 import java.time.Duration;
@@ -276,6 +277,22 @@ class ListEditUiTest extends HomeChoresUiTest {
         test(button(tray, "swipe-delete")).click();
         assertTrue(lists.openItems(code, ListKind.TODO).isEmpty());
         assertTrue(rows().isEmpty());
+    }
+
+    @Test
+    void theUndoToast_opensAtTheBottom_notUnderTheCameraIsland() {
+        Member alex = signedIn("Alex");
+        lists.add(alex.getHomeCode(), ListKind.TODO, alex.getId(), "Call the plumber");
+        openLists(1);
+        Div tray = $(Div.class, rows().get(0)).all().stream()
+                .filter(d -> d.getClassNames().contains("swipe-actions")).findFirst().orElseThrow();
+
+        test(button(tray, "swipe-delete")).click();
+
+        Notification undo = $(Notification.class).all().stream()
+                .filter(Notification::isOpened).findFirst().orElseThrow();
+        assertEquals(Notification.Position.BOTTOM_CENTER, undo.getPosition());
+        assertTrue(undo.getElement().getTextRecursively().contains("Undo"));
     }
 
     @Test

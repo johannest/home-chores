@@ -45,7 +45,7 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Backup / restore** | Admins can download a JSON backup of the whole family (settings, members, chores, groups and their order, completions, credits, spree tiers) and restore from one (replaces current data after a confirmation). |
 | **Live sync** | Vaadin **Signals**: each home has a revision signal (`HomeState`) that every open UI observes via `Signal.effect`, delivered over server push (long-polling). Completions, approvals, leaderboard, badges and pending counts update on everyone's screen instantly. |
 | **Languages** | English (default), Finnish, Swedish. The browser language picks the initial locale; the header switcher stores the choice in a `lang` cookie. Default chores are seeded in the creator's language. |
-| **Built for phones** | Laid out for a ~360px column first: no horizontal scrolling anywhere, safe-area padding for the notch and home indicator, `100dvh` against iOS Safari's collapsing URL bar, 40px touch targets, and no sticky `:hover` states after a tap. The board header collapses Copy/Share to icons and stacks onto two rows so chores are visible without scrolling. A request that takes longer than **1.5 s** covers the page with the same *Getting your chores…* card the app starts with, so the first tap after a session expired reads as a reload rather than a dead app. See SPEC §4.15.1 and §4.1.2. |
+| **Built for phones** | Laid out for a ~360px column first: no horizontal scrolling anywhere, safe-area padding for the notch and home indicator, toasts at the bottom rather than behind the camera island, `100dvh` against iOS Safari's collapsing URL bar, 40px touch targets, and no sticky `:hover` states after a tap. The board header collapses Copy/Share to icons and stacks onto two rows so chores are visible without scrolling. A request that takes longer than **1.5 s** covers the page with the same *Getting your chores…* card the app starts with, so the first tap after a session expired reads as a reload rather than a dead app. See SPEC §4.15.1 and §4.1.2. |
 | **PWA install** | Installable on Android (install prompt) and iPhone (Share → *Add to Home Screen*): branded icon, standalone display, themed splash screens, offline fallback page. |
 | **Privacy page** | A plain-language privacy notice at `/privacy` and a brief user agreement at `/terms` (consented via a checkbox on the create/join forms), both linked from the landing page. |
 | **Themes & colours** | Follows the OS theme automatically (`@ColorScheme(SYSTEM)` + CSS `light-dark()`), and one palette-glyph menu in the header holds both axes: auto/light/dark **and** a brand colour — **green, pink, blue or grey**. Both are per device (localStorage), applied before Vaadin loads so there's no flash. A palette is three CSS custom properties, so it composes with light/dark instead of duplicating it. |
@@ -432,6 +432,7 @@ src/main/java/com/homechores/
     ├── LoadingOverlayInitListener.java # the "Getting your chores…" card for a slow request
     ├── SessionContext.java       # who am I / which home / my time zone (VaadinSession)
     │                             #   — short-lived; DeviceIdentity is what outlives it
+    ├── Toasts.java               # where every toast opens (bottom centre, clear of the island)
     └── T.java                    # small translation helper
 src/main/resources/
 ├── messages[_fi|_sv].properties  # UI texts (all three languages)
@@ -439,6 +440,7 @@ src/main/resources/
 └── META-INF/resources/icons/     # PWA icons + iOS splash screens (generated set)
 src/main/frontend/confetti.js     # self-contained confetti (no CDN)
 src/main/frontend/loading-overlay.js # the loading card, built from the landing restore card's classes
+src/main/frontend/keyboard-inset.js  # how much of the page the on-screen keyboard covers (toasts)
 src/main/frontend/list-swipe.js   # swipe-to-reveal actions on list lines
 src/main/frontend/hold-drag.js    # the hold-and-drag gesture: lift, preview, drop event
 src/main/frontend/board-drag.js   # …configured for the board's chore cards (admins)

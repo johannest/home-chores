@@ -1425,10 +1425,10 @@ class AdminPanel extends VerticalLayout {
                         SessionContext.signOut();
                         getUI().ifPresent(ui -> {
                             ui.navigate(LandingView.class);
-                            Notification n = Notification.show(
+                            Notification n = Toasts.show(
                                     T.tr("admin.restore.done", result.homeCode(),
                                             result.members(), result.tasks()),
-                                    5000, Notification.Position.TOP_CENTER);
+                                    5000);
                             n.addThemeVariants(NotificationVariant.LUMO_SUCCESS);
                         });
                     } catch (IllegalArgumentException ex) {
@@ -1497,8 +1497,7 @@ class AdminPanel extends VerticalLayout {
             SessionContext.signOut();
             ui.navigate(LandingView.class);
             if (service.deleteHome(homeCode)) {
-                Notification n = Notification.show(T.tr("admin.deleteHome.done", name),
-                        5000, Notification.Position.TOP_CENTER);
+                Notification n = Toasts.show(T.tr("admin.deleteHome.done", name), 5000);
                 n.addThemeVariants(NotificationVariant.LUMO_SUCCESS);
             } else {
                 toastError(T.tr("admin.deleteHome.failed"));
@@ -1582,12 +1581,12 @@ class AdminPanel extends VerticalLayout {
     }
 
     private void toast(String msg) {
-        Notification n = Notification.show(msg, 2500, Notification.Position.TOP_CENTER);
+        Notification n = Toasts.show(msg, 2500);
         n.addThemeVariants(NotificationVariant.LUMO_SUCCESS);
     }
 
     private void toastError(String msg) {
-        Notification n = Notification.show(msg, 3500, Notification.Position.TOP_CENTER);
+        Notification n = Toasts.show(msg, 3500);
         n.addThemeVariants(NotificationVariant.LUMO_ERROR);
     }
 

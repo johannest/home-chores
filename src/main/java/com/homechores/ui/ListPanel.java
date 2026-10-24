@@ -285,7 +285,7 @@ class ListPanel extends VerticalLayout {
     }
 
     private static void toast(String text, boolean warn) {
-        Notification n = Notification.show(text, 3500, Notification.Position.TOP_CENTER);
+        Notification n = Toasts.show(text, 3500);
         if (warn) {
             n.addThemeVariants(NotificationVariant.LUMO_WARNING);
         }
@@ -651,7 +651,7 @@ class ListPanel extends VerticalLayout {
      */
     private void offerUndo(ListItem item) {
         Notification n = new Notification();
-        n.setPosition(Notification.Position.TOP_CENTER);
+        n.setPosition(Toasts.POSITION);
         n.setDuration(6000);
         Span text = new Span(T.tr("list.deleted", item.getText()));
         Button undo = new Button(T.tr("undo.action"), e -> {

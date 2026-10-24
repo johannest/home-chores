@@ -643,7 +643,10 @@ message and shows a matching badge on the card (`LockReason`):
   line carries no `data-item-id`, so it can be neither lifted nor landed on, and the drag's run of
   landable lines is bounded by the pinned ones above and below. Underneath, the line keeps its own
   `sortOrder`, so once the reminder is answered or cancelled it drops back into the family's order
-  where it was. The swipe (`list-swipe.js`) and the hold coexist on the same row: a finger that
+  where it was. While a line is lifted, its slot is a whole dashed frame drawn inside the row
+  (2px, `--lumo-contrast-50pct`, about 3:1 against the page in both schemes) with the words faded
+  under it: no line changes height, and no neighbour covers an edge of the frame.
+  The swipe (`list-swipe.js`) and the hold coexist on the same row: a finger that
   moves within the 450 ms hold swipes or scrolls and never lifts, and once a line is lifted the
   swipe script stands down for that gesture.
 - Ticked lines sink to a **Done (n)** section, struck through, with who ticked them and when.
@@ -1185,6 +1188,15 @@ scales up, not the other way round.
   indicator, and heights use `100dvh` (with a `100vh` fallback) to track iOS Safari's
   collapsing URL bar. The fixed `.restore-overlay` (and the loading card built from it, §4.1.2)
   pads its own top the same way.
+- **Toasts at the bottom.** Every toast — credits, Undo, copied, saved, errors — opens
+  at the bottom centre (`Toasts`), never at the top, where with `viewport-fit=cover` it sat
+  behind the camera island. The bottom is also where the thumb is for a toast's Undo, and the
+  notification container pads its bottom with `max(var(--lumo-space-s), env(safe-area-inset-bottom))`
+  to clear the home indicator — or by `--keyboard-inset` when that is larger: iOS Safari and
+  Android Chrome open the on-screen keyboard over the page without resizing it, so a join error
+  answering Enter would open under the keys, and `keyboard-inset.js` measures how much of the
+  page the visual viewport no longer shows. The two answers to a tap that did nothing — why a chore cannot be done right now,
+  and "someone else just booked this" — stay in the middle of the screen, where the eye already is.
 - **Header (≤640px).** The identity block and the action cluster each take a full row
   rather than pushing each other off-screen; the home name is one ellipsised line. Copy
   and Share collapse to icons — their glyphs are self-explanatory and they sit beside the
@@ -1404,7 +1416,8 @@ scales up, not the other way round.
   **Display order**: due reminders lead soonest first, far-off ones trail soonest first, the plain
   lines keep the family's order between them, "tomorrow 9:00" is below the plain lines today and
   above them tomorrow, and with no reminders the display order is the family's order. Plus
-  `ListEditUiTest`: tapping the text edits, the swipe tray edits and deletes, the reminder badge
+  `ListEditUiTest`: tapping the text edits, the swipe tray edits and deletes (and the Undo toast
+  opens at the bottom centre), the reminder badge
   opens its time; rows with a reminder sort by due date and carry no id while plain rows do, the
   list is `draggable` for a member, a drop through the panel reorders the rows and the family's
   order, a drop beside an id that is not ours moves nothing, a drop naming another home's line
@@ -1447,7 +1460,8 @@ scales up, not the other way round.
   in `ui`, `@Service` in `service`, other `@Component`s in `ui` only as `VaadinServiceInitListener`s;
   `UI.getCurrent()`/`VaadinSession` touched only from `ui` (plus the `LocaleInitListener`
   session hook); `ui` helpers package-private
-  (`SessionContext` excepted); no standard streams outside `MaintenanceRunner`; no
+  (`SessionContext` excepted); no toast positioned at the top of the screen (no `TOP_*`
+  `Notification.Position`, §4.15.1); no standard streams outside `MaintenanceRunner`; no
   `java.util.logging`. Every rule passed on the day it was written — the suite exists so the
   next change cannot quietly bend the shape.
 

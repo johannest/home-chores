@@ -36,6 +36,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @StyleSheet("styles.css")
 // On the app shell rather than a view, so the card exists on the landing page too.
 @JsModule("./loading-overlay.js")
+// Likewise: the landing page's join errors are the toasts most likely to answer an Enter key.
+@JsModule("./keyboard-inset.js")
 @PWA(name = "FlashChores", shortName = "FlashChores",
         themeColor = "#10b981", backgroundColor = "#ffffff")
 public class Application implements AppShellConfigurator {
