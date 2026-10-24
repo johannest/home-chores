@@ -3,6 +3,8 @@ package com.homechores.service;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -92,5 +94,21 @@ class PushEndpointsTest {
     void theAddressCheckAlsoAppliesTheShapeRules() {
         assertFalse(PushEndpoints.resolvesToPublicAddress("http://fcm.googleapis.com/x"));
         assertFalse(PushEndpoints.resolvesToPublicAddress("https://127.0.0.1/x"));
+    }
+
+    /** The IPv6 private network, fc00::/7, is not what java.net calls site-local (that is the
+     *  deprecated fec0::/10), so it is checked by hand; the public side of the line stays open. */
+    @ParameterizedTest
+    @ValueSource(strings = {"fd00::1", "fc00::", "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        "fe80::1", "::1", "::", "ff02::1", "10.0.0.1", "100.64.0.1", "169.254.169.254"})
+    void privateAddresses_areRecognised(String literal) throws UnknownHostException {
+        assertTrue(PushEndpoints.isPrivate(InetAddress.getByName(literal)), literal);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2606:4700::1", "2a00:1450:400f:80d::200e", "fbff::1", "fe00::1",
+        "142.250.74.78", "8.8.8.8"})
+    void publicAddresses_areNot(String literal) throws UnknownHostException {
+        assertFalse(PushEndpoints.isPrivate(InetAddress.getByName(literal)), literal);
     }
 }

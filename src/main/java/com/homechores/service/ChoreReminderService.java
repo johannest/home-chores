@@ -105,6 +105,9 @@ public class ChoreReminderService {
             List<Long> dead = new ArrayList<>();
             if (plan != null) {
                 for (PushSubscription sub : plan.subscriptions()) {
+                    if (sent >= MAX_SENDS_PER_SWEEP) {
+                        break; // the cap bounds devices too, not only reminders
+                    }
                     if (sender.send(sub, plan.title(), plan.body())) {
                         sent++;
                     } else {

@@ -222,7 +222,7 @@ class ListReminderServiceTest {
 
         String json = backup.export(code);
         assertFalse(json.contains("dueAt"), "a pending notification is not family history");
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
         assertTrue(reminders.forHome(code).isEmpty(), "line ids were reissued — a survivor would point nowhere");
 
         ListItem again = todo(code, chores.membersOf(code).get(0).getId(), "Bread");

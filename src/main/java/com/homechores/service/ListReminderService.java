@@ -159,6 +159,9 @@ public class ListReminderService {
             List<Long> dead = new ArrayList<>();
             if (plan != null) {
                 for (Map.Entry<PushSubscription, String[]> e : plan.messages().entrySet()) {
+                    if (sent >= MAX_SENDS_PER_SWEEP) {
+                        break; // the cap bounds devices too, not only reminders
+                    }
                     if (sender.send(e.getKey(), e.getValue()[0], e.getValue()[1])) {
                         sent++;
                     } else {

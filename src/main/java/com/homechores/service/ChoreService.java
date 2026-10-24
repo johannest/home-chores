@@ -432,7 +432,8 @@ public class ChoreService {
     @Transactional
     public boolean decideRejoin(Long requestId, Long adminId, boolean approve) {
         RejoinRequest r = rejoins.findById(requestId).orElse(null);
-        if (r == null || r.getStatus() != RejoinStatus.PENDING) {
+        if (r == null || r.getStatus() != RejoinStatus.PENDING
+                || members.findAdmin(r.getHomeCode(), adminId).isEmpty()) {
             return false;
         }
         if (approve && r.isJoin()) {
@@ -553,6 +554,19 @@ public class ChoreService {
     }
 
     // ---- Admin & member management -----------------------------------------
+
+    /** Whether this member is, right now, an admin of this home. The UI's check before an
+     *  admin action; the service methods that take the acting admin make it again. */
+    public boolean isAdminOf(String homeCode, Long memberId) {
+        return members.findAdmin(normalizeCode(homeCode), memberId).isPresent();
+    }
+
+    /** The acting admin, or an exception: a call here from a non-admin is a stale screen or
+     *  a tampered request, and either way nothing happens. */
+    private Member adminOf(String homeCode, Long adminId) {
+        return members.findAdmin(homeCode, adminId)
+                .orElseThrow(() -> new IllegalArgumentException("Not an admin of this home"));
+    }
 
     /** Attempts to grant admin rights to a member by verifying the home's admin PIN. */
     @Transactional
@@ -1503,6 +1517,7 @@ public class ChoreService {
         if (!task.getHomeCode().equals(member.getHomeCode())) {
             throw new IllegalArgumentException("Chore and member belong to different homes");
         }
+        adminOf(task.getHomeCode(), adminId);
 
         // Logging it settles the chore, so a booking on it has served its purpose.
         if (task.getBookedByMemberId() != null) {
@@ -1584,8 +1599,8 @@ public class ChoreService {
     public Optional<CompleteOutcome> logOtherHelpAsAdmin(String homeCode, Long adminId,
                                                           String description, int credits) {
         Home home = homes.findById(normalizeCode(homeCode)).orElseThrow();
-        Member admin = members.findById(adminId).orElseThrow();
-        if (!admin.isAdmin() || !admin.getHomeCode().equals(home.getCode())) {
+        Member admin = members.findAdmin(home.getCode(), adminId).orElse(null);
+        if (admin == null) {
             return Optional.empty();
         }
         Optional<String> text = helpText(home, description);
@@ -1669,6 +1684,7 @@ public class ChoreService {
     @Transactional
     public CompleteOutcome approve(Long completionId, Long adminId, int credits) {
         Completion c = completions.findById(completionId).orElseThrow();
+        adminOf(c.getHomeCode(), adminId);
         ChoreTask task = c.isOtherHelp() ? null : tasks.findById(c.getTaskId()).orElseThrow();
         Member member = members.findById(c.getMemberId()).orElseThrow();
 
@@ -1695,6 +1711,7 @@ public class ChoreService {
     @Transactional
     public void reject(Long completionId, Long adminId) {
         Completion c = completions.findById(completionId).orElseThrow();
+        adminOf(c.getHomeCode(), adminId);
         c.setStatus(CompletionStatus.REJECTED);
         c.setReviewedByMemberId(adminId);
         c.setReviewedAt(java.time.Instant.now());

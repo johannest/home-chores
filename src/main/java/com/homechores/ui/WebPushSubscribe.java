@@ -70,9 +70,11 @@ final class WebPushSubscribe {
                 });
     }
 
-    /** Unsubscribes this browser and forgets the row. Reports {@code ok} / {@code none} /
-     *  {@code error}, with the endpoint already removed server-side when there was one. */
-    static void drop(PushReminderService reminders, SerializableConsumer<String> onResult) {
+    /** Unsubscribes this browser and forgets the member's row for it. Reports {@code ok} /
+     *  {@code none} / {@code error}, with the endpoint already removed server-side when there
+     *  was one. */
+    static void drop(PushReminderService reminders, Long memberId,
+                     SerializableConsumer<String> onResult) {
         UI.getCurrent().getPage().executeJs(
                 "return (async () => { try {"
                 + " const reg = await navigator.serviceWorker.getRegistration();"
@@ -89,7 +91,7 @@ final class WebPushSubscribe {
                     JsonNode result = parse(json);
                     String endpoint = result.path("endpoint").asText(null);
                     if (endpoint != null) {
-                        reminders.removeSubscription(endpoint);
+                        reminders.removeSubscription(endpoint, memberId);
                     }
                     onResult.accept(result.path("status").asText("error"));
                 });

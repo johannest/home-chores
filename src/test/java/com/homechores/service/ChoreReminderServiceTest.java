@@ -189,7 +189,7 @@ class ChoreReminderServiceTest {
         String json = backup.export(code);
 
         assertFalse(json.contains("dueAt"), "reminders are not family history — never exported");
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
 
         // Scoped to this member, not findAll(): SnoozeUiTest is not transactional and leaves its
         // own rows behind, and this assertion is about THIS home's restore.
@@ -306,5 +306,22 @@ class ChoreReminderServiceTest {
         assertTrue(reminders.findByMemberIdAndTaskId(robin.getId(), alexsChore.getId()).isEmpty(),
                 "nothing was armed");
         assertTrue(snoozes.forMember(robin.getId()).isEmpty());
+    }
+
+
+    /** The per-sweep cap bounds devices, not only reminders: a member with a table full of rows
+     *  (more than the subscribe path keeps) still costs one sweep at most the cap. */
+    @Test
+    void oneMemberWithManyDevices_isSentToNoMoreThanTheCap() {
+        when(sender.send(any(), anyString(), anyString())).thenReturn(true);
+        Member alex = subscribedMember("Snooze", "Alex");
+        String code = alex.getHomeCode();
+        for (int i = 0; i < ChoreReminderService.MAX_SENDS_PER_SWEEP + 5; i++) {
+            subscriptions.save(new PushSubscription(alex.getId(), code,
+                    "https://fcm.googleapis.com/fcm/send/extra" + i, "p256dh", "auth"));
+        }
+        armed(alex.getId(), anytimeChore(code).getId(), Duration.ofMinutes(1));
+
+        assertEquals(ChoreReminderService.MAX_SENDS_PER_SWEEP, snoozes.sendDue(Instant.now()));
     }
 }

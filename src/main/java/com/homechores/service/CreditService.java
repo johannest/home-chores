@@ -7,6 +7,7 @@ import com.homechores.domain.CompletionStatus;
 import com.homechores.domain.CreditEntry;
 import com.homechores.domain.CreditEntryRepository;
 import com.homechores.domain.CreditType;
+import com.homechores.domain.MemberRepository;
 import com.homechores.domain.InputLimits;
 import com.homechores.domain.SpreeTier;
 import com.homechores.domain.SpreeTierRepository;
@@ -32,13 +33,16 @@ public class CreditService {
     private final CreditEntryRepository credits;
     private final SpreeTierRepository tiers;
     private final CompletionRepository completions;
+    private final MemberRepository members;
     private final HomeState homeState;
 
     public CreditService(CreditEntryRepository credits, SpreeTierRepository tiers,
-                        CompletionRepository completions, HomeState homeState) {
+                        CompletionRepository completions, MemberRepository members,
+                        HomeState homeState) {
         this.credits = credits;
         this.tiers = tiers;
         this.completions = completions;
+        this.members = members;
         this.homeState = homeState;
     }
 
@@ -135,9 +139,14 @@ public class CreditService {
         return earned - redeemed;
     }
 
-    /** Logs a redemption (credits spent). Fails if the amount exceeds the balance. */
+    /** Logs a redemption (credits spent). False when the amount exceeds the balance, when
+     *  {@code adminId} is not currently an admin of the home, or when the member is not in it. */
     @Transactional
     public boolean redeem(String homeCode, Long memberId, int amount, String note, Long adminId) {
+        if (members.findAdmin(homeCode, adminId).isEmpty()
+                || members.findById(memberId).filter(m -> homeCode.equals(m.getHomeCode())).isEmpty()) {
+            return false;
+        }
         if (amount <= 0 || amount > balance(memberId)) {
             return false;
         }

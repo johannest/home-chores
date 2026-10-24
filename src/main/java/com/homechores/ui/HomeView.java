@@ -315,8 +315,12 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         return header;
     }
 
-    /** Leaving is an explicit sign-out, so the device forgets who it was as well. */
+    /** Leaving is an explicit sign-out, so the device forgets who it was as well — its push
+     *  subscription included, or the next person to sign in on this browser would inherit
+     *  this member's reminders. The unsubscribe answers after the navigation; its callback
+     *  needs no session, only the member id captured here. */
     private void leave() {
+        WebPushSubscribe.drop(reminderService, memberId, status -> { });
         DeviceIdentity.forget();
         SessionContext.signOut();
         getUI().ifPresent(ui -> ui.navigate(LandingView.class));

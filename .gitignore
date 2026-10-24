@@ -13,3 +13,9 @@
 /logs/
 # Log files copied in for a look (prod-logs.log and the like) never belong in the repo
 *.log
+# The demo recorder's Playwright install and its output (tools/demo-video/run.sh)
+/tools/demo-video/node_modules/
+/tools/demo-video/video/
+/tools/demo-video/fail.png
+/tools/demo-video/.venv/
+/tools/demo-video/.voice-cache/

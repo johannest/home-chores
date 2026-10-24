@@ -73,6 +73,16 @@ Terms in **bold** map to concepts in the code.
 Non-admins have **read/complete** rights only; all create/update/delete of shared
 config is admin-only — that is the "admin has CRUD over everything" requirement.
 
+**Checked when the action is taken, not when the screen was drawn.** The Admin tab and the
+board's ＋ card exist only for admins, but a dialog opened from them hangs off the UI and
+outlives the redraw that removes them, so the role is re-read at action time:
+`AdminPanel.stillAdmin` (through `ChoreService.isAdminOf`) guards every action in the tab and
+refuses a demoted admin's open dialog with a notice, and the service methods that take the
+acting admin — `decideRejoin`, `completeFor`, `approve`, `reject`, `logOtherHelpAsAdmin`,
+`CreditService.redeem`, `BackupService.restore` — make the same check themselves
+(`MemberRepository.findAdmin`: the member exists, is an admin, and is in *that* home), so they
+hold whatever screen the call came from.
+
 ## 3. User stories
 
 ### Phase 1
@@ -283,6 +293,11 @@ config is admin-only — that is the "admin has CRUD over everything" requiremen
   and put chores in them, so a long board reads as sections instead of one wall of cards.
   Chores I do not group sit under "Other chores" at the bottom. Deleting a group keeps its
   chores and their history; it is a label, not a container.
+- **US-60 A slow answer looks like loading, not like a broken app.** As a family member whose
+  tap is taking long — typically the first tap after my phone spent a while in my pocket and the
+  server let my session go — I see the same full-screen "Getting your chores…" card the app shows
+  while it starts, instead of a 4px bar hidden under the camera island, so I know to wait rather
+  than tap again or give up.
 
 ### Phase 5
 
@@ -406,6 +421,12 @@ and the next interaction signs the phone straight back in.
   real work. The lifetime is re-applied on every board render, so a promotion or demotion
   moves that device onto the other one without signing out.
 - `server.servlet.session.timeout=3m` covers visitors who haven't signed in yet.
+- **The session cookie** is `Secure` and `HttpOnly` (Tomcat, behind the TLS proxy's
+  `X-Forwarded-Proto`, honoured through `server.forward-headers-strategy=native`) and
+  `SameSite=Lax` (`server.servlet.session.cookie.same-site`, set in the app because nothing
+  upstream sets it). Lax is what the app needs: same-site UIDL, push and heartbeat traffic, a
+  join link opened from a chat still carrying the cookie, and no cookie on a cross-site POST.
+  The runbook's verify step checks all three flags on the host.
 - **`vaadin.closeIdleSessions=true`** is what makes the numbers mean anything. Without it,
   Vaadin's heartbeats keep an open tab alive indefinitely and the timeout only applies to
   closed tabs. With it, the clock runs from `VaadinSession.lastRequestTimestamp`, which only
@@ -420,6 +441,19 @@ and the next interaction signs the phone straight back in.
   so it is disabled and `sessionExpiredURL` points at `/`. The browser reloads the landing
   page, which restores the stored identity and returns to the board. A device waiting on a
   rejoin approval re-reads its token the same way and goes back to waiting.
+- **A long wait is shown as loading** (`LoadingOverlayInitListener`, `loading-overlay.js`).
+  Vaadin's loading indicator is a 4px bar along the top of the viewport — under a phone's camera
+  island — so a tap that takes seconds looks like a tap that did nothing. From the indicator's
+  second stage on, **1.5 s** into a request (`LoadingOverlayInitListener.OVERLAY_DELAY_MS`, after
+  the bar's own first stage), the page is covered by the landing page's restore card: built
+  client-side on every page from the same CSS classes, raised as a manual **popover** — the
+  browser's top layer, so it covers a dialog left open too — while the bar is in its second or
+  third stage, and given its text (`app.loading`, the key the landing card reads) by the server
+  in the UI's language. The first tap on an expired session therefore reads as the
+  app reloading, which is what it is, and a wait that ends in a reload runs straight into the
+  landing page's own copy of the card. An ordinary redraw — tens of milliseconds plus a round
+  trip — never reaches it. While the connection itself is down the card yields to Vaadin's
+  "Connection lost" message, and the first-stage bar is moved below `env(safe-area-inset-top)`.
 
 ### 4.2 Chores (CRUD — admin)
 - Create: name (required) + emoji (optional, default ✅) + **repeat every N days**
@@ -728,11 +762,17 @@ message and shows a matching badge on the card (`LockReason`):
   feedback-per-chore — "which chore does this family hate" needs more than a week of reactions.
 - **Bucketing is by `doneAt`**, so a completion approved days late still belongs to the day it
   was *done*. Approval never moves a row between periods.
-- **Cost.** The period is applied inside the single pass that already loads the working set, and
-  the longer trends are derived from the same per-day map. Bounding the query per lens instead
-  would be one round trip per chip against a `doneAt` with no index behind it — more work, to
-  avoid a comparison per row already in memory, and it would cost the "one query for the working
-  set" property `BoardRenderCostTest` pins.
+- **Cost.** A Stats tab is rebuilt on every change in the home, for every device parked on it,
+  and completions are never purged — so what one render loads must not grow with the years.
+  Under any lens but *All time*, the pass walks the **trend window only** (`StatsService
+  .historyStart`: the twelve months the month trend draws, which covers every other picture the
+  tiles and charts take from the rows themselves), and the facts that stay all-time under every
+  lens are asked of the database instead: the approved total and the approval queue are count
+  queries, feedback-per-chore is a group-by (`CompletionRepository.feedbackByTask`), the 💎
+  totals are sums and the redemption list is read on its own (small by nature — a redemption is
+  an admin typing into a dialog). Only the *All time* lens, the member's own choice, loads the
+  ledger whole. The period is then applied inside that single pass and the trends derived from
+  the same per-day map. `StatsRenderCostTest` pins the number of rows a render loads.
 - **My stats** (any member): total approved; the period tiles; bar chart of my chores by type
   under the lens; **💎 earned** and **💎 redeemed** (below); my feedback split; 7-day adherence;
   **12-week and 12-month trends**.
@@ -799,7 +839,8 @@ message and shows a matching badge on the card (`LockReason`):
   data will be replaced, the home's data is deleted and recreated from the file, and
   home settings (name, PIN, approval, division style, booking hold, target) are
   applied. **The file's home code must match the admin's own home** — an admin can only
-  restore over their own home, never another family's. IDs are remapped internally;
+  restore over their own home, never another family's — **and the acting member must be an
+  admin of it at that moment**, since the confirmation outlives a demotion. IDs are remapped internally;
   orphaned records are skipped — an other-help entry has no task to remap and is not an
   orphan. Invalid files (including a mismatched home code) are rejected with a message.
   A file carrying keys this build does not know (a backup written by a newer version) is
@@ -877,12 +918,24 @@ message and shows a matching badge on the card (`LockReason`):
   reminder time (their own browser timezone, persisted on `Member.zoneId`). A
   once-a-minute sweep (`PushReminderService`) sends a push to the member's subscribed
   devices when that time passes with no completion (any status) logged that member-local
-  day; `Member.lastRemindedOn` makes it once per day and restart-safe. Sending uses
-  Vaadin's `flow-webpush`; Vaadin's generated service worker already handles the `push`
-  and `notificationclick` events. Subscriptions (`PushSubscription`) are per device,
-  pruned when the push service reports 404/410, deleted with their member/home, and
-  excluded from backups. On iOS this requires the PWA installed to the Home Screen
-  (16.4+); the dialog says so.
+  day; `Member.lastRemindedOn` makes it once per day and restart-safe. The payload is
+  Vaadin's `flow-webpush` format, so Vaadin's generated service worker handles the `push`
+  and `notificationclick` events unchanged; the HTTP send is the app's own
+  (`WebPushSender`), over a client with timeouts. **A send is bounded**: DNS check, connect,
+  request and response run on a virtual thread the sweep waits on for at most
+  `homechores.push.send-timeout-ms` (10 s; connect 5 s), after which the exchange is cancelled
+  and the row kept. The endpoint is the one URL a browser chooses and the server then connects
+  to, and every sweep runs on the single scheduler thread, so without that bound one endpoint
+  that accepts and never answers would stall every sweep for every home until a restart.
+  Subscriptions (`PushSubscription`) are per device, **at most `MAX_DEVICES_PER_MEMBER` = 5 per
+  member** (the oldest is evicted when a sixth arrives), pruned when the push service reports
+  404/410, deleted with their member/home, and excluded from backups. The per-sweep send caps
+  count devices, not reminders. An endpoint already on file **moves to whoever subscribes from
+  that browser** — a profile hands the same endpoint to everyone who signs in on it — and
+  *Leave* unsubscribes the device and drops its row, so a shared tablet never carries one
+  member's reminders (or a home's list-line texts) to the next. Unsubscribing is scoped to the
+  member's own row. On iOS this requires the PWA installed to the Home Screen (16.4+); the
+  dialog says so.
 
 ### 4.13b Per-chore reminders (one-shot snooze)
 - A ⏰ on each chore card opens a six-chip dialog (1h / 2h / 4h / 8h / 1d / 1w). Offsets are
@@ -1130,7 +1183,8 @@ scales up, not the other way round.
   `max(<pad>, env(safe-area-inset-*))` on all four sides — top included, or the header
   slides under the iPhone camera island / Dynamic Island — to clear the notch and home
   indicator, and heights use `100dvh` (with a `100vh` fallback) to track iOS Safari's
-  collapsing URL bar. The fixed `.restore-overlay` pads its own top the same way.
+  collapsing URL bar. The fixed `.restore-overlay` (and the loading card built from it, §4.1.2)
+  pads its own top the same way.
 - **Header (≤640px).** The identity block and the action cluster each take a full row
   rather than pushing each other off-screen; the home name is one ellipsised line. Copy
   and Share collapse to icons — their glyphs are self-explanatory and they sit beside the
@@ -1202,8 +1256,19 @@ scales up, not the other way round.
   casual misuse and is **rate-limited** (5 wrong tries → 15-minute per-home lockout on both
   the claim-admin and rejoin-bypass checks) rather than being brute-force-proof. Codes are
   long enough not to be guessable. **HTTPS is required in production**: the app binds
-  loopback and expects a TLS-terminating reverse proxy — enforce HTTPS + HSTS and a Secure
-  session cookie there, since nothing in the app itself does.
+  loopback and expects a TLS-terminating reverse proxy — enforce HTTPS + HSTS there and send
+  `X-Forwarded-Proto`, which is what makes Tomcat mark the session cookie `Secure`; the app
+  itself adds `SameSite=Lax` (§4.1.2). Behind Cloudflare the edges are trusted in the
+  forwarded-for chain (`server.tomcat.remoteip.trusted-proxies`), so the client the rate
+  limiter keys on is the visitor, not the edge, whatever the proxy forwards.
+- **Response headers** (`SecurityHeadersInitListener`, on every request the app serves, so
+  they hold without the proxy): `X-Frame-Options: DENY` against click-jacking of the
+  authenticated board, `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+  strict-origin-when-cross-origin` so the invite URL (which carries the home code) never
+  reaches a third-party site as a referrer, and a `Permissions-Policy` that switches off
+  camera, microphone, geolocation, payment and USB — the clipboard, the share sheet and
+  notifications, which the app uses, are left alone. No CSP: Vaadin bootstraps with inline
+  scripts and `index.html` carries one, so a nonce-based policy is a project of its own.
 - **Identity storage**: the browser holds `memberId|homeCode|secret` — a per-device 128-bit
   secret whose SHA-256 the server checks on every restore — and, while a join/rejoin is
   pending, a separate 128-bit device token. No personal data. The secret *is* the
@@ -1284,7 +1349,11 @@ scales up, not the other way round.
   row with the member's name, a blank note reads "(no note)" and past ten rows the card counts
   the ones it left out; the admin's Home stats fold each member's own chores and keep an open fold open across
   a redraw; and the session lifetime is the member's until the PIN is entered, and the admin's
-  from then on.
+  from then on. `LoadingOverlayUiTest`: the loading card gets its text in the UI's language
+  (Finnish, English, Swedish) from the same key as the landing page's restore card, appears at
+  the indicator's second stage set to 1.5 s with the thin bar still first, and every new UI is
+  configured by the init listener. The card itself — covering the page at 1.5 s, yielding to the
+  connection-lost message — is browser behaviour, verified by hand in the browser pane.
 - **Statistics** (`StatsServiceTest`): my/home aggregates; 💎 earned follows an undo and ignores
   redemptions, bucketed by the day the credit landed; 💎 redeemed lists the member's redemptions
   newest first with the note as the reward and a blank note as none, and earned − redeemed is the
@@ -1297,6 +1366,23 @@ scales up, not the other way round.
   tiles stay all-time under every lens; trends are zero-filled and end with the current bucket; a
   chore done last month lands in its own column; home bars follow the lens while the headline does
   not; and **axis labels stay narrow in every language** — the case Finnish broke.
+- **Push delivery** (`WebPushSenderTest`, against a local HTTP server standing in for the push
+  service): a service that accepts the connection and never answers holds the sweep no longer
+  than the deadline; an exchange that overruns the deadline is given up on; 2xx is delivered,
+  404/410 is gone, 5xx keeps the row, and the request carries the VAPID signature, `aes128gcm`
+  and a TTL; `send` drops only a malformed endpoint and keeps one it will not connect to.
+- **Push subscriptions** (`PushReminderServiceTest`): a sixth device evicts the oldest;
+  re-subscribing from another member's browser moves the row to them; unsubscribing touches
+  only the member's own row. `ChoreReminderServiceTest`: one member with more devices than the
+  sweep cap is sent to no more than the cap.
+- **Admin actions re-checked at action time** (`RejoinServiceTest`, `ChoreServiceTest`,
+  `LogForMemberTest`, `CreditServiceTest`, `BackupServiceTest`): a member of the home and an
+  admin of another home can neither decide a request, approve or reject, log a chore for
+  someone, redeem, nor restore; redeeming for a member who is not in the home is refused too.
+  `HomeUiTest`: a demoted admin's already-open rename dialog saves nothing.
+- **Stats render cost** (`StatsRenderCostTest`, Hibernate statistics): under the week lens a
+  two-year-old completion is counted (all-time total, feedback per chore) but not loaded; the
+  all-time lens loads it; the 💎 card loads the headline window and sums the rest.
 - **Per-chore reminders** (`ChoreReminderServiceTest`, sender mocked): fires once and the row is
   gone; nothing before its time; arming twice moves it rather than stacking; completing cancels the
   member's own but not another's; an admin logging it for someone cancels theirs; a chore someone
@@ -1345,11 +1431,18 @@ scales up, not the other way round.
 - **Message-bundle parity** (`MessageParityTest`): the three properties files carry identical key
   sets, and no parameterized value hides a lone apostrophe. A missing key fails nothing at
   runtime — it simply renders as the key — so it needs a test rather than a reviewer.
+- **Response headers** (`SecurityHeadersInitListenerTest`): the one handler sets all four
+  headers and returns the request to the normal chain. **Push endpoints**
+  (`PushEndpointsTest`): IPv6 unique-local, link-local, loopback and multicast literals are
+  private; public IPv6 and IPv4 addresses are not.
+- **Trusted proxies** (`TrustedProxiesTest`): the Cloudflare edge regex in
+  `application.properties` is read from the production file the way Tomcat will read it (a `.properties` file unescapes
+  backslashes) and matches edge addresses but not a visitor or the loopback proxy.
 - **Architecture rules** (`ArchitectureTest`, ArchUnit over the compiled main classes): the
   layering `ui → service → domain` with `i18n` a leaf and `maintenance` depended on by nothing;
   no package cycles; `domain` free of in-house and Vaadin dependencies; services free of Vaadin
   except `HomeState` and `WebPushSender`; repositories are `domain` interfaces used only by
-  services and the CLI, with derived queries only; entities in `domain` with a protected no-arg
+  services and the CLI, with derived queries only (`@Query` is allowed for an aggregate — a sum or a group-by — never a row load or `@Modifying`); entities in `domain` with a protected no-arg
   constructor; constructor injection only; Spring's `@Transactional`, never Jakarta's; `@Route`
   in `ui`, `@Service` in `service`, other `@Component`s in `ui` only as `VaadinServiceInitListener`s;
   `UI.getCurrent()`/`VaadinSession` touched only from `ui` (plus the `LocaleInitListener`

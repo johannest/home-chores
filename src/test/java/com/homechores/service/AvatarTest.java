@@ -55,12 +55,13 @@ class AvatarTest {
         assertTrue(json.contains("narwhal"));
 
         // A restore keeps a valid avatar…
-        backupService.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backupService.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
         assertEquals("narwhal", service.membersOf(code).get(0).getAvatar());
 
         // …and a hand-edited file with a bogus one falls back to initials.
         String tampered = json.replace("narwhal", "javascript:alert(1)");
-        backupService.restore(tampered.getBytes(StandardCharsets.UTF_8), code);
+        backupService.restore(tampered.getBytes(StandardCharsets.UTF_8), code,
+                service.findMemberByName(code, "Alex").orElseThrow().getId()); // ids were reissued
         assertNull(service.membersOf(code).get(0).getAvatar());
     }
 }

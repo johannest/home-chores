@@ -3,6 +3,7 @@ package com.homechores;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
 import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
 import static com.tngtech.archunit.library.GeneralCodingRules.ACCESS_STANDARD_STREAMS;
@@ -16,6 +17,7 @@ import com.homechores.ui.SessionContext;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaConstructor;
+import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -135,12 +137,32 @@ class ArchitectureTest {
                 .check(classes);
     }
 
+    /**
+     * Derived query names are the repository convention (see ChoreTaskRepository's note on null
+     * arguments). The one thing they cannot say is an aggregate — a sum, a group-by — and an
+     * aggregate is exactly what keeps a Stats render from loading a family's whole history
+     * (SPEC §4.9), so {@code @Query} is allowed for those alone: never for a row load, where
+     * the null-argument pitfall lives, and never {@code @Modifying}.
+     */
     @Test
-    void repositoriesUseDerivedQueriesOnly() {
-        noMethods().should().beAnnotatedWith(Query.class)
-                .orShould().beAnnotatedWith(Modifying.class)
-                .because("derived query names are the repository convention here (see "
-                        + "ChoreTaskRepository's note on null arguments)")
+    void repositoriesUseDerivedQueries_exceptForAggregates() {
+        noMethods().should().beAnnotatedWith(Modifying.class)
+                .because("writes go through the entity, as everywhere")
+                .check(classes);
+        methods().that().areAnnotatedWith(Query.class)
+                .should(new ArchCondition<JavaMethod>("be an aggregate (select new …, sum, count)") {
+                    @Override
+                    public void check(JavaMethod method, ConditionEvents events) {
+                        String query = method.getAnnotationOfType(Query.class).value().trim();
+                        boolean aggregate = query.matches(
+                                "(?is)select\\s+(new\\s|coalesce\\(sum\\(|sum\\(|count\\().*");
+                        events.add(new SimpleConditionEvent(method, aggregate,
+                                method.getFullName() + " uses @Query for something a derived "
+                                        + "name could say; keep @Query for aggregates"));
+                    }
+                })
+                .because("a derived name cannot express a sum or a group-by, and those are what "
+                        + "keep a Stats render from loading a family's whole history")
                 .check(classes);
     }
 

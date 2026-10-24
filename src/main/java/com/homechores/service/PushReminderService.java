@@ -42,8 +42,20 @@ public class PushReminderService {
     private static final Logger log = LoggerFactory.getLogger(PushReminderService.class);
 
     /** Upper bound on blocking HTTP sends per sweep, protecting the 1-thread scheduler.
-     *  The rest are picked up next minute — a reminder a minute late is still a reminder. */
+     *  The rest are picked up next minute — a reminder a minute late is still a reminder.
+     *  Checked between devices, not only between members: a member's device list is what
+     *  the cap below bounds, and the sweep must not pay for more than this whatever it
+     *  finds in the table. */
     static final int MAX_SENDS_PER_SWEEP = 20;
+
+    /**
+     * Devices one member may have subscribed at once; the oldest goes when a sixth arrives.
+     * A family member has a phone and maybe a tablet. Without a cap, every subscribe
+     * round-trip that names a new endpoint is a new row, and each row is one DNS lookup
+     * and one HTTP exchange per reminder — a table one member could grow without bound
+     * into work the sweep does for them every day.
+     */
+    static final int MAX_DEVICES_PER_MEMBER = 5;
 
     private final MemberRepository members;
     private final CompletionRepository completions;
@@ -101,6 +113,9 @@ public class PushReminderService {
             List<Long> dead = new ArrayList<>();
             if (plan.send()) {
                 for (PushSubscription sub : plan.subscriptions()) {
+                    if (sent >= MAX_SENDS_PER_SWEEP) {
+                        break;
+                    }
                     if (sender.send(sub, plan.title(), plan.body())) {
                         sent++;
                     } else {
@@ -229,13 +244,19 @@ public class PushReminderService {
     }
 
     /**
-     * Upserts a device subscription (keyed by its unique endpoint).
+     * Upserts a device subscription (keyed by its unique endpoint), and keeps the member
+     * within {@link #MAX_DEVICES_PER_MEMBER} by evicting their oldest rows.
      *
      * <p>The endpoint arrives from the browser and is the one URL this server is later
      * told to make requests to, so it is checked before it is ever stored — see
      * {@link PushEndpoints} for why that matters and what the check is. A value that
      * fails is dropped silently: there is nothing the member could do about it, and the
      * only realistic way to produce one is to have tampered with the subscribe script.
+     *
+     * <p>An endpoint already on file is moved to whoever is subscribing now. A browser
+     * profile hands out the same endpoint to everyone who signs in on it, so without this
+     * the row would keep its first owner for good and a shared tablet would carry one
+     * family's reminders — and the text of their list lines — to the next.
      */
     @Transactional
     public void storeSubscription(Long memberId, String homeCode, String endpoint,
@@ -246,16 +267,23 @@ public class PushReminderService {
         PushSubscription sub = subscriptions.findByEndpoint(endpoint)
                 .orElseGet(() -> new PushSubscription(memberId, homeCode, endpoint,
                         p256dh, auth));
+        sub.setOwner(memberId, homeCode);
         sub.setP256dh(p256dh);
         sub.setAuth(auth);
         subscriptions.save(sub);
+        List<PushSubscription> mine = subscriptions.findByMemberIdOrderByCreatedAtAscIdAsc(memberId);
+        for (int i = 0; i < mine.size() - MAX_DEVICES_PER_MEMBER; i++) {
+            subscriptions.delete(mine.get(i));
+        }
         log.debug("Stored push subscription for member {}", memberId);
     }
 
+    /** Forgets one of this member's devices — their own only; another member's endpoint,
+     *  should a browser ever hand it over, is left alone. */
     @Transactional
-    public void removeSubscription(String endpoint) {
-        if (endpoint != null && !endpoint.isBlank()) {
-            subscriptions.deleteByEndpoint(endpoint);
+    public void removeSubscription(String endpoint, Long memberId) {
+        if (endpoint != null && !endpoint.isBlank() && memberId != null) {
+            subscriptions.deleteByEndpointAndMemberId(endpoint, memberId);
         }
     }
 

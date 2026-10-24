@@ -45,12 +45,12 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Backup / restore** | Admins can download a JSON backup of the whole family (settings, members, chores, groups and their order, completions, credits, spree tiers) and restore from one (replaces current data after a confirmation). |
 | **Live sync** | Vaadin **Signals**: each home has a revision signal (`HomeState`) that every open UI observes via `Signal.effect`, delivered over server push (long-polling). Completions, approvals, leaderboard, badges and pending counts update on everyone's screen instantly. |
 | **Languages** | English (default), Finnish, Swedish. The browser language picks the initial locale; the header switcher stores the choice in a `lang` cookie. Default chores are seeded in the creator's language. |
-| **Built for phones** | Laid out for a ~360px column first: no horizontal scrolling anywhere, safe-area padding for the notch and home indicator, `100dvh` against iOS Safari's collapsing URL bar, 40px touch targets, and no sticky `:hover` states after a tap. The board header collapses Copy/Share to icons and stacks onto two rows so chores are visible without scrolling. See SPEC §4.15.1. |
+| **Built for phones** | Laid out for a ~360px column first: no horizontal scrolling anywhere, safe-area padding for the notch and home indicator, `100dvh` against iOS Safari's collapsing URL bar, 40px touch targets, and no sticky `:hover` states after a tap. The board header collapses Copy/Share to icons and stacks onto two rows so chores are visible without scrolling. A request that takes longer than **1.5 s** covers the page with the same *Getting your chores…* card the app starts with, so the first tap after a session expired reads as a reload rather than a dead app. See SPEC §4.15.1 and §4.1.2. |
 | **PWA install** | Installable on Android (install prompt) and iPhone (Share → *Add to Home Screen*): branded icon, standalone display, themed splash screens, offline fallback page. |
 | **Privacy page** | A plain-language privacy notice at `/privacy` and a brief user agreement at `/terms` (consented via a checkbox on the create/join forms), both linked from the landing page. |
 | **Themes & colours** | Follows the OS theme automatically (`@ColorScheme(SYSTEM)` + CSS `light-dark()`), and one palette-glyph menu in the header holds both axes: auto/light/dark **and** a brand colour — **green, pink, blue or grey**. Both are per device (localStorage), applied before Vaadin loads so there's no flash. A palette is three CSS custom properties, so it composes with light/dark instead of duplicating it. |
 | **Remind me later (per chore)** | Tap ⏰ on a chore card and pick *in 1h / 2h / 4h / 8h / a day / a week* — one push notification naming that chore when the time comes. One per chore per person, replaced if you change your mind, and it cancels itself the moment you do the chore (or somebody else does). Needs the same VAPID keys as the daily reminder. |
-| **Chore reminders (opt-in)** | Real Web Push: each member can pick a wall-clock time (their own timezone) and get a notification on subscribed devices if they haven't logged any chores that day. Requires VAPID keys (see below); on iPhone/iPad it works once the PWA is added to the Home Screen (iOS 16.4+). |
+| **Chore reminders (opt-in)** | Real Web Push: each member can pick a wall-clock time (their own timezone) and get a notification on subscribed devices if they haven't logged any chores that day. Requires VAPID keys (see below); on iPhone/iPad it works once the PWA is added to the Home Screen (iOS 16.4+). Each member keeps at most five subscribed devices, and a push the service does not answer within 10 s is given up on rather than waited for. |
 
 ## Running it
 
@@ -109,8 +109,11 @@ wants no auto-deletion sets all three windows to 0.
 `FLASHCHORES_VAPID_PUBLIC`, `FLASHCHORES_VAPID_PRIVATE`, and optionally
 `FLASHCHORES_VAPID_SUBJECT` (a `mailto:` or `https:` URL). Without the keys the whole
 subsystem is inert and the reminder bell never shows. Subscriptions are per device,
-stored server-side, pruned automatically when the push service reports them gone, and
-never included in backups.
+stored server-side, at most five per member (the oldest is evicted), pruned automatically
+when the push service reports them gone, dropped on *Leave*, and never included in backups.
+Sends run over the app's own HTTP client with a hard deadline
+(`homechores.push.send-timeout-ms`, 10 s), so an endpoint that accepts and never answers
+cannot hold the single scheduler thread.
 
 **npm cooldown note:** Vaadin 25.2 skips npm packages published less than a day ago
 (supply-chain cooldown), which can break the frontend install when Vaadin's own
@@ -193,7 +196,10 @@ payload — fine because the endpoint is loopback-only). Database row counts per
 (`vaadin.observability.database`) are left off. In development mode the kit also adds an
 **Observability** panel to Vaadin Copilot with the same findings and live meters.
 
-### Production runbook: Apache 2 in front, fat jar on 8080
+### Production runbook: the reverse proxy in front, fat jar on 8080
+
+The host runs LiteSpeed Enterprise under cPanel, which reads Apache-style config and
+`.htaccess`, so the directives below are written as Apache's.
 
 Nothing here changes how 8080 is served. The only new thing on the host is a loopback-only
 listener on 8090 for Actuator.
@@ -282,46 +288,99 @@ doubles the writes on a host that counts every byte.
 **Rollback:** stop the app and start the previous jar with the same command; it ignores the
 new properties. The Apache deny rule is harmless on the old version and can stay.
 
-### Behind Cloudflare (free tier)
+**Before announcing it**
 
-The app is Cloudflare-ready (the repo side is `vaadin.pushLongPollingSuspendTimeout=45000`
-in `application.properties` — Cloudflare kills idle requests at ~100 s and Apache's
-`ProxyTimeout` defaults to 60 s, and the suspended long-poll would otherwise sit open
-until one of them cuts it). Everything else is dashboard/proxy work:
+13. **The session cookie and HSTS.** From a laptop, not the host:
+    ```bash
+    curl -sI https://flashchores.com/ | grep -iE 'set-cookie|strict-transport'
+    ```
+    must print `JSESSIONID=…; Path=/; Secure; HttpOnly; SameSite=Lax` and a
+    `strict-transport-security` line. `SameSite` is the app's (`application.properties`);
+    `Secure` appears only when the proxy sends `X-Forwarded-Proto: https` (Apache:
+    `RequestHeader set X-Forwarded-Proto "https"` in the TLS vhost), and HSTS is the proxy's
+    or Cloudflare's to send. Without `Secure`, a phone that follows an `http://` link to the
+    site sends the cookie in the clear; without HSTS, the browser follows such a link at all.
+14. **Rate-limit the public port.** The in-app `RateLimiter` guards the three landing-page
+    actions, but every `GET /` still builds a session and a UI that lives three minutes, and
+    nothing in the app bounds how many of those a stranger can open. Put a coarse per-IP limit
+    in front: Cloudflare's free rate rule (step 6 of the next section) — on a cPanel host that
+    is the one you control — at around 60 requests per 10 s per IP, generous for a phone and
+    far below a script. Then confirm one phone still works normally after the rule is on.
 
-1. **DNS & TLS**: proxy (orange-cloud) the apex + `www`; topology stays
-   CF → your TLS reverse proxy → `127.0.0.1:8080`. Set SSL mode to **Full (strict)** and
-   install a free Cloudflare **Origin CA certificate** on the proxy (or keep Let's
-   Encrypt via DNS-01). Recommended: firewall port 443 to [Cloudflare's IP
-   ranges](https://www.cloudflare.com/ips/) so the origin can't be reached around CF.
-2. **Real client IP — required, or the in-app rate limiter breaks.** Restore it at the
-   reverse proxy from `CF-Connecting-IP`; for nginx:
-   ```
-   # one line per range from https://www.cloudflare.com/ips/ (refresh occasionally)
-   set_real_ip_from 173.245.48.0/20;
-   # ... all other Cloudflare ranges ...
-   real_ip_header CF-Connecting-IP;
-   ```
-   `set_real_ip_from` means the header is only honored when the TCP peer really is
-   Cloudflare, so it can't be spoofed by direct hits. The app then needs no changes
-   (`server.forward-headers-strategy=native` keeps working). Without this, every visitor
-   shares a few CF edge IPs and one spammer's rate limit throttles everyone.
-3. **Cache Rules** (3 of the 10 free): `/VAADIN/build/*` → cache, edge TTL 1 year
+### Behind Cloudflare (free tier): step by step
+
+The origin is LiteSpeed Enterprise on a cPanel host (it reads Apache-style config, which is
+why the runbook above speaks Apache), proxying to the jar on `127.0.0.1:8080`. Three things
+are already on the app's side: the long-poll resumes every 45 s
+(`vaadin.pushLongPollingSuspendTimeout`, under Cloudflare's ~100 s idle cut), Cloudflare's
+edge addresses are trusted in the forwarded chain (`server.tomcat.remoteip.trusted-proxies`,
+so the rate limiter sees the visitor and not the edge), and the session cookie carries
+`SameSite=Lax`. Everything else is the Cloudflare dashboard and one `.htaccess`:
+
+1. **Add the site.** Cloudflare → *Add a site* → the Free plan. It imports the DNS records;
+   check them: `A` apex → the origin's IP and `CNAME www` → apex, both **proxied** (orange
+   cloud); anything for mail (`MX`, `mail.`) stays **DNS only** (grey). Then change the
+   nameservers at the registrar to the two Cloudflare gives you and wait for the zone to
+   show *Active* (minutes to a day).
+2. **TLS.** *SSL/TLS → Overview*: **Full (strict)**. *Edge Certificates*: **Always Use
+   HTTPS** on, **Minimum TLS Version** 1.2. The origin certificate can stay as it is —
+   cPanel's AutoSSL keeps renewing through the proxy — or be a free Cloudflare **Origin CA**
+   certificate installed in cPanel → *SSL/TLS → Manage*. Leave Cloudflare's own HSTS off:
+   the origin already sends it (runbook step 13).
+3. **Real visitor IP.** On LiteSpeed 5.4.9 and later Cloudflare's ranges are trusted
+   automatically once the server-level setting *Use Client IP in Header* is **Trusted IP
+   only** (WebAdmin → *Configuration → Server → General*). That setting is the hosting
+   provider's, so ask them to confirm it — it is what makes LiteSpeed's own logs and
+   throttles see visitors rather than edges. The app does not depend on it: whatever
+   LiteSpeed forwards, Tomcat resolves the chain with the trusted-proxies list above. Step 8
+   proves it either way.
+4. **Switch Rocket Loader off** (*Speed → Optimization → Content Optimization*): it defers
+   every script and breaks the Vaadin bootstrap. *Caching → Configuration → Browser Cache
+   TTL*: **Respect Existing Headers**.
+5. **Cache Rules** (3 of the 10 free): `/VAADIN/build/*` → cache, edge TTL 1 year
    (content-hashed bundles; never cache `/VAADIN/` more broadly — the push endpoint lives
    under it); `/icons/*` and `/avatars/*` → cache, 1 month; **bypass** `/sw.js`,
    `/styles.css`, `/manifest.webmanifest` (stable un-hashed URLs — a stale edge-cached
    `sw.js` is the classic broken-PWA-update failure). Do not enable "Cache Everything".
-4. **Protection**: the Free Managed WAF ruleset is on by default. Bot Fight Mode is worth
-   a trial but is zone-wide and unscopable — if installed-PWA requests start getting
-   challenged, turn it off. Configure the one free **rate-limiting rule** as a coarse
-   backstop only, e.g. `POST` to `/` above ~60 requests/10 s per IP → block; anything
-   more aggressive breaks the app's own UIDL/heartbeat traffic (the real business limits
-   live in the in-app `RateLimiter`). "Under Attack" mode is the emergency lever; it
-   temporarily breaks already-open boards until reload. Cloudflare Turnstile on the
-   create-home form is a possible later addition.
-5. **Verify after cutover**: two devices on different networks get *separate* rate-limit
-   buckets (create 10 homes from one network — the other must not be blocked), push still
-   updates a second device live, and the PWA updates after a redeploy.
+6. **Protection.** The Free Managed WAF ruleset is on by default. The one free
+   **rate-limiting rule** is runbook step 14: *Security → WAF → Rate limiting rules*,
+   when `URI Path equals /` and `Request Method equals POST`, more than **60** requests per
+   **10 seconds** per IP → **Block** for 10 seconds. A coarse backstop only: anything
+   tighter breaks the app's own UIDL and heartbeat traffic (the business limits live in the
+   in-app `RateLimiter`). Bot Fight Mode is worth a trial but is zone-wide and unscopable —
+   if installed-PWA requests start getting challenged, turn it off. "Under Attack" mode is
+   the emergency lever; it breaks already-open boards until reload.
+7. **Lock the origin to Cloudflare** (recommended; skip if the host's AutoSSL breaks on it).
+   A shared cPanel host has no firewall you control, but LiteSpeed honours `.htaccess`, so
+   in the site's document root:
+   ```apache
+   # Only Cloudflare (https://www.cloudflare.com/ips, refresh occasionally) and the host itself.
+   <RequireAny>
+       Require ip 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18
+       Require ip 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17
+       Require ip 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22
+       Require ip 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32
+       Require ip 2a06:98c0::/29 2c0f:f248::/32
+       Require ip 127.0.0.1 <the server's own public IP>
+   </RequireAny>
+   ```
+   The server's own IP is for cPanel's AutoSSL self-check and anything local. With this, the
+   WAF and the rate rule cannot be walked around, and a forged forwarded-for header can only
+   arrive through Cloudflare, which overwrites it.
+8. **Verify.** From a laptop, not the host:
+   ```bash
+   curl -sI https://flashchores.com/ | grep -iE 'server:|cf-ray|set-cookie|strict-transport'
+   ```
+   must show `server: cloudflare`, a `cf-ray`, the cookie with `Secure; HttpOnly;
+   SameSite=Lax`, and HSTS. Then the three live checks: two devices on different networks
+   get *separate* rate-limit buckets (create 10 homes from one network — the other must not
+   be blocked; if it is, step 3 or the trusted-proxies list is wrong), a chore ticked on one
+   phone appears on the other without a reload, and a board left open for ten minutes keeps
+   its push connection (no reconnect notices). After the next deploy, confirm the installed
+   PWA picks the new version up.
+9. **Keep it current.** When Cloudflare's published ranges change (rare), update both the
+   `.htaccess` list and `server.tomcat.remoteip.trusted-proxies`; the regex in
+   `application.properties` names the date it was generated.
 
 ## Project structure
 
@@ -333,6 +392,7 @@ src/main/java/com/homechores/
 │   ├── ChoreReminder.java        # one-shot "remind me about this chore later"
 │   ├── ListItem.java             # a grocery / to-do line or a dinner slot
 │   ├── ListReminder.java         # the home's reminder about one list line (fired = unanswered)
+│   ├── FeedbackCount.java        # one row of the home's all-time reaction tally, grouped in the DB
 │   ├── CreditEntry / SpreeTier   # credit rewards
 │   ├── RejoinRequest.java        # a device asking to sign back in as an existing member
 │   ├── TimeWindows.java          # availability-hours parsing & evaluation
@@ -368,6 +428,8 @@ src/main/java/com/homechores/
     ├── Celebrations.java         # confetti + congratulation + feedback dialogs
     ├── PrivacyView.java          # /privacy notice
     ├── LanguageSwitcher.java     # en/fi/sv select, persisted in a cookie
+    ├── SessionExpiryInitListener.java  # silent expiry: back to the landing page, which restores
+    ├── LoadingOverlayInitListener.java # the "Getting your chores…" card for a slow request
     ├── SessionContext.java       # who am I / which home / my time zone (VaadinSession)
     │                             #   — short-lived; DeviceIdentity is what outlives it
     └── T.java                    # small translation helper
@@ -376,11 +438,23 @@ src/main/resources/
 ├── META-INF/resources/styles.css # app styling (Lumo tweaks + components)
 └── META-INF/resources/icons/     # PWA icons + iOS splash screens (generated set)
 src/main/frontend/confetti.js     # self-contained confetti (no CDN)
+src/main/frontend/loading-overlay.js # the loading card, built from the landing restore card's classes
 src/main/frontend/list-swipe.js   # swipe-to-reveal actions on list lines
 src/main/frontend/hold-drag.js    # the hold-and-drag gesture: lift, preview, drop event
 src/main/frontend/board-drag.js   # …configured for the board's chore cards (admins)
 src/main/frontend/list-drag.js    # …configured for the lines of a shared list (everyone)
 src/test/java/com/homechores/     # JUnit service tests + Vaadin UI unit tests
+tools/
+├── flashchores-admin.py          # operator maintenance: list / show / export / delete / restore / purge
+├── release.sh                    # deploy or roll back a release
+├── generate-icons.cjs            # regenerates the PWA icons + iOS splash screens
+├── observability/                # Prometheus + Grafana setup for the Observability Kit
+└── demo-video/                   # the vertical demo video, captioned and narrated
+    ├── run.sh                    # production jar on a throwaway database, then record + mix
+    ├── record.mjs                # Playwright drives the app; each caption waits for its line
+    ├── tts.py                    # speaks the lines with Kokoro, a local neural voice (.venv)
+    ├── requirements.txt          # Kokoro for that venv (plus brew install espeak-ng)
+    └── mix.sh                    # ffmpeg lays the voice under it -> video/flashchores-demo.mp4
 ```
 
 ## Tests
@@ -398,7 +472,9 @@ in-memory H2 database; UI tests use Vaadin's browserless **UI Unit Testing**
 test base class's `test(Chart)` overload resolves during JUnit scanning — the app never
 uses Charts.)* `ArchitectureTest` (ArchUnit) pins the package layering and the coding
 conventions listed in SPEC §6, so a stray repository in a view or a Vaadin import in a
-service fails the build rather than a review.
+service fails the build rather than a review. `TrustedProxiesTest` reads the Cloudflare edge
+regex out of the production `application.properties` the way Tomcat will, since a
+`.properties` file eats single backslashes.
 
 ### Code review
 
@@ -419,8 +495,8 @@ accessibility, and QA. The checklist each one walks through lives in [`CLAUDE.md
 - Members are identified per device (a phone = a member): the member id lives in the
   browser's local storage and is restored into a fresh session on every visit. Two people
   on the *same* browser share one identity — fine for real use where everyone has their
-  own phone. Server sessions are deliberately left at Spring's 30-minute default, so an
-  idle phone costs the server nothing.
+  own phone. Server sessions are deliberately short — 5 minutes for a member, 20 for an
+  admin (SPEC §4.1.2) — so an idle phone costs the server nothing.
 - Clearing browsing data is the one thing local storage doesn't survive; the
   "I'm already a member" flow on the Join tab is the recovery path. It's gated by
   `Home.approveRejoin` (default on) because the home code travels in join links — without
@@ -435,3 +511,6 @@ accessibility, and QA. The checklist each one walks through lives in [`CLAUDE.md
 - Possible next steps: weekly/monthly leaderboards, real accounts.
 - A mobile UX review from 2026-09-16 with a prioritised fix list lives in
   `docs/UX-REVIEW-2026-09-16.md`.
+- What happens when a phone comes back to an expired session, measured, and the options
+  for making that reload shorter (identity cookie, static restore card, one render per
+  load, keep-alive while visible) are in `docs/SESSION-REVIVE-2026-10-19.md`.

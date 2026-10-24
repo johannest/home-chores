@@ -187,7 +187,7 @@ class SchemaEvolutionTest {
         String json = backup.export(CODE);
         assertTrue(json.contains("The Old House"));
 
-        var result = backup.restore(json.getBytes(StandardCharsets.UTF_8), CODE);
+        var result = backup.restore(json.getBytes(StandardCharsets.UTF_8), CODE, byName("Alex").getId());
 
         assertEquals(2, result.members());
         assertEquals(2, result.tasks());

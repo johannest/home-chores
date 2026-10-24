@@ -62,6 +62,13 @@ public class PushSubscription {
         return memberId;
     }
 
+    /** Re-subscribing from a browser that now belongs to someone else moves the row to them:
+     *  the endpoint is the device's, and whoever is signed in on the device is its owner. */
+    public void setOwner(Long memberId, String homeCode) {
+        this.memberId = memberId;
+        this.homeCode = homeCode;
+    }
+
     public String getHomeCode() {
         return homeCode;
     }

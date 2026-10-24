@@ -164,4 +164,18 @@ class LogForMemberTest {
         assertThrows(IllegalArgumentException.class,
                 () -> service.completeFor(chores.get(0).getId(), other.getId(), alex.getId()));
     }
+
+
+    /** Logging for someone is an admin's statement about what happened; a member cannot make
+     *  it, however the call reached the service. */
+    @Test
+    void aNonAdmin_cannotLogAChoreForSomeoneElse() {
+        Member alex = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(alex.getHomeCode(), "Sam").orElseThrow();
+        ChoreTask chore = service.tasksOf(alex.getHomeCode()).get(0);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.completeFor(chore.getId(), alex.getId(), sam.getId()));
+        assertEquals(0, service.completionCount(alex.getId()));
+    }
 }

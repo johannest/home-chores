@@ -50,8 +50,10 @@
         </dependency>
 
         <!-- Web Push chore reminders (see WebPushSender). Vaadin's first-party wrapper
-             around com.interaso:webpush — plain java.security + java.net.http, no
-             BouncyCastle. Inert unless VAPID keys are configured. -->
+             around com.interaso:webpush — plain java.security, no BouncyCastle. The
+             payload format is Vaadin's; the HTTP send is the app's own, over a client with
+             timeouts, built on the interaso classes this brings in. Inert unless VAPID keys
+             are configured. -->
         <dependency>
             <groupId>com.vaadin</groupId>
             <artifactId>flow-webpush</artifactId>
@@ -89,16 +91,16 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- Jackson for backup JSON (not pulled transitively without a web/json starter). -->
+        <!-- Jackson 2 for backup JSON (not pulled transitively without a web/json starter).
+             Versions come from the Spring Boot BOM on purpose: a pin here would freeze
+             databind on a patch line Boot's CVE tracking has long moved past. -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>2.18.2</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-jsr310</artifactId>
-            <version>2.18.2</version>
         </dependency>
 
         <!-- Testing -->

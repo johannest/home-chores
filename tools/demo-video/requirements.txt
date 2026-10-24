@@ -1,0 +1,3 @@
+# The narration voice (tts.py). Kokoro also needs espeak-ng: brew install espeak-ng
+kokoro==0.9.4
+soundfile==0.14.0

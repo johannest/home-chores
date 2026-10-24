@@ -1,5 +1,6 @@
 package com.homechores;
 
+import com.vaadin.flow.component.dependency.JsModule;
 import com.vaadin.flow.component.dependency.StyleSheet;
 import com.vaadin.flow.component.page.AppShellConfigurator;
 import com.vaadin.flow.component.page.ColorScheme;
@@ -33,6 +34,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @ColorScheme(ColorScheme.Value.SYSTEM)
 @StyleSheet(Lumo.STYLESHEET)
 @StyleSheet("styles.css")
+// On the app shell rather than a view, so the card exists on the landing page too.
+@JsModule("./loading-overlay.js")
 @PWA(name = "FlashChores", shortName = "FlashChores",
         themeColor = "#10b981", backgroundColor = "#ffffff")
 public class Application implements AppShellConfigurator {

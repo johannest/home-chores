@@ -60,7 +60,7 @@ class BackupSettingsRoundTripTest {
         String pin = setUpHomeWithEverythingNonDefault(code);
 
         String json = backup.export(code);
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restoreAnyHome(json.getBytes(StandardCharsets.UTF_8)); // the operator's undo
 
         Home after = chores.findHome(code).orElseThrow();
         assertEquals("Renamed House", after.getName());
@@ -99,7 +99,7 @@ class BackupSettingsRoundTripTest {
                 .replaceAll(",\\s*\"counterReset\"\\s*:\\s*\"[A-Z]+\"", "")
                 .replaceAll(",\\s*\"counterResetAt\"\\s*:\\s*(\"[^\"]*\"|null)", "");
 
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restoreAnyHome(json.getBytes(StandardCharsets.UTF_8)); // the operator's undo
 
         Home after = chores.findHome(code).orElseThrow();
         assertTrue(after.isApproveRejoin(), "absent rejoin gate means gated, not open");
@@ -129,7 +129,8 @@ class BackupSettingsRoundTripTest {
         assertTrue(chores.deleteHome(code), "the home is really gone");
         assertTrue(chores.findHome(code).isEmpty());
 
-        var result = backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        // A purged home has no admin left to sign in as: this is the operator's restore (SPEC §4.11.3).
+        var result = backup.restoreAnyHome(json.getBytes(StandardCharsets.UTF_8));
 
         assertEquals(2, result.members());
         assertEquals(1, result.completions());
@@ -160,7 +161,7 @@ class BackupSettingsRoundTripTest {
         String json = backup.export(code);
         chores.deleteHome(code);
 
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restoreAnyHome(json.getBytes(StandardCharsets.UTF_8)); // the operator's undo
 
         Home after = chores.findHome(code).orElseThrow();
         assertTrue(after.lastActiveOrCreated()

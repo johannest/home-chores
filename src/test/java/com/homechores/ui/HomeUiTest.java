@@ -1770,4 +1770,29 @@ class HomeUiTest extends HomeChoresUiTest {
                 .filter(d -> d.getClassNames().contains("board-sections") && usable(d))
                 .findFirst().orElseThrow();
     }
+
+
+    /** The redraw that drops the Admin tab cannot close a dialog that was already open — it
+     *  hangs off the UI, not the panel — so the action behind it re-checks the role itself:
+     *  a demoted admin's Save does nothing but say why. */
+    @Test
+    void aDemotedAdmins_openDialog_noLongerActs() {
+        Member alex = service.createHome("Shared", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        assertTrue(service.setMemberAdmin(sam.getId(), true));
+        SessionContext.signIn(sam.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Admin");
+        openSection("Members");
+        clickMenuItem("Rename member"); // Alex's row: first by join time
+        setField("Name", "Hacked");
+
+        assertTrue(service.setMemberAdmin(sam.getId(), false)); // Alex, on another phone
+        awaitRedraw(() -> tabCount() == 3);
+        clickButton("Save");
+
+        assertEquals("Alex", service.findMember(alex.getId()).orElseThrow().getName(),
+                "the stale dialog's Save did nothing");
+    }
 }

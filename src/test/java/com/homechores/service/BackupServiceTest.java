@@ -41,7 +41,7 @@ class BackupServiceTest {
 
         String json = backup.export(code);
         assertTrue(json.contains("\"customLists\""));
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
 
         var restored = lists.customLists(code);
         assertEquals(List.of("Gifts"), restored.stream().map(com.homechores.domain.CustomList::getName).toList());
@@ -53,7 +53,8 @@ class BackupServiceTest {
         // A file whose list vanished (hand-edited): the line falls back to the built-in To-do.
         String orphaned = json.replaceAll(",\\s*\"customLists\"\\s*:\\s*\\[[^\\]]*\\]", "");
         assertFalse(orphaned.contains("customLists"), "precondition: key stripped");
-        backup.restore(orphaned.getBytes(StandardCharsets.UTF_8), code);
+        backup.restore(orphaned.getBytes(StandardCharsets.UTF_8), code,
+                chores.findMemberByName(code, "Alex").orElseThrow().getId());
         assertTrue(lists.customLists(code).isEmpty());
         assertEquals(2, lists.openItems(code, ListKind.TODO).size(), "Book lands on To-do");
     }
@@ -76,7 +77,7 @@ class BackupServiceTest {
         assertTrue(json.contains("Bread"));
         assertTrue(json.contains("\"day\" : \"" + today + "\""), "the dinner's day travels as an ISO date");
 
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
 
         assertEquals(List.of("Milk"),
                 lists.openItems(code, ListKind.GROCERY).stream().map(ListItem::getText).toList());
@@ -94,7 +95,9 @@ class BackupServiceTest {
         // A file from before the lists existed has no such key: restore leaves the lists empty.
         String old = json.replaceAll(",\\s*\"listItems\"\\s*:\\s*\\[[^\\]]*\\]", "");
         assertFalse(old.contains("listItems"), "precondition: key stripped");
-        backup.restore(old.getBytes(StandardCharsets.UTF_8), code);
+        // The first restore reissued every member id, so the admin is looked up again.
+        backup.restore(old.getBytes(StandardCharsets.UTF_8), code,
+                chores.findMemberByName(code, "Alex").orElseThrow().getId());
         assertTrue(lists.openItems(code, ListKind.GROCERY).isEmpty());
         assertTrue(lists.doneItems(code, ListKind.GROCERY).isEmpty());
         assertTrue(lists.dinners(code, today, today).isEmpty());
@@ -127,7 +130,7 @@ class BackupServiceTest {
         assertTrue(json.contains("Backup Home"));
 
         // Wipe by deleting the whole home's members/tasks, then restore.
-        RestoreResult result = backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        RestoreResult result = backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
 
         assertEquals(code, result.homeCode());
         assertEquals(2, result.members());
@@ -160,7 +163,7 @@ class BackupServiceTest {
     @Test
     void restore_rejectsGarbage() {
         assertThrows(IllegalArgumentException.class,
-                () -> backup.restore("not json".getBytes(StandardCharsets.UTF_8), "XXXXXXX"));
+                () -> backup.restore("not json".getBytes(StandardCharsets.UTF_8), "XXXXXXX", null));
     }
 
     /** A backup may only be restored into the home it came from — never over another family. */
@@ -174,7 +177,7 @@ class BackupServiceTest {
 
         // Admin of "Mine" uploads a file that names the victim's home code.
         assertThrows(IllegalArgumentException.class,
-                () -> backup.restore(victimBackup.getBytes(StandardCharsets.UTF_8), myCode));
+                () -> backup.restore(victimBackup.getBytes(StandardCharsets.UTF_8), myCode, mine.getId()));
 
         // The victim home is completely untouched.
         assertEquals("Victim", chores.findHome(victimCode).orElseThrow().getName());
@@ -193,7 +196,7 @@ class BackupServiceTest {
         chores.setChoreGroup(t.get(0).getId(), kitchen.getId());
 
         String json = backup.export(code);
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
 
         assertEquals(List.of("Kitchen", "Laundry"),
                 chores.groupsOf(code).stream().map(ChoreGroup::getName).toList());
@@ -221,7 +224,7 @@ class BackupServiceTest {
                 .replaceAll("\\s*\"groupId\"\\s*:\\s*(null|\\d+)\\s*,", "");
         assertFalse(json.contains("\"groupId\""), "the key really is gone from the payload");
 
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
 
         assertTrue(chores.groupsOf(code).isEmpty());
         assertTrue(chores.tasksOf(code).stream().allMatch(t -> t.getGroupId() == null));
@@ -237,7 +240,7 @@ class BackupServiceTest {
         String json = backup.export(code)
                 .replaceFirst("\"groupId\"\\s*:\\s*null", "\"groupId\":999999");
 
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
 
         assertEquals(11, chores.tasksOf(code).size());
         assertTrue(chores.tasksOf(code).stream().allMatch(t -> t.getGroupId() == null));
@@ -254,7 +257,7 @@ class BackupServiceTest {
         String json = backup.export(code).replaceAll("\\s*\"seasons\"\\s*:\\s*(null|\"[^\"]*\")\\s*,", "");
         assertFalse(json.contains("\"seasons\""), "the key really is gone from the payload");
 
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
 
         List<ChoreTask> restored = chores.tasksOf(code);
         assertEquals(11, restored.size());
@@ -276,16 +279,36 @@ class BackupServiceTest {
 
         String json = backup.export(code);
         assertTrue(json.contains("\"sortOrder\""));
-        backup.restore(json.getBytes(StandardCharsets.UTF_8), code);
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
         assertEquals(List.of("Eggs", "Milk", "Bread"),
                 lists.openItems(code, ListKind.GROCERY).stream().map(ListItem::getText).toList(),
                 "the dragged order is back");
 
         String old = json.replaceAll(",\\s*\"sortOrder\"\\s*:\\s*\\d+", "");
         assertFalse(old.contains("sortOrder"), "precondition: key stripped");
-        backup.restore(old.getBytes(StandardCharsets.UTF_8), code);
+        // The first restore reissued every member id, so the admin is looked up again.
+        backup.restore(old.getBytes(StandardCharsets.UTF_8), code,
+                chores.findMemberByName(code, "Alex").orElseThrow().getId());
         assertEquals(List.of("Milk", "Bread", "Eggs"),
                 lists.openItems(code, ListKind.GROCERY).stream().map(ListItem::getText).toList(),
                 "no order in the file: writing order, as that list was shown");
+    }
+
+
+    /** Restore is the admin's wipe-and-replace; the acting member's role is checked when the
+     *  confirmation lands, not when the upload card was drawn. */
+    @Test
+    void restore_refusesANonAdmin() {
+        Member alex = chores.createHome("Guarded", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = chores.joinHome(code, "Sam").orElseThrow();
+        String json = backup.export(code);
+        chores.addTask(code, "Added after the export", "🆕");
+        int before = chores.tasksOf(code).size();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> backup.restore(json.getBytes(StandardCharsets.UTF_8), code, sam.getId()));
+
+        assertEquals(before, chores.tasksOf(code).size(), "nothing was replaced");
     }
 }

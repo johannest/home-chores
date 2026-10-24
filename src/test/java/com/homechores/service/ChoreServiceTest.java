@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @SpringBootTest
 @Transactional
@@ -221,5 +222,28 @@ class ChoreServiceTest {
         service.deleteTask(dish);
         assertEquals(10, tasks(alex.getHomeCode()).size());
         assertEquals(0, service.completionCount(alex.getId()), "completions removed with the chore");
+    }
+
+
+    /** Approving and rejecting are admin actions, re-checked for the acting member when they
+     *  happen: a demoted admin's still-open approval list must not keep working. */
+    @Test
+    void approveAndReject_refuseANonAdmin() {
+        Member alex = service.createHome("Nest", "Alex");
+        Home home = service.findHome(alex.getHomeCode()).orElseThrow();
+        home.setRequireApproval(true);
+        service.saveHome(home);
+        Member sam = service.joinHome(alex.getHomeCode(), "Sam").orElseThrow();
+        Long dish = tasks(alex.getHomeCode()).get(0).getId();
+        CompleteOutcome pending = service.complete(dish, sam.getId());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.approve(pending.completionId(), sam.getId()));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.reject(pending.completionId(), sam.getId()));
+        assertEquals(1, service.pendingCount(alex.getHomeCode()), "still pending");
+
+        service.approve(pending.completionId(), alex.getId());
+        assertEquals(1, service.completionCount(sam.getId()));
     }
 }
