@@ -86,12 +86,23 @@ final class Celebrations {
     }
 
     static void showBlocked(CompleteOutcome o) {
+        showBlocked(o, false);
+    }
+
+    /**
+     * @param named true on the shared device, where "you" is nobody: the two messages that say
+     *              "you" name the member the chore was tapped for instead
+     */
+    static void showBlocked(CompleteOutcome o, boolean named) {
         String chore = o.task().getName();
+        String who = o.member().getName();
         String msg = switch (o.blockReason()) {
-            case STREAK -> T.tr("blocked.streak", chore, o.newStreak());
+            case STREAK -> named ? T.tr("blocked.named.streak", chore, o.newStreak(), who)
+                    : T.tr("blocked.streak", chore, o.newStreak());
             case BOOKED -> T.tr("blocked.booked", chore);
             case NOT_DUE -> T.tr("blocked.notDue", chore);
-            case NOT_ASSIGNED -> T.tr("blocked.notAssigned", chore);
+            case NOT_ASSIGNED -> named ? T.tr("blocked.named.notAssigned", chore, who)
+                    : T.tr("blocked.notAssigned", chore);
             case OUTSIDE_HOURS -> T.tr("blocked.outsideHours", chore,
                     com.homechores.domain.TimeWindows.displayCompact(o.task().getAvailableWindows()));
             case OUT_OF_SEASON -> T.tr("blocked.outOfSeason", chore,

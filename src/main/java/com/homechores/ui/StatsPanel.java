@@ -23,6 +23,7 @@ import com.vaadin.flow.component.html.ListItem;
 import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.UnorderedList;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
+import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
 import java.time.LocalDate;
@@ -40,6 +41,11 @@ class StatsPanel extends VerticalLayout {
     private final ChoreService service;
     private final String homeCode;
     private final Long memberId;
+    private final Viewer viewer;
+
+    /** On the shared device, whose statistics are showing. A field for the same reason as the
+     *  lens: the panel is rebuilt on every change in the home. Null until somebody is picked. */
+    private Long picked;
 
     private final Div content = new Div();
     private boolean showHome = false;
@@ -57,11 +63,12 @@ class StatsPanel extends VerticalLayout {
      *  the admin just opened must not snap shut because somebody tapped a chore. */
     private final Set<Long> memberOpen = new HashSet<>();
 
-    StatsPanel(StatsService stats, ChoreService service, String homeCode, Long memberId) {
+    StatsPanel(StatsService stats, ChoreService service, Viewer viewer) {
         this.stats = stats;
         this.service = service;
-        this.homeCode = homeCode;
-        this.memberId = memberId;
+        this.viewer = viewer;
+        this.homeCode = viewer.homeCode();
+        this.memberId = viewer.memberId();
         setPadding(false);
         setSpacing(false);
         setWidthFull();
@@ -73,6 +80,24 @@ class StatsPanel extends VerticalLayout {
         content.removeAll();
         boolean admin = service.findMember(memberId).map(Member::isAdmin).orElse(false);
 
+        if (viewer.isDevice()) {
+            // The device has no "my" stats; it shows one family member's at a time — the one
+            // place a member without a phone of their own gets to see their numbers.
+            List<Member> members = service.membersOf(homeCode);
+            Select<Member> who = new Select<>();
+            who.setLabel(T.tr("stats.whose"));
+            who.setItems(members);
+            who.setItemLabelGenerator(Member::getName);
+            who.setWidthFull();
+            members.stream().filter(m -> m.getId().equals(picked)).findFirst().ifPresent(who::setValue);
+            who.addValueChangeListener(e -> {
+                picked = e.getValue() == null ? null : e.getValue().getId();
+                renderBody(false);
+            });
+            content.add(who);
+            renderBody(false);
+            return;
+        }
         if (admin) {
             Tab mine = new Tab(T.tr("stats.myTab"));
             Tab home = new Tab(T.tr("stats.homeTab"));
@@ -100,13 +125,17 @@ class StatsPanel extends VerticalLayout {
         }
         if (showHome && admin) {
             renderHome();
+        } else if (viewer.isDevice() && picked == null) {
+            Paragraph pick = new Paragraph(T.tr("stats.pick"));
+            pick.addClassName("feedback-hint");
+            body.add(pick);
         } else {
-            renderMine();
+            renderMine(viewer.isDevice() ? picked : this.memberId);
         }
     }
 
-    private void renderMine() {
-        MyStats s = stats.myStats(memberId, homeCode, period, UI.getCurrent().getLocale());
+    private void renderMine(Long forMember) {
+        MyStats s = stats.myStats(forMember, homeCode, period, UI.getCurrent().getLocale());
 
         H2 total = new H2(T.tr("stats.myTotal", s.totalApproved()));
         total.getStyle().set("margin", "0 0 var(--lumo-space-s)");

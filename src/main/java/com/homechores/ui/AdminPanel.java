@@ -9,6 +9,7 @@ import com.homechores.domain.Home;
 import com.homechores.domain.InputLimits;
 import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
+import com.homechores.domain.SharedDevice;
 import com.homechores.domain.RejoinRequest;
 import com.homechores.domain.Season;
 import com.homechores.domain.Seasons;
@@ -18,6 +19,7 @@ import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
 import com.homechores.service.ListItemService;
+import com.homechores.service.SharedDeviceService;
 import com.homechores.service.ListItemService.ListSlot;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
@@ -85,7 +87,7 @@ class AdminPanel extends VerticalLayout {
      *  changes with the language switcher and now embeds a count. */
     private enum Section {
         REJOINS, HELP, APPROVALS, LOG_FOR, RECENT,
-        MEMBERS, GROUPS, CHORES, REWARDS, LISTS, RULES, SETTINGS, BACKUP, DANGER
+        MEMBERS, DEVICES, GROUPS, CHORES, REWARDS, LISTS, RULES, SETTINGS, BACKUP, DANGER
     }
 
     /** Key in {@link #groupOpen} for the chores that belong to no group. */
@@ -106,13 +108,16 @@ class AdminPanel extends VerticalLayout {
      * remembered choice, a card would slam shut under the admin's finger on every tap.
      */
     private final ListItemService lists;
+    private final SharedDeviceService sharedDevices;
 
     private final EnumMap<Section, Boolean> openState = new EnumMap<>(Section.class);
 
     AdminPanel(ChoreService service, CreditService creditService, BackupService backup,
-               ListItemService lists, String homeCode, Long memberId) {
+               ListItemService lists, SharedDeviceService sharedDevices, String homeCode,
+               Long memberId) {
         this.service = service;
         this.lists = lists;
+        this.sharedDevices = sharedDevices;
         this.creditService = creditService;
         this.backup = backup;
         this.homeCode = homeCode;
@@ -132,6 +137,7 @@ class AdminPanel extends VerticalLayout {
         // Daily work above, weekly work here, set-once configuration below it: settings alone is
         // ~950px of controls an admin touches at setup and then never again.
         add(membersSection());
+        add(devicesSection());
         // The card that creates the headings sits above the card that assigns them.
         add(groupsSection());
         add(choresSection());
@@ -825,6 +831,41 @@ class AdminPanel extends VerticalLayout {
         d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), save);
         d.open();
         name.focus();
+    }
+
+    /**
+     * The family's shared devices (§4.1.3): paired on the device itself with the home code and
+     * the admin PIN, listed here so a forgotten tablet can be told from one in daily use and
+     * unpaired — which stops its secret at once.
+     */
+    private Details devicesSection() {
+        List<SharedDevice> devices = sharedDevices.devicesOf(homeCode);
+        Details s = section(Section.DEVICES, T.tr("admin.devices", devices.size()), false);
+        Span info = new Span(T.tr("admin.devices.info"));
+        info.addClassName("sub");
+        s.add(info);
+        for (SharedDevice d : devices) {
+            Div line = new Div();
+            line.setText(d.getName());
+            line.getStyle().set("font-weight", "600");
+            Span sub = new Span(d.getLastSeenAt() == null
+                    ? T.tr("admin.device.paired", ago(d.getPairedAt()))
+                    : T.tr("admin.device.seen", ago(d.getPairedAt()), ago(d.getLastSeenAt())));
+            sub.addClassName("sub");
+            Div box = new Div(line, sub);
+            box.addClassName("grow");
+            Button unpair = new Button(T.tr("admin.unpair"), e ->
+                    confirm(T.tr("admin.unpair.title", d.getName()), T.tr("admin.unpair.text"), () -> {
+                        sharedDevices.unpair(d.getId(), memberId);
+                        refresh();
+                    }));
+            unpair.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL,
+                    ButtonVariant.LUMO_ERROR);
+            Div row = new Div(box, unpair);
+            row.addClassName("list-row");
+            s.add(row);
+        }
+        return s;
     }
 
     private void renameMemberDialog(Member m) {

@@ -13,6 +13,7 @@ public final class SessionContext {
     private static final String HOME_CODE = "homeCode";
     private static final String TIME_ZONE = "timeZone";
     private static final String DEVICE_SECRET = "deviceSecret";
+    private static final String DEVICE_ID = "deviceId";
 
     /**
      * How long a member's session survives without them touching the app. Short on purpose:
@@ -65,12 +66,23 @@ public final class SessionContext {
     public static void signIn(Long memberId, String homeCode) {
         VaadinSession s = VaadinSession.getCurrent();
         s.setAttribute(MEMBER_ID, memberId);
+        s.setAttribute(DEVICE_ID, null);
+        s.setAttribute(HOME_CODE, homeCode);
+    }
+
+    /** Signs the session in as the home's shared device (§4.1.3) — no member, so the board
+     *  belongs to nobody until a chip is tapped. */
+    public static void signInDevice(Long deviceId, String homeCode) {
+        VaadinSession s = VaadinSession.getCurrent();
+        s.setAttribute(MEMBER_ID, null);
+        s.setAttribute(DEVICE_ID, deviceId);
         s.setAttribute(HOME_CODE, homeCode);
     }
 
     public static void signOut() {
         VaadinSession s = VaadinSession.getCurrent();
         s.setAttribute(MEMBER_ID, null);
+        s.setAttribute(DEVICE_ID, null);
         s.setAttribute(HOME_CODE, null);
         s.setAttribute(DEVICE_SECRET, null);
     }
@@ -89,11 +101,21 @@ public final class SessionContext {
         return (Long) VaadinSession.getCurrent().getAttribute(MEMBER_ID);
     }
 
+    /** The shared device this session is, or null for a member's session. */
+    public static Long deviceId() {
+        return (Long) VaadinSession.getCurrent().getAttribute(DEVICE_ID);
+    }
+
+    /** Who is looking at the board: the member, or the shared device. */
+    public static Viewer viewer() {
+        return new Viewer(homeCode(), memberId(), deviceId());
+    }
+
     public static String homeCode() {
         return (String) VaadinSession.getCurrent().getAttribute(HOME_CODE);
     }
 
     public static boolean isSignedIn() {
-        return memberId() != null && homeCode() != null;
+        return homeCode() != null && (memberId() != null || deviceId() != null);
     }
 }

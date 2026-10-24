@@ -26,25 +26,34 @@ final class DeviceIdentity {
     /** Secret for a rejoin request this device is waiting on. */
     private static final String REJOIN_KEY = "flashchores.rejoin";
 
+    /** "deviceId|homeCode|secret" for a shared family device (§4.1.3); a browser holds either
+     *  this or a member identity, never both. */
+    private static final String DEVICE_KEY = "flashchores.device";
+
     /** Local storage throws in Safari private mode, so every access is guarded. */
     private static final String READ = "try{return localStorage.getItem($0)||''}catch(e){return ''}";
 
     private DeviceIdentity() {
     }
 
-    /** A member id + home code + device secret recovered from the browser. */
-    record Stored(Long memberId, String homeCode, String secret) {
+    /** An id (a member's, or a shared device's) + home code + secret recovered from the browser. */
+    record Stored(Long id, String homeCode, String secret) {
     }
 
     static void remember(Long memberId, String homeCode, String secret) {
-        exec("try{localStorage.setItem($0,$1)}catch(e){}",
-                IDENTITY_KEY, memberId + "|" + homeCode + "|" + secret);
+        exec("try{localStorage.setItem($0,$1);localStorage.removeItem($2)}catch(e){}",
+                IDENTITY_KEY, memberId + "|" + homeCode + "|" + secret, DEVICE_KEY);
+    }
+
+    static void rememberDevice(Long deviceId, String homeCode, String secret) {
+        exec("try{localStorage.setItem($0,$1);localStorage.removeItem($2)}catch(e){}",
+                DEVICE_KEY, deviceId + "|" + homeCode + "|" + secret, IDENTITY_KEY);
     }
 
     /** Clears everything this app stored — used on Leave and on a stale/invalid identity. */
     static void forget() {
-        exec("try{localStorage.removeItem($0);localStorage.removeItem($1)}catch(e){}",
-                IDENTITY_KEY, REJOIN_KEY);
+        exec("try{localStorage.removeItem($0);localStorage.removeItem($1);localStorage.removeItem($2)}catch(e){}",
+                IDENTITY_KEY, REJOIN_KEY, DEVICE_KEY);
     }
 
     static void rememberRejoinToken(String token) {
@@ -63,6 +72,17 @@ final class DeviceIdentity {
             return;
         }
         ui.getPage().executeJs(READ, IDENTITY_KEY)
+                .then(String.class, raw -> callback.accept(parse(raw)));
+    }
+
+    /** Reads the stored shared-device identity, in the same shape as a member's. */
+    static void readDevice(SerializableConsumer<Optional<Stored>> callback) {
+        UI ui = UI.getCurrent();
+        if (ui == null) {
+            callback.accept(Optional.empty());
+            return;
+        }
+        ui.getPage().executeJs(READ, DEVICE_KEY)
                 .then(String.class, raw -> callback.accept(parse(raw)));
     }
 

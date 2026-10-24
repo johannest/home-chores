@@ -58,7 +58,9 @@ class ListPanel extends VerticalLayout {
     private final PushReminderService push;
     private final WebPushSender pushSender;
     private final String homeCode;
+    /** Null on the shared device: its lines carry no author (§4.1.3). */
     private final Long memberId;
+    private final Viewer viewer;
 
     private final Div content = new Div();
     private final Div body = new Div();
@@ -88,14 +90,15 @@ class ListPanel extends VerticalLayout {
     private boolean focusOnRender = true;
 
     ListPanel(ListItemService lists, ChoreService service, ListReminderService reminders,
-              PushReminderService push, WebPushSender pushSender, String homeCode, Long memberId) {
+              PushReminderService push, WebPushSender pushSender, Viewer viewer) {
         this.lists = lists;
         this.service = service;
         this.reminders = reminders;
         this.push = push;
         this.pushSender = pushSender;
-        this.homeCode = homeCode;
-        this.memberId = memberId;
+        this.viewer = viewer;
+        this.homeCode = viewer.homeCode();
+        this.memberId = viewer.memberId();
         setPadding(false);
         setSpacing(false);
         setWidthFull();
@@ -511,7 +514,8 @@ class ListPanel extends VerticalLayout {
         info.addClassName("grow");
         if (item.isDone()) {
             text.addClassName("done");
-            String who = names.getOrDefault(item.getDoneByMemberId(), "?");
+            String who = item.getDoneByMemberId() == null ? T.tr("list.device")
+                    : names.getOrDefault(item.getDoneByMemberId(), "?");
             Span sub = new Span(T.tr("list.tickedBy", who, T.ago(item.getDoneAt())));
             sub.addClassName("sub");
             info.add(sub);
@@ -526,8 +530,11 @@ class ListPanel extends VerticalLayout {
             if (reminder.isFired()) {
                 when.addClassName("fired");
             }
-            // The badge is the reminder: tapping it changes or cancels it, same as the bell.
-            when.addClickListener(e -> openReminder.run());
+            // The badge is the reminder: tapping it changes or cancels it, same as the bell —
+            // except on the shared device, which has no member to set or answer one as.
+            if (!viewer.isDevice()) {
+                when.addClickListener(e -> openReminder.run());
+            }
             info.add(when);
         }
 
@@ -550,7 +557,7 @@ class ListPanel extends VerticalLayout {
                                     here + 2 < plain.size() ? plain.get(here + 2).getId() : null)));
         }
         // Only on open lines and only when push is configured, matching the chore card's ⏰.
-        if (!item.isDone() && pushSender.isEnabled()) {
+        if (!item.isDone() && pushSender.isEnabled() && !viewer.isDevice()) {
             Button remind = new Button(VaadinIcon.BELL_O.create(), e -> openReminder.run());
             remind.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL,
                     ButtonVariant.LUMO_ICON);

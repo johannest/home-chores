@@ -12,6 +12,7 @@ import com.homechores.domain.ListReminder;
 import com.homechores.domain.ListReminderRepository;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
+import com.homechores.domain.SharedDeviceRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -70,17 +71,20 @@ public class ListItemService {
     private final HomeRepository homes;
     private final ListReminderRepository reminders;
     private final MemberRepository members;
+    private final SharedDeviceRepository sharedDevices;
     private final ChoreService chores;
     private final HomeState homeState;
 
     public ListItemService(ListItemRepository items, CustomListRepository customLists,
                            HomeRepository homes, ListReminderRepository reminders,
-                           MemberRepository members, ChoreService chores, HomeState homeState) {
+                           MemberRepository members, SharedDeviceRepository sharedDevices,
+                           ChoreService chores, HomeState homeState) {
         this.items = items;
         this.customLists = customLists;
         this.homes = homes;
         this.reminders = reminders;
         this.members = members;
+        this.sharedDevices = sharedDevices;
         this.chores = chores;
         this.homeState = homeState;
     }
@@ -255,7 +259,7 @@ public class ListItemService {
         if (listId != null && findList(homeCode, listId).isEmpty()) {
             return Optional.empty();
         }
-        ListItem line = new ListItem(homeCode, listId == null ? kind : ListKind.TODO, clean, member.getId());
+        ListItem line = new ListItem(homeCode, listId == null ? kind : ListKind.TODO, clean, memberId);
         line.setListId(listId);
         // After the last open line, in a list that may have been arranged: on one nobody ever
         // dragged every line sits at 0 and a new 0 would still sort last by createdAt, but after a
@@ -476,7 +480,7 @@ public class ListItemService {
                 || customLists.countByHomeCode(homeCode) >= InputLimits.CUSTOM_LISTS) {
             return Optional.empty();
         }
-        CustomList saved = customLists.save(new CustomList(homeCode, clean, member.getId()));
+        CustomList saved = customLists.save(new CustomList(homeCode, clean, memberId));
         touchAndBump(homeCode);
         return Optional.of(saved);
     }
@@ -680,7 +684,7 @@ public class ListItemService {
 
     private Member adminOf(String homeCode, Long memberId) {
         Member member = memberOf(homeCode, memberId);
-        if (!member.isAdmin()) {
+        if (member == null || !member.isAdmin()) {
             throw new IllegalArgumentException("Only an admin changes the home's lists");
         }
         return member;
@@ -693,8 +697,20 @@ public class ListItemService {
     }
 
     /** The member, if they belong to the home — the same line ChoreReminderService holds. */
+    /**
+     * The acting member, who must belong to the home — or null for the home's shared device,
+     * which writes lines with no author. A null member is accepted only for a home that has a
+     * device paired: the service has no device in hand to check, so the paired device is the
+     * home's opt-in, and the session layer has verified the device's secret before it got here.
+     */
     private Member memberOf(String homeCode, Long memberId) {
-        Member member = memberId == null ? null : members.findById(memberId).orElse(null);
+        if (memberId == null) {
+            if (!sharedDevices.existsByHomeCode(homeCode)) {
+                throw new IllegalArgumentException("No shared device in this home");
+            }
+            return null;
+        }
+        Member member = members.findById(memberId).orElse(null);
         if (member == null || !member.getHomeCode().equals(homeCode)) {
             throw new IllegalArgumentException("Member does not belong to this home");
         }

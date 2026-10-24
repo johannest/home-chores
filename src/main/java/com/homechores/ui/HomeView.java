@@ -12,6 +12,7 @@ import com.homechores.service.ChoreReminderService;
 import com.homechores.service.ListItemService;
 import com.homechores.service.ListReminderService;
 import com.homechores.service.PushReminderService;
+import com.homechores.service.SharedDeviceService;
 import com.homechores.service.StatsService;
 import com.homechores.service.WebPushSender;
 import com.vaadin.flow.component.AttachEvent;
@@ -67,9 +68,13 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     private final PushReminderService reminderService;
     private final ChoreReminderService snoozeService;
     private final WebPushSender pushSender;
+    private final SharedDeviceService sharedDevices;
 
     private String homeCode;
     private Long memberId;
+    /** The member or the shared device this screen is drawn for; {@link #memberId} is its
+     *  member half, kept as a field because almost every check here reads it. */
+    private Viewer viewer;
 
     private ChoresPanel choresPanel;
     private ListPanel listPanel;
@@ -82,8 +87,10 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     public HomeView(ChoreService service, StatsService statsService, BackupService backupService,
                     CreditService creditService, HomeState homeState, ListItemService listService,
                     ListReminderService listReminderService, PushReminderService reminderService,
-                    ChoreReminderService snoozeService, WebPushSender pushSender) {
+                    ChoreReminderService snoozeService, WebPushSender pushSender,
+                    SharedDeviceService sharedDevices) {
         this.service = service;
+        this.sharedDevices = sharedDevices;
         this.statsService = statsService;
         this.backupService = backupService;
         this.creditService = creditService;
@@ -106,14 +113,14 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
             event.forwardTo(LandingView.class);
             return;
         }
-        this.homeCode = SessionContext.homeCode();
-        this.memberId = SessionContext.memberId();
+        this.viewer = SessionContext.viewer();
+        this.homeCode = viewer.homeCode();
+        this.memberId = viewer.memberId();
 
         Optional<Home> home = service.findHome(homeCode);
-        Optional<Member> me = service.findMember(memberId);
-        if (home.isEmpty() || me.isEmpty()) {
-            // Removed member or wiped home — drop the stored identity too, or the device
-            // would keep restoring itself into a dead session on every visit.
+        if (home.isEmpty() || !viewerExists()) {
+            // Removed member, unpaired device or wiped home — drop the stored identity too, or
+            // the device would keep restoring itself into a dead session on every visit.
             DeviceIdentity.forget();
             SessionContext.signOut();
             event.forwardTo(LandingView.class);
@@ -121,15 +128,19 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         }
         // Opening the board is the broadest honest signal that this family still uses the
         // home; it feeds retention (see HomeCleanupService) and is throttled to hourly.
-        service.touchHome(homeCode);
+        if (viewer.isDevice()) {
+            sharedDevices.seen(viewer.deviceId());
+        } else {
+            service.touchHome(homeCode);
+        }
 
         choresPanel = new ChoresPanel(service, creditService, snoozeService, reminderService,
-                pushSender, homeCode, memberId);
+                pushSender, sharedDevices, viewer);
         listPanel = new ListPanel(listService, service, listReminderService, reminderService,
-                pushSender, homeCode, memberId);
-        statsPanel = new StatsPanel(statsService, service, homeCode, memberId);
-        adminPanel = new AdminPanel(service, creditService, backupService, listService, homeCode,
-                memberId);
+                pushSender, viewer);
+        statsPanel = new StatsPanel(statsService, service, viewer);
+        adminPanel = new AdminPanel(service, creditService, backupService, listService,
+                sharedDevices, homeCode, memberId);
         // Initial render happens from the Signal.effect registered in onAttach.
     }
 
@@ -148,6 +159,16 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         return service.findMember(memberId).map(Member::isAdmin).orElse(false);
     }
 
+    /** Whether the member, or the shared device, this screen is drawn for still exists in
+     *  the home — re-read on every render, since either can be removed from another phone. */
+    private boolean viewerExists() {
+        return viewer.isDevice()
+                ? sharedDevices.find(viewer.deviceId())
+                        .filter(d -> d.getHomeCode().equals(homeCode)).isPresent()
+                : service.findMember(memberId).filter(m -> m.getHomeCode().equals(homeCode))
+                        .isPresent();
+    }
+
     // ---- Chrome (header + tabs) --------------------------------------------
 
     private void buildChrome() {
@@ -155,7 +176,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         // looking at it — the revision bump lands here first, so show ourselves out
         // rather than blowing up mid-render.
         Optional<Home> current = service.findHome(homeCode);
-        if (current.isEmpty() || service.findMember(memberId).isEmpty()) {
+        if (current.isEmpty() || !viewerExists()) {
             showOut();
             return;
         }
@@ -195,7 +216,8 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
      * whose nudge somebody else has since answered closes.
      */
     private void showFiredReminders() {
-        if (!pushSender.isEnabled()) {
+        // A shared device gets no reminders: they are answered as a member, and it is none.
+        if (!pushSender.isEnabled() || viewer.isDevice()) {
             return;
         }
         List<ListReminder> fired = listReminderService.firedForHome(homeCode);
@@ -234,7 +256,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
      */
     @ClientCallable
     private void onVisible() {
-        if (homeCode != null && service.findMember(memberId).isPresent()) {
+        if (homeCode != null && viewerExists()) {
             showFiredReminders();
         }
     }
@@ -281,6 +303,14 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
             codeRow.setAlignItems(FlexComponent.Alignment.CENTER);
             left.add(codeRow);
         }
+        if (viewer.isDevice()) {
+            // Says what this screen is — the family's device, not somebody's phone — so a
+            // member seeing their name missing from the header knows why.
+            Span device = new Span(T.tr("home.device.badge", sharedDevices.find(viewer.deviceId())
+                    .map(d -> d.getName()).orElse("")));
+            device.addClassName("chore-master");
+            left.add(device);
+        }
         statsService.lastWeekChoreMaster(homeCode).ifPresent(cm -> {
             Span master = new Span(T.tr("home.choreMaster", cm.member().getName()));
             master.addClassName("chore-master");
@@ -300,7 +330,8 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         if (!solo) {
             right.add(inviteMenu(home));
         }
-        right.add(new HeaderMenu(admin, pushSender.isEnabled(),
+        right.add(new HeaderMenu(admin, pushSender.isEnabled() && !viewer.isDevice(),
+                viewer.isDevice(),
                 () -> new ReminderDialog(reminderService, snoozeService, pushSender, memberId, homeCode)
                         .open(),
                 this::claimAdminDialog,
@@ -501,7 +532,9 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         // write was lost (private mode, storage pressure) and outlives the server session.
         // Only with the secret in hand — stamping without one would corrupt a good identity.
         String secret = SessionContext.deviceSecret();
-        if (secret != null) {
+        if (secret != null && viewer.isDevice()) {
+            DeviceIdentity.rememberDevice(viewer.deviceId(), homeCode, secret);
+        } else if (secret != null) {
             DeviceIdentity.remember(memberId, homeCode, secret);
         }
         // Chore availability windows ("dog out 8-10") are evaluated in the member's local
@@ -513,7 +546,9 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
                     SessionContext.setTimeZone(java.time.ZoneId.of(tz));
                     // Persist it too: the reminder sweep runs with no session to ask,
                     // and "remind me at 19:00" means 19:00 on this member's own clock.
-                    reminderService.updateZone(memberId, tz);
+                    if (!viewer.isDevice()) {
+                        reminderService.updateZone(memberId, tz);
+                    }
                     buildChrome();
                 } catch (Exception ignored) {
                     // unknown zone id — keep the server default

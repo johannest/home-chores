@@ -14,6 +14,7 @@ import com.homechores.service.ChoreReminderService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
 import com.homechores.service.PushReminderService;
+import com.homechores.service.SharedDeviceService;
 import com.homechores.service.WebPushSender;
 import com.homechores.service.ChoreService.CompleteOutcome;
 import com.homechores.service.ChoreService.LockReason;
@@ -41,6 +42,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 /** The chore board: daily progress, leaderboard, and tap-to-complete chore cards. */
@@ -51,11 +54,22 @@ class ChoresPanel extends VerticalLayout {
     private final ChoreReminderService snoozes;
     private final PushReminderService reminders;
     private final WebPushSender pushSender;
+    private final SharedDeviceService sharedDevices;
+    private final Viewer viewer;
 
     /** taskId → when its nudge fires, refreshed once per board render. */
     private final Map<Long, Instant> armedReminders = new java.util.HashMap<>();
     private final String homeCode;
+    /** The member this board is drawn for; null on the shared device, where every "mine"
+     *  check reads as "not mine" and who did a chore is picked at the tap. */
     private final Long memberId;
+
+    /** The last chore logged from the shared device while it can still be taken back: the
+     *  device has no member to ask {@code undoableCompletion} for, so it remembers its own. */
+    private record FromDevice(Long completionId, Long memberId) {
+    }
+
+    private FromDevice lastFromDevice;
 
     private final Div dailyStrip = new Div();
     private final Div doneTodayHolder = new Div();
@@ -112,14 +126,16 @@ class ChoresPanel extends VerticalLayout {
 
     ChoresPanel(ChoreService service, CreditService creditService, ChoreReminderService snoozes,
                 PushReminderService reminders, WebPushSender pushSender,
-                String homeCode, Long memberId) {
+                SharedDeviceService sharedDevices, Viewer viewer) {
         this.service = service;
         this.creditService = creditService;
         this.snoozes = snoozes;
         this.reminders = reminders;
         this.pushSender = pushSender;
-        this.homeCode = homeCode;
-        this.memberId = memberId;
+        this.sharedDevices = sharedDevices;
+        this.viewer = viewer;
+        this.homeCode = viewer.homeCode();
+        this.memberId = viewer.memberId();
         setPadding(false);
         setSpacing(false);
         setWidthFull();
@@ -177,7 +193,12 @@ class ChoresPanel extends VerticalLayout {
 
     void refresh() {
         boolean admin = service.findMember(memberId).map(Member::isAdmin).orElse(false);
-        renderDaily();
+        // The daily target is one person's; the device's board shows the family's day instead
+        // (the Done today list below it).
+        dailyStrip.setVisible(!viewer.isDevice());
+        if (!viewer.isDevice()) {
+            renderDaily();
+        }
         renderDoneToday();
         renderUndo();
         renderLeaderboard();
@@ -327,7 +348,7 @@ class ChoresPanel extends VerticalLayout {
         // its cost is a tested invariant, and a per-member badge has no business in a per-home
         // projection.
         armedReminders.clear();
-        if (pushSender.isEnabled()) {
+        if (pushSender.isEnabled() && !viewer.isDevice()) {
             snoozes.forMember(memberId)
                     .forEach(r -> armedReminders.put(r.getTaskId(), r.getDueAt()));
         }
@@ -563,7 +584,7 @@ class ChoresPanel extends VerticalLayout {
         // .complete-area rather than on the card — the same reason .book-btn works.
         // Only when push is actually configured, matching how the header bell is hidden: a
         // control that exists to explain a server setting the family cannot change is noise.
-        if (pushSender.isEnabled()) {
+        if (pushSender.isEnabled() && !viewer.isDevice()) {
             Instant armed = armedReminders.get(taskId);
             Span snooze = new Span(armed == null ? "⏰" : snoozeBadge(armed));
             snooze.addClassName("snooze-chip");
@@ -586,8 +607,26 @@ class ChoresPanel extends VerticalLayout {
             card.add(b);
         }
 
-        // Booking controls — default division only, and only for a due chore.
-        if (!rotating && view.due()) {
+        // Booking controls — default division only, and only for a due chore. On the shared
+        // device a booking is anyone's to clear (the device is the household's), and a fresh
+        // one asks who it is for.
+        if (!rotating && view.due() && viewer.isDevice()) {
+            if (view.bookedById() != null) {
+                Button cancel = new Button(T.tr("board.cancelBooking"), e -> {
+                    sharedDevices.cancelBooking(viewer.deviceId(), taskId);
+                    refresh();
+                });
+                cancel.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+                cancel.addClassName("book-btn");
+                card.add(cancel);
+            } else if (view.lockReason() == LockReason.NONE) {
+                Button book = new Button(T.tr("board.book"), e -> whoDialog(view.task().getEmoji(),
+                        view.task().getName(), T.tr("board.who.book"), m -> handleBookAs(taskId, m)));
+                book.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+                book.addClassName("book-btn");
+                card.add(book);
+            }
+        } else if (!rotating && view.due()) {
             if (view.bookedByMe(memberId)) {
                 Button cancel = new Button(T.tr("board.cancelBooking"), e -> {
                     service.cancelBooking(taskId, memberId);
@@ -696,13 +735,53 @@ class ChoresPanel extends VerticalLayout {
         card.add(emoji, name);
 
         long waiting = service.pendingOtherHelpCount(homeCode, memberId);
-        if (waiting > 0) {
+        if (waiting > 0 && !viewer.isDevice()) {
             Span badge = new Span(T.tr("board.otherHelp.waiting", waiting));
             badge.addClassName("streak");
             card.add(badge);
         }
-        card.addClickListener(e -> openOtherHelpDialog(admin));
+        if (viewer.isDevice()) {
+            card.addClickListener(e -> whoDialog("🙋", T.tr("board.otherHelp"),
+                    T.tr("board.who.help"), this::openOtherHelpDialogFor));
+        } else {
+            card.addClickListener(e -> openOtherHelpDialog(admin));
+        }
         return card;
+    }
+
+    /** Other help from the shared device, for the member just picked; it waits for an admin
+     *  exactly as their own entry would. */
+    private void openOtherHelpDialogFor(Member who) {
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle(T.tr("board.otherHelp.titleFor", who.getName()));
+        dialog.setWidth("min(90vw, 24em)");
+        TextArea what = new TextArea(T.tr("board.otherHelp.what"));
+        what.setPlaceholder(T.tr("board.otherHelp.placeholder"));
+        what.setWidthFull();
+        what.setMaxLength(ChoreService.MAX_HELP_LENGTH);
+        what.setValueChangeMode(ValueChangeMode.EAGER);
+        what.setHelperText(T.tr("board.otherHelp.helper"));
+        what.focus();
+        Button send = new Button(T.tr("board.otherHelp.send"), e -> {
+            if (what.getValue() == null || what.getValue().isBlank()) {
+                what.setInvalid(true);
+                what.setErrorMessage(T.tr("board.otherHelp.required"));
+                return;
+            }
+            var logged = sharedDevices.logOtherHelp(viewer.deviceId(), who.getId(), what.getValue());
+            dialog.close();
+            logged.ifPresent(c -> lastFromDevice = new FromDevice(c.getId(), who.getId()));
+            Notification n = Toasts.show(
+                    logged.isPresent() ? T.tr("board.otherHelp.sent") : T.tr("board.otherHelp.off"),
+                    4000);
+            n.addThemeVariants(logged.isPresent() ? NotificationVariant.LUMO_SUCCESS
+                    : NotificationVariant.LUMO_CONTRAST);
+            refresh();
+        });
+        send.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        dialog.add(what);
+        dialog.getFooter().add(new Button(T.tr("common.cancel"), e -> dialog.close()), send);
+        dialog.open();
     }
 
     /**
@@ -793,15 +872,91 @@ class ChoresPanel extends VerticalLayout {
     private void handleComplete(Long taskId) {
         boolean confirm = service.findHome(homeCode)
                 .map(Home::isConfirmCompletion).orElse(true);
-        if (!confirm) {
+        if (!confirm && !viewer.isDevice()) {
             completeNow(taskId);
             return;
         }
         service.taskViews(homeCode, memberId, SessionContext.timeZone()).stream()
                 .filter(v -> v.task().getId().equals(taskId))
                 .findFirst()
-                .ifPresent(view -> confirmDialog(view.task().getEmoji(), view.task().getName(),
-                        () -> completeNow(taskId)));
+                .ifPresent(view -> {
+                    if (viewer.isDevice()) {
+                        // On the shared device the pick *is* the confirmation: whoever's face is
+                        // tapped did it — one tap fewer than pick-then-yes, and the confirm
+                        // setting does not apply, since a board that belongs to nobody has
+                        // nobody to skip the question for.
+                        whoDialog(view.task().getEmoji(), view.task().getName(),
+                                T.tr("board.who.did"), m -> completeAs(taskId, m));
+                    } else {
+                        confirmDialog(view.task().getEmoji(), view.task().getName(),
+                                () -> completeNow(taskId));
+                    }
+                });
+    }
+
+    /**
+     * "Who?" — the shared device's version of the confirm dialog: the chore, a question, and
+     * the family as big avatar chips. The ids live in the lambdas, never in the DOM, and the
+     * service re-checks that the member is in the device's home anyway.
+     */
+    private void whoDialog(String emoji, String title, String question, Consumer<Member> onPick) {
+        Dialog dialog = new Dialog();
+        dialog.setModal(true);
+        dialog.addClassName("celebrate-dialog");
+
+        Div emojiEl = new Div();
+        emojiEl.setText(emoji);
+        emojiEl.addClassName("celebrate-emoji");
+        Div titleEl = new Div();
+        titleEl.setText(title);
+        titleEl.addClassName("celebrate-title");
+        Div questionEl = new Div();
+        questionEl.setText(question);
+        questionEl.addClassName("celebrate-text");
+
+        Div chips = new Div();
+        chips.addClassName("who-row");
+        for (Member m : service.membersOf(homeCode)) {
+            Button chip = new Button(m.getName(), e -> {
+                dialog.close();
+                onPick.accept(m);
+            });
+            chip.setPrefixComponent(MemberAvatar.dot(m));
+            chip.addClassName("who-chip");
+            chips.add(chip);
+        }
+        Button cancel = new Button(T.tr("common.cancel"), e -> dialog.close());
+        cancel.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        cancel.setWidthFull();
+
+        VerticalLayout layout = new VerticalLayout(emojiEl, titleEl, questionEl, chips, cancel);
+        layout.setAlignItems(FlexComponent.Alignment.CENTER);
+        layout.setPadding(false);
+        dialog.add(layout);
+        dialog.open();
+    }
+
+    /** The device's tap, attributed to the member picked: every §4.3 lock runs for them. */
+    private void completeAs(Long taskId, Member who) {
+        CompleteOutcome outcome = sharedDevices.complete(viewer.deviceId(), taskId, who.getId(),
+                SessionContext.timeZone());
+        if (!outcome.allowed()) {
+            Celebrations.showBlocked(outcome, true);
+            refresh();
+            return;
+        }
+        lastFromDevice = new FromDevice(outcome.completionId(), who.getId());
+        Celebrations.afterComplete(service, outcome, this::undoLast);
+        refresh();
+    }
+
+    private void handleBookAs(Long taskId, Member who) {
+        if (!sharedDevices.book(viewer.deviceId(), taskId, who.getId())) {
+            Notification n = Notification.show(T.tr("board.booked.someoneElse"),
+                    3000, Notification.Position.MIDDLE);
+            n.addThemeVariants(NotificationVariant.LUMO_CONTRAST);
+        }
+        refresh();
     }
 
     private void confirmDialog(String emoji, String choreName, Runnable onYes) {
@@ -852,27 +1007,55 @@ class ChoresPanel extends VerticalLayout {
      * from a strip on the board, so it survives dismissing the dialog.
      */
     private void undoLast() {
-        service.undoableCompletion(memberId).ifPresentOrElse(completion -> {
-            if (service.undoCompletion(completion.getId(), memberId)) {
+        undoable().ifPresentOrElse(completion -> {
+            if (service.undoCompletion(completion.getId(), undoMemberId())) {
                 Notification n = Toasts.show(T.tr("undo.done"), 3000);
                 n.addThemeVariants(NotificationVariant.LUMO_SUCCESS);
             }
+            lastFromDevice = null;
             refresh();
         }, this::refresh);
     }
 
-    /** A time-limited "that wasn't me" for the member's own last chore. */
+    /** Whose completion the undo strip is about: this member's, or the member the device
+     *  last logged for. */
+    private Long undoMemberId() {
+        return viewer.isDevice() ? lastFromDevice == null ? null : lastFromDevice.memberId()
+                : memberId;
+    }
+
+    /**
+     * The completion the strip can take back. For a member, their newest within the window;
+     * for the device, the one it remembers logging — looked up through the same query, so that
+     * a completion an admin has since unmarked, or one that aged out, is gone here too.
+     */
+    private Optional<Completion> undoable() {
+        if (!viewer.isDevice()) {
+            return service.undoableCompletion(memberId);
+        }
+        if (lastFromDevice == null) {
+            return Optional.empty();
+        }
+        return service.undoableCompletion(lastFromDevice.memberId())
+                .filter(c -> c.getId().equals(lastFromDevice.completionId()));
+    }
+
+    /** A time-limited "that wasn't me" for the member's own last chore — or, on the shared
+     *  device, for the last chore logged from it, naming who it was logged for. */
     private void renderUndo() {
         undoStrip.removeAll();
-        var recent = service.undoableCompletion(memberId);
+        var recent = undoable();
         if (recent.isEmpty()) {
             undoStrip.setVisible(false);
             return;
         }
         undoStrip.setVisible(true);
         Completion last = recent.get();
-        Span text = new Span(T.tr(last.isOtherHelp() ? "undo.justLogged" : "undo.justDid",
-                describe(last)));
+        String what = describe(last);
+        Span text = new Span(viewer.isDevice()
+                ? T.tr(last.isOtherHelp() ? "undo.someoneJustLogged" : "undo.someoneJustDid",
+                        service.findMember(last.getMemberId()).map(Member::getName).orElse("?"), what)
+                : T.tr(last.isOtherHelp() ? "undo.justLogged" : "undo.justDid", what));
         text.addClassName("grow");
         Button undo = new Button(T.tr("undo.action"), e -> undoLast());
         undo.addThemeVariants(ButtonVariant.LUMO_TERTIARY);

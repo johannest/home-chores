@@ -36,6 +36,7 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Admin role (PIN)** | The creator is admin. Enter the admin PIN via **Admin?** in the header to (re)claim admin on any device. Admins can promote others. |
 | **Chore groups & order** | Admins can create groups (🍳 Kitchen, 🧺 Laundry) that become headings on the board, and arrange them: **hold a card on the board and drag it** to where it belongs (into another group too), or use the ↑/↓ items in the Admin tab. Ungrouped chores sit under *Other chores*. Deleting a group keeps its chores. Rearranging is purely cosmetic: it never changes who the daily rotation assigns what to. |
 | **Admin CRUD** | Under the **Admin** tab: add/edit/delete chores (name, emoji, group, interval, credits, hours), rename/remove members, promote/demote admins, rename the home, change the PIN. |
+| **Shared family device** | The tablet on the kitchen counter. Pair it once with the home code and the **admin PIN** ("Set up a shared family device" under Join) and it shows the board for everyone — whose turn, who booked what, who is on a streak — with no member of its own. Tap a chore, tap your face: that is the confirmation, and it counts for that person with their locks, celebration and credits. Groceries and to-dos work from it too. Never an admin; unpair it from the Admin tab's **Shared devices** card. |
 | **Members without a phone** | A child with no phone of their own is added from the Members card (the admin accepts the agreement on their behalf) and gets a leaderboard chip, rotation turns, credits and stats like everyone else. Admins log their chores under **Log a chore for someone**; the card says *no phone yet* until they sign in from a phone with **"I'm already a member"** and their nickname. |
 | **Optional approval** | Admins can require approval. Completions then wait as **pending** until an admin **approves** (counts) or **rejects** (discarded). A badge shows the pending count. |
 | **Shared lists** | A **Lists** tab with **Groceries**, **To-do** and **Dinner** for the whole family. Anyone adds a line, whoever is at the store ticks it off — nothing here is a chore, so ticking earns no credits and starts no streak. Ticked lines show struck through with who ticked them, can be unticked, and vanish after 24 h (or on **Clear done**). **Hold a line and drag it** to arrange the list, the way the board is arranged (↑/↓ on each line do the same for keyboards and screen readers); a line with a reminder sorts itself instead — due today it leads the list, due next month it waits at the bottom. **Dinner** is a sliding window of today plus a full week: one free-text slot per day, labelled with the weekday, today highlighted; as days pass a new empty slot appears at the far end, and a Sunday plan still reaches next Sunday. Included in backups. |
@@ -396,6 +397,7 @@ src/main/java/com/homechores/
 │   ├── FeedbackCount.java        # one row of the home's all-time reaction tally, grouped in the DB
 │   ├── CreditEntry / SpreeTier   # credit rewards
 │   ├── RejoinRequest.java        # a device asking to sign back in as an existing member
+│   ├── SharedDevice.java         # the family's kitchen tablet: a home and a secret, no member
 │   ├── TimeWindows.java          # availability-hours parsing & evaluation
 │   └── (enums: CompletionStatus, Feedback, DivisionStyle, CreditType)
 ├── service/
@@ -405,6 +407,7 @@ src/main/java/com/homechores/
 │   ├── StatsService.java         # chart aggregations, period lenses, week/month trends
 │   ├── ChoreReminderService.java # the one-shot snooze sweep (sibling of PushReminderService)
 │   ├── ListItemService.java      # the shared lists: add, tick, delete, dinner slots, purge
+│   ├── SharedDeviceService.java  # pair / verify / unpair a shared device; what it does for members
 │   ├── ListReminderService.java  # the list-line reminder sweep; fired rows wait for an answer
 │   ├── BackupService.java        # per-home JSON export / restore
 │   └── HomeState.java            # per-home revision Signal (live sync)
@@ -414,7 +417,8 @@ src/main/java/com/homechores/
 └── ui/
     ├── LandingView.java          # create / join screen (+ admin-PIN reveal, ?join= links,
     │                             #   identity restore, "sign me back in" picker + waiting)
-    ├── DeviceIdentity.java       # member id kept in the browser's local storage
+    ├── DeviceIdentity.java       # member (or shared-device) id kept in the browser's local storage
+    ├── Viewer.java               # who a board is drawn for: a member, or the shared device
     ├── HomeView.java             # header + Chores / Stats / Admin tab host, share links
     ├── ChoresPanel.java          # daily ring, leaderboard, chore cards + badges
     ├── ClientId.java             # parses an id read back from a browser event (drops)
@@ -498,7 +502,8 @@ accessibility, and QA. The checklist each one walks through lives in [`CLAUDE.md
 - Members are identified per device (a phone = a member): the member id lives in the
   browser's local storage and is restored into a fresh session on every visit. Two people
   on the *same* browser share one identity — fine for real use where everyone has their
-  own phone. Server sessions are deliberately short — 5 minutes for a member, 20 for an
+  own phone; a device the whole family uses is paired as a **shared device** instead (SPEC
+  §4.1.3). Server sessions are deliberately short — 5 minutes for a member, 20 for an
   admin (SPEC §4.1.2) — so an idle phone costs the server nothing.
 - Clearing browsing data is the one thing local storage doesn't survive; the
   "I'm already a member" flow on the Join tab is the recovery path. It's gated by

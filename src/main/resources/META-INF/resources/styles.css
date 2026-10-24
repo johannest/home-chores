@@ -984,6 +984,37 @@ body.hold-dragging {
     margin: var(--lumo-space-s) 0 0;
 }
 
+/* ---- "Who did it?" — the shared device's confirm dialog (§4.1.3) ---- */
+/* The family as chips, wrapping; a child's thumb finds a 48px face faster than a name in a
+   list. Button, not Div: keyboard-reachable and announced as what it is. */
+.who-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.who-chip {
+    min-height: 48px;
+    padding: 4px 16px 4px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--lumo-contrast-10pct);
+    background: var(--lumo-base-color);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.who-chip .avatar-dot {
+    width: 36px;
+    height: 36px;
+    margin-right: 6px;
+}
+
+.who-chip:hover {
+    border-color: var(--lumo-primary-color-50pct);
+}
+
 /* ---- Bar chart ---- */
 .chart-card {
     background: var(--lumo-base-color);

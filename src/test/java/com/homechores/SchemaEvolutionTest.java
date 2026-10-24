@@ -103,6 +103,7 @@ class SchemaEvolutionTest {
     @Autowired MemberRepository members;
     @Autowired CompletionRepository completions;
     @Autowired com.homechores.service.ListItemService lists;
+    @Autowired com.homechores.service.SharedDeviceService sharedDevices;
     @Autowired EntityManager em;
 
     private static final String CODE = "OLDHOME";
@@ -202,6 +203,7 @@ class SchemaEvolutionTest {
         assertTrue(service.pendingOtherHelp(CODE).isEmpty());
         assertTrue(service.groupsOf(CODE).isEmpty());
         assertTrue(lists.openItems(CODE, com.homechores.domain.ListKind.GROCERY).isEmpty());
+        assertTrue(sharedDevices.devicesOf(CODE).isEmpty());
         // ...and writable: the old family can start a shopping list right away.
         assertTrue(lists.add(CODE, com.homechores.domain.ListKind.GROCERY,
                 byName("Alex").getId(), "Milk").isPresent());

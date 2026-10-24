@@ -8,6 +8,8 @@ import com.homechores.domain.RejoinStatus;
 import com.homechores.service.ChoreService;
 import com.homechores.service.HomeState;
 import com.homechores.service.RateLimiter;
+import com.homechores.service.SharedDeviceService;
+import com.homechores.service.SharedDeviceService.PairOutcome;
 import com.vaadin.flow.component.AttachEvent;
 import com.vaadin.flow.component.Key;
 import com.vaadin.flow.component.button.Button;
@@ -45,6 +47,7 @@ import java.util.Optional;
 public class LandingView extends VerticalLayout implements BeforeEnterObserver {
 
     private final ChoreService service;
+    private final SharedDeviceService sharedDevices;
     private final HomeState homeState;
     private final RateLimiter rateLimiter;
 
@@ -65,6 +68,10 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
      */
     private static final int MAX_REJOIN_LOOKUPS_PER_HOUR = 20;
 
+    /** Pairing attempts for a shared device per hour. Each one is a PIN guess, and the PIN's
+     *  own 5-tries lock is per home; this bounds the guessing across homes too. */
+    private static final int MAX_PAIRINGS_PER_HOUR = 10;
+
     private static final java.time.Duration RATE_WINDOW = java.time.Duration.ofHours(1);
 
     /** Join-form code, kept as a field so a ?join= link can prefill it in beforeEnter. */
@@ -83,8 +90,10 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
     /** The effect watching that request; one at a time, so a second wait replaces the first. */
     private Registration waitingEffect;
 
-    public LandingView(ChoreService service, HomeState homeState, RateLimiter rateLimiter) {
+    public LandingView(ChoreService service, SharedDeviceService sharedDevices,
+                       HomeState homeState, RateLimiter rateLimiter) {
         this.service = service;
+        this.sharedDevices = sharedDevices;
         this.homeState = homeState;
         this.rateLimiter = rateLimiter;
         addClassName("centered-page");
@@ -271,7 +280,15 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         Paragraph rejoinHint = new Paragraph(T.tr("landing.rejoin.hint"));
         rejoinHint.addClassName("feedback-hint");
 
-        Div form = new Div(codeField, yourNameField, agree, join, rejoinHint, rejoin);
+        // The family's kitchen tablet: not a member, so it never joins — an admin pairs it with
+        // the PIN (§4.1.3). Under the join form because that is where "this device should show
+        // our board" is looked for.
+        Button pair = new Button(T.tr("landing.device.link"), VaadinIcon.DESKTOP.create(),
+                e -> openPairDialog(code.peek()));
+        pair.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+        pair.setWidthFull();
+
+        Div form = new Div(codeField, yourNameField, agree, join, rejoinHint, rejoin, pair);
         form.getStyle().set("display", "flex").set("flex-direction", "column")
                 .set("gap", "var(--lumo-space-m)").set("margin-top", "var(--lumo-space-m)");
         return form;
@@ -338,6 +355,79 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         name.addKeyPressListener(Key.ENTER, e -> me.click());
 
         VerticalLayout body = new VerticalLayout(intro, name, pin, me);
+        body.setPadding(false);
+        body.setSpacing(true);
+        body.setWidthFull();
+        d.add(body);
+        d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()));
+        d.open();
+    }
+
+    // ---- Pairing a shared family device ----------------------------------------
+
+    /**
+     * Home code plus admin PIN makes this browser the home's shared device. The PIN is asked
+     * here rather than an admin signing in on the tablet: a member is one phone, and signing
+     * the admin in here would sign their own phone out.
+     */
+    private void openPairDialog(String rawCode) {
+        if (rawCode == null || rawCode.isBlank()) {
+            warn(T.tr("landing.rejoin.needCode"));
+            return;
+        }
+        Dialog d = new Dialog();
+        d.setHeaderTitle(T.tr("landing.device.title"));
+        d.setWidth("min(90vw, 24em)");
+
+        Span intro = new Span(T.tr("landing.device.intro"));
+        intro.addClassName("sub");
+
+        TextField name = new TextField(T.tr("landing.device.name"));
+        name.setPlaceholder(T.tr("landing.device.name.placeholder"));
+        name.setMaxLength(InputLimits.MEMBER_NAME);
+        name.setWidthFull();
+
+        TextField pin = new TextField(T.tr("claim.pin"));
+        pin.setMaxLength(4);
+        pin.setWidthFull();
+
+        Button pair = new Button(T.tr("landing.device.pair"), e -> {
+            if (!rateLimiter.allow("pair:" + clientKey(), MAX_PAIRINGS_PER_HOUR, RATE_WINDOW)) {
+                warn(T.tr("landing.rateLimited"));
+                return;
+            }
+            PairOutcome outcome = sharedDevices.pair(rawCode, pin.getValue(), name.getValue(),
+                    T.tr("landing.device.name.placeholder"));
+            switch (outcome.result()) {
+                case PAIRED -> {
+                    d.close();
+                    var paired = outcome.paired();
+                    SessionContext.signInDevice(paired.device().getId(), paired.device().getHomeCode());
+                    SessionContext.setDeviceSecret(paired.secret());
+                    SessionContext.applyTimeout(false);
+                    DeviceIdentity.rememberDevice(paired.device().getId(),
+                            paired.device().getHomeCode(), paired.secret());
+                    getUI().ifPresent(ui -> ui.navigate(HomeView.class));
+                }
+                case WRONG_PIN -> {
+                    pin.setInvalid(true);
+                    pin.setErrorMessage(T.tr("claim.wrong"));
+                }
+                case TOO_MANY -> {
+                    d.close();
+                    warn(T.tr("landing.device.tooMany"));
+                }
+                default -> {
+                    d.close();
+                    warn(T.tr("landing.join.notFound", rawCode.trim().toUpperCase()));
+                }
+            }
+        });
+        pair.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        pair.setWidthFull();
+        pin.addKeyPressListener(Key.ENTER, e -> pair.click());
+
+        VerticalLayout body = new VerticalLayout(intro, name, pin, pair);
         body.setPadding(false);
         body.setSpacing(true);
         body.setWidthFull();
@@ -451,8 +541,32 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
             if (stored.isPresent()) {
                 DeviceIdentity.forget(); // points at a member or home that no longer exists
             }
-            checkPendingRejoin();
+            DeviceIdentity.readDevice(device -> {
+                if (device.isPresent() && restoreDevice(device.get())) {
+                    return;
+                }
+                if (device.isPresent()) {
+                    DeviceIdentity.forget(); // unpaired, or the home is gone
+                }
+                checkPendingRejoin();
+            });
         });
+    }
+
+    /** The shared-device counterpart of {@link #restoreFrom}: the device must still be paired
+     *  to that home and hold the secret issued at pairing. */
+    private boolean restoreDevice(DeviceIdentity.Stored stored) {
+        var device = sharedDevices.find(stored.id());
+        if (device.isEmpty() || !device.get().getHomeCode().equals(stored.homeCode())
+                || service.findHome(stored.homeCode()).isEmpty()
+                || !sharedDevices.verify(stored.id(), stored.secret())) {
+            return false;
+        }
+        SessionContext.signInDevice(stored.id(), stored.homeCode());
+        SessionContext.setDeviceSecret(stored.secret());
+        SessionContext.applyTimeout(false);
+        getUI().ifPresent(ui -> ui.navigate(HomeView.class));
+        return true;
     }
 
     /**
@@ -462,13 +576,13 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
      * would sign anyone in as any member.
      */
     private boolean restoreFrom(DeviceIdentity.Stored stored) {
-        Optional<Member> m = service.findMember(stored.memberId());
+        Optional<Member> m = service.findMember(stored.id());
         if (m.isEmpty() || !m.get().getHomeCode().equals(stored.homeCode())
                 || service.findHome(stored.homeCode()).isEmpty()) {
             return false;
         }
         String secret = stored.secret();
-        if (!service.verifyDeviceSecret(stored.memberId(), secret)) {
+        if (!service.verifyDeviceSecret(stored.id(), secret)) {
             return false;
         }
         SessionContext.signIn(m.get().getId(), m.get().getHomeCode());
