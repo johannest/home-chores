@@ -568,6 +568,25 @@ public class ChoreService {
                 .orElseThrow(() -> new IllegalArgumentException("Not an admin of this home"));
     }
 
+    /**
+     * An admin adding a member who has no phone of their own — a child, usually. The member
+     * exists like any other (leaderboard, rotation, credits, backups) but holds no device
+     * secret, so nothing can sign in as them until they get a phone and use "I'm already a
+     * member" by nickname, which is why the nickname must be unique in the home: that flow
+     * matches on it. Empty for a blank or already-taken name. The admin is the adult acting
+     * for them, and the dialog that calls this carries the user-agreement checkbox, so
+     * creation time is consent time here too.
+     */
+    @Transactional
+    public Optional<Member> addMemberWithoutDevice(String homeCode, String name, Long adminId) {
+        String norm = normalizeCode(homeCode);
+        adminOf(norm, adminId);
+        if (name == null || name.isBlank() || findMemberByName(norm, name).isPresent()) {
+            return Optional.empty();
+        }
+        return Optional.of(addMember(norm, name.trim(), false));
+    }
+
     /** Attempts to grant admin rights to a member by verifying the home's admin PIN. */
     @Transactional
     public boolean claimAdmin(Long memberId, String pin) {

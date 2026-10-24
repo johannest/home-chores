@@ -1725,6 +1725,33 @@ class HomeUiTest extends HomeChoresUiTest {
         assertEquals(4, tabCount(), "still the admin");
     }
 
+    /** A child with no phone is added from the Members card: name, the agreement ticked on
+     *  their behalf, and they appear with "no phone yet" under their name. */
+    @Test
+    void membersCard_addsAMemberWithoutAPhone_behindTheAgreement() {
+        Member alex = service.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Admin");
+        openSection("Members");
+
+        clickButton("Add a member without a phone");
+        setField("Name", "Milla");
+        Button add = $(Button.class).all().stream()
+                .filter(b -> "Add".equals(labelOf(b)) && usable(b)).findFirst().orElseThrow();
+        assertFalse(add.isEnabled(), "disabled until the agreement is accepted on their behalf");
+        acceptTerms();
+        assertTrue(add.isEnabled());
+        clickButton("Add");
+
+        awaitRedraw(() -> adminSection("Members").getSummaryText().equals("Members (2)"));
+        Member milla = service.findMemberByName(code, "Milla").orElseThrow();
+        assertFalse(milla.hasDevice());
+        assertTrue($(Span.class).all().stream().filter(this::usable)
+                .anyMatch(sp -> "no phone yet".equals(sp.getText())), "the card says so");
+    }
+
     /** The home-wide numbers are the admin's: a member's Stats has no sub-tabs at all. */
     @Test
     void member_getsNoHomeStatsTab() {

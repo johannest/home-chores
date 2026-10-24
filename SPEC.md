@@ -63,6 +63,7 @@ Terms in **bold** map to concepts in the code.
 | Approve / reject pending completions | — | ✅ |
 | Delete / correct any completion | — | ✅ |
 | Rename / remove members, promote / demote admins | — | ✅ |
+| Add a member who has no phone of their own | — | ✅ |
 | Ask to sign back in as an existing member | ✅ | ✅ |
 | Approve / reject a join or rejoin request | — | ✅ |
 | Change home settings (approval, rejoin gate, division style, booking hold, daily target, other help, PIN, name) | — | ✅ |
@@ -298,6 +299,12 @@ hold whatever screen the call came from.
   server let my session go — I see the same full-screen "Getting your chores…" card the app shows
   while it starts, instead of a 4px bar hidden under the camera island, so I know to wait rather
   than tap again or give up.
+- **US-61 A child without a phone is still on the board.** As an admin, I can add a family
+  member who has no phone of their own from the Members card — name them and accept the user
+  agreement on their behalf — so they have a leaderboard chip, a place in the rotation, credits
+  and statistics like everyone else. I log their chores for them (US-47), and the card shows
+  "no phone yet" under their name until the day they get one and sign in with "I'm already a
+  member" and the nickname I gave them.
 
 ### Phase 5
 
@@ -361,6 +368,16 @@ hold whatever screen the call came from.
   the user sent to the landing page. While the browser is being asked, a full-screen
   overlay covers the landing card, so a lookup that never answers leaves a working page.
 - **Leave**, self-removal and backup restore all clear the stored identity.
+- **A member without a device** (`ChoreService.addMemberWithoutDevice(homeCode, name,
+  adminId)`): an admin adds a member who has no phone from the Admin tab's Members card. The
+  member is an ordinary row with `deviceSecretHash == null` (`Member.hasDevice()` is false, and
+  the card reads "no phone yet"), so nothing can sign in as them until a phone goes through
+  "I'm already a member" by nickname (§4.1.1), which is why the service refuses a nickname
+  already in use in the home (case-insensitive, as that match is) and a blank one. The service
+  re-checks that the caller is an admin of that home. The dialog carries the same user-agreement
+  checkbox as the create and join forms — the admin accepts it on the child's behalf — so
+  `termsAcceptedAt` is stamped at creation like every other member's. Their chores are logged
+  through §4.3.3.
 
 #### 4.1.1 Joining and signing back in (admin-gated)
 Both doors into a home are gated by an admin by default, so knowing the home code is never
@@ -1388,10 +1405,16 @@ scales up, not the other way round.
   only the member's own row. `ChoreReminderServiceTest`: one member with more devices than the
   sweep cap is sent to no more than the cap.
 - **Admin actions re-checked at action time** (`RejoinServiceTest`, `ChoreServiceTest`,
-  `LogForMemberTest`, `CreditServiceTest`, `BackupServiceTest`): a member of the home and an
-  admin of another home can neither decide a request, approve or reject, log a chore for
-  someone, redeem, nor restore; redeeming for a member who is not in the home is refused too.
+  `LogForMemberTest`, `CreditServiceTest`, `BackupServiceTest`, `AddMemberTest`): a member of
+  the home and an admin of another home can neither decide a request, approve or reject, log a
+  chore for someone, redeem, restore, nor add a member without a device; redeeming for a member
+  who is not in the home is refused too.
   `HomeUiTest`: a demoted admin's already-open rename dialog saves nothing.
+- **A member without a device** (`AddMemberTest`): added trimmed, non-admin, with no device and
+  the agreement stamped, and an admin can log a chore for them; a blank or already-taken
+  nickname (case-insensitive) is refused; and the sign-back-in by nickname with the PIN later
+  gives them a device. `HomeUiTest`: the Members card's dialog adds them only once the agreement
+  is ticked, and then shows "no phone yet" under their name.
 - **Stats render cost** (`StatsRenderCostTest`, Hibernate statistics): under the week lens a
   two-year-old completion is counted (all-time total, feedback per chore) but not loaded; the
   all-time lens loads it; the 💎 card loads the headline window and sums the rest.

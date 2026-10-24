@@ -22,6 +22,7 @@ import com.homechores.service.ListItemService.ListSlot;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
+import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.checkbox.CheckboxGroup;
 import com.vaadin.flow.component.checkbox.Switch;
 import com.vaadin.flow.component.contextmenu.MenuItem;
@@ -42,6 +43,8 @@ import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.textfield.IntegerField;
 import com.vaadin.flow.component.textfield.TextField;
+import com.vaadin.flow.data.value.ValueChangeMode;
+import com.vaadin.flow.router.RouterLink;
 import com.vaadin.flow.component.upload.Upload;
 import com.vaadin.flow.server.StreamResource;
 import java.io.ByteArrayInputStream;
@@ -751,7 +754,8 @@ class AdminPanel extends VerticalLayout {
             Div line = new Div();
             line.setText(m.getName() + (m.isAdmin() ? " 👑" : ""));
             line.getStyle().set("font-weight", "600");
-            Span sub = new Span(T.tr(m.getId().equals(memberId) ? "admin.you" : "admin.member"));
+            Span sub = new Span(T.tr(m.getId().equals(memberId) ? "admin.you"
+                    : m.hasDevice() ? "admin.member" : "admin.member.noPhone"));
             sub.addClassName("sub");
             info.add(line, sub);
             info.addClassName("grow");
@@ -773,7 +777,54 @@ class AdminPanel extends VerticalLayout {
             row.addClassName("list-row");
             s.add(row);
         }
+        Button add = new Button(T.tr("admin.addMember"), VaadinIcon.PLUS.create(),
+                e -> addMemberDialog());
+        add.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+        s.add(add);
         return s;
+    }
+
+    /**
+     * A member who has no phone: the admin names them and accepts the agreement on their
+     * behalf, the same gate every other way of creating a member has. The service refuses a
+     * nickname already in use, since "I'm already a member" finds people by it.
+     */
+    private void addMemberDialog() {
+        Dialog d = new Dialog();
+        d.setHeaderTitle(T.tr("admin.addMember"));
+        Span info = new Span(T.tr("admin.addMember.info"));
+        info.addClassName("sub");
+        TextField name = new TextField(T.tr("admin.name"));
+        name.setMaxLength(InputLimits.MEMBER_NAME);
+        Checkbox agree = new Checkbox();
+        agree.setLabelComponent(new Span(new Span(T.tr("admin.addMember.agree.prefix") + " "),
+                new RouterLink(T.tr("landing.agree.link"), TermsView.class),
+                new Span(" " + T.tr("admin.addMember.agree.suffix"))));
+        Button save = new Button(T.tr("admin.addMember.action"), e -> {
+            if (name.isEmpty() || !Boolean.TRUE.equals(agree.getValue()) || !stillAdmin()) {
+                return;
+            }
+            Optional<Member> added = service.addMemberWithoutDevice(homeCode, name.getValue(),
+                    memberId);
+            if (added.isEmpty()) {
+                toastError(T.tr("admin.addMember.duplicate", name.getValue().trim()));
+                return;
+            }
+            d.close();
+            toast(T.tr("admin.addMember.done", added.get().getName()));
+            refresh();
+        });
+        save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        save.setEnabled(false);
+        Runnable gate = () -> save.setEnabled(!name.isEmpty()
+                && Boolean.TRUE.equals(agree.getValue()));
+        name.setValueChangeMode(ValueChangeMode.EAGER);
+        name.addValueChangeListener(e -> gate.run());
+        agree.addValueChangeListener(e -> gate.run());
+        d.add(new Div(info), new Div(name), new Div(agree));
+        d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), save);
+        d.open();
+        name.focus();
     }
 
     private void renameMemberDialog(Member m) {
