@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.homechores.domain.CustomList;
 import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
+import com.homechores.service.Author;
 import com.homechores.service.ChoreService;
 import com.homechores.service.ListItemService;
 import com.vaadin.flow.component.ClickEvent;
@@ -110,7 +111,7 @@ class ListOrderUiTest extends HomeChoresUiTest {
     @Test
     void theCardListsEveryList_withASwitchOnlyForTheBuiltIns() {
         Member alex = signedIn("Alex");
-        lists.createList(alex.getHomeCode(), alex.getId(), "Gifts");
+        lists.createList(alex.getHomeCode(), Author.member(alex.getId()), "Gifts");
         mainTab("Admin");
 
         assertEquals(4, adminRows().size());
@@ -146,7 +147,7 @@ class ListOrderUiTest extends HomeChoresUiTest {
     @Test
     void switchingAListOff_removesItsTab_andOnBringsItBack() {
         Member alex = signedIn("Alex");
-        lists.add(alex.getHomeCode(), ListKind.GROCERY, alex.getId(), "Milk");
+        lists.add(alex.getHomeCode(), ListKind.GROCERY, Author.member(alex.getId()), "Milk");
         mainTab("Admin");
         $(Switch.class, adminRow("Groceries")).first().setValue(false);
 
@@ -175,11 +176,11 @@ class ListOrderUiTest extends HomeChoresUiTest {
     void withToDoOff_aDeletedCustomListFallsBackToTheFirstList() {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
-        CustomList gifts = lists.createList(code, alex.getId(), "Gifts").orElseThrow();
+        CustomList gifts = lists.createList(code, Author.member(alex.getId()), "Gifts").orElseThrow();
         lists.setListEnabled(code, alex.getId(), ListKind.TODO, false);
         mainTab("Lists");
         kindTabs().setSelectedIndex(2); // Groceries, Dinner, Gifts
-        lists.deleteList(code, gifts.getId(), alex.getId());
+        lists.deleteList(code, gifts.getId(), Author.member(alex.getId()));
         awaitRedraw(() -> kindTabs().getSelectedIndex() == 0);
 
         assertEquals(0, kindTabs().getSelectedIndex());

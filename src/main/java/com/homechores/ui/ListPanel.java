@@ -6,6 +6,7 @@ import com.homechores.domain.ListItem;
 import com.homechores.domain.ListKind;
 import com.homechores.domain.ListReminder;
 import com.homechores.domain.Member;
+import com.homechores.service.Author;
 import com.homechores.service.ChoreService;
 import com.homechores.service.ListItemService;
 import com.homechores.service.ListItemService.ListSlot;
@@ -58,7 +59,10 @@ class ListPanel extends VerticalLayout {
     private final PushReminderService push;
     private final WebPushSender pushSender;
     private final String homeCode;
+    /** Null on the shared device: its lines carry no author (§4.1.3). */
     private final Long memberId;
+    private final Viewer viewer;
+    private final Author author;
 
     private final Div content = new Div();
     private final Div body = new Div();
@@ -88,14 +92,16 @@ class ListPanel extends VerticalLayout {
     private boolean focusOnRender = true;
 
     ListPanel(ListItemService lists, ChoreService service, ListReminderService reminders,
-              PushReminderService push, WebPushSender pushSender, String homeCode, Long memberId) {
+              PushReminderService push, WebPushSender pushSender, Viewer viewer) {
         this.lists = lists;
         this.service = service;
         this.reminders = reminders;
         this.push = push;
         this.pushSender = pushSender;
-        this.homeCode = homeCode;
-        this.memberId = memberId;
+        this.viewer = viewer;
+        this.homeCode = viewer.homeCode();
+        this.memberId = viewer.memberId();
+        this.author = viewer.author();
         setPadding(false);
         setSpacing(false);
         setWidthFull();
@@ -229,7 +235,7 @@ class ListPanel extends VerticalLayout {
         }
         new TextPromptDialog(T.tr("list.custom.new"), T.tr("list.custom.name"), "",
                 InputLimits.LIST_NAME, T.tr("list.custom.create"), name -> {
-                    var made = lists.createList(homeCode, memberId, name);
+                    var made = lists.createList(homeCode, author, name);
                     made.ifPresent(l -> {
                         focusOnRender = true;
                         show(ListKind.TODO, l.getId());
@@ -251,7 +257,7 @@ class ListPanel extends VerticalLayout {
         root.getSubMenu().addItem(T.tr("list.custom.rename"), e ->
                 new TextPromptDialog(T.tr("list.custom.rename"), T.tr("list.custom.name"),
                         list.getName(), InputLimits.LIST_NAME, T.tr("common.save"), text -> {
-                            boolean ok = lists.renameList(homeCode, list.getId(), memberId, text);
+                            boolean ok = lists.renameList(homeCode, list.getId(), author, text);
                             if (ok) {
                                 refresh();
                             }
@@ -273,7 +279,7 @@ class ListPanel extends VerticalLayout {
         d.addClassName("delete-list-dialog");
         d.add(new Paragraph(T.tr("list.custom.deleteConfirm", list.getName())));
         Button delete = new Button(T.tr("common.delete"), e -> {
-            lists.deleteList(homeCode, list.getId(), memberId);
+            lists.deleteList(homeCode, list.getId(), author);
             d.close();
             List<ListSlot> left = lists.visibleSlots(homeCode);
             ListSlot to = left.isEmpty() ? ListSlot.builtIn(ListKind.TODO) : fallback(left);
@@ -425,7 +431,7 @@ class ListPanel extends VerticalLayout {
         field.addValueChangeListener(e -> dinnerDrafts.put(day, e.getValue()));
 
         Runnable save = () -> {
-            lists.setDinner(homeCode, day, memberId, field.getValue());
+            lists.setDinner(homeCode, day, author, field.getValue());
             dinnerDrafts.remove(day);
             refresh();
         };
@@ -464,7 +470,7 @@ class ListPanel extends VerticalLayout {
         input.addValueChangeListener(e -> draft = e.getValue());
 
         Runnable submit = () -> {
-            if (lists.add(homeCode, kind, listId, memberId, input.getValue()).isPresent()) {
+            if (lists.add(homeCode, kind, listId, author, input.getValue()).isPresent()) {
                 draft = "";
                 focusOnRender = true;
                 refresh();
@@ -497,7 +503,7 @@ class ListPanel extends VerticalLayout {
         tick.addValueChangeListener(e -> {
             // Only a person's tap: programmatic values during a rebuild are not decisions.
             if (e.isFromClient()) {
-                lists.setDone(item.getId(), memberId, e.getValue());
+                lists.setDone(item.getId(), author, e.getValue());
                 refresh();
             }
         });
@@ -511,7 +517,8 @@ class ListPanel extends VerticalLayout {
         info.addClassName("grow");
         if (item.isDone()) {
             text.addClassName("done");
-            String who = names.getOrDefault(item.getDoneByMemberId(), "?");
+            String who = item.getDoneByMemberId() == null ? T.tr("list.device")
+                    : names.getOrDefault(item.getDoneByMemberId(), "?");
             Span sub = new Span(T.tr("list.tickedBy", who, T.ago(item.getDoneAt())));
             sub.addClassName("sub");
             info.add(sub);
@@ -526,8 +533,11 @@ class ListPanel extends VerticalLayout {
             if (reminder.isFired()) {
                 when.addClassName("fired");
             }
-            // The badge is the reminder: tapping it changes or cancels it, same as the bell.
-            when.addClickListener(e -> openReminder.run());
+            // The badge is the reminder: tapping it changes or cancels it, same as the bell —
+            // except on the shared device, which has no member to set or answer one as.
+            if (!viewer.isDevice()) {
+                when.addClickListener(e -> openReminder.run());
+            }
             info.add(when);
         }
 
@@ -550,7 +560,7 @@ class ListPanel extends VerticalLayout {
                                     here + 2 < plain.size() ? plain.get(here + 2).getId() : null)));
         }
         // Only on open lines and only when push is configured, matching the chore card's ⏰.
-        if (!item.isDone() && pushSender.isEnabled()) {
+        if (!item.isDone() && pushSender.isEnabled() && !viewer.isDevice()) {
             Button remind = new Button(VaadinIcon.BELL_O.create(), e -> openReminder.run());
             remind.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL,
                     ButtonVariant.LUMO_ICON);
@@ -564,7 +574,7 @@ class ListPanel extends VerticalLayout {
         }
 
         Runnable delete = () -> {
-            lists.delete(item.getId(), memberId);
+            lists.delete(item.getId(), author);
             offerUndo(item);
             refresh();
         };
@@ -627,7 +637,7 @@ class ListPanel extends VerticalLayout {
         if (itemId == null) {
             return;
         }
-        if (!lists.placeItem(homeCode, memberId, itemId, beforeItemId)) {
+        if (!lists.placeItem(homeCode, author, itemId, beforeItemId)) {
             refresh();
         }
     }
@@ -635,7 +645,7 @@ class ListPanel extends VerticalLayout {
     private void editDialog(ListItem item) {
         new TextPromptDialog(T.tr("list.edit.title"), null, item.getText(),
                 InputLimits.LIST_ITEM, T.tr("common.save"), text -> {
-                    boolean ok = lists.rename(item.getId(), memberId, text);
+                    boolean ok = lists.rename(item.getId(), author, text);
                     if (ok) {
                         refresh();
                     }
@@ -655,7 +665,7 @@ class ListPanel extends VerticalLayout {
         n.setDuration(6000);
         Span text = new Span(T.tr("list.deleted", item.getText()));
         Button undo = new Button(T.tr("undo.action"), e -> {
-            lists.add(homeCode, item.getKind(), item.getListId(), memberId, item.getText());
+            lists.add(homeCode, item.getKind(), item.getListId(), author, item.getText());
             n.close();
             refresh();
         });

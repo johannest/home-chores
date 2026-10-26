@@ -185,6 +185,12 @@ public class Member {
         return deviceSecretHash;
     }
 
+    /** Whether some phone has ever signed in as this member. False for a member an admin
+     *  added without a device, and until a joiner's first sign-in issues a secret. */
+    public boolean hasDevice() {
+        return deviceSecretHash != null;
+    }
+
     public void setDeviceSecretHash(String deviceSecretHash) {
         this.deviceSecretHash = deviceSecretHash;
     }

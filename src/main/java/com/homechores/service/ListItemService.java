@@ -12,6 +12,7 @@ import com.homechores.domain.ListReminder;
 import com.homechores.domain.ListReminderRepository;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
+import com.homechores.domain.SharedDeviceRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -70,17 +71,20 @@ public class ListItemService {
     private final HomeRepository homes;
     private final ListReminderRepository reminders;
     private final MemberRepository members;
+    private final SharedDeviceRepository sharedDevices;
     private final ChoreService chores;
     private final HomeState homeState;
 
     public ListItemService(ListItemRepository items, CustomListRepository customLists,
                            HomeRepository homes, ListReminderRepository reminders,
-                           MemberRepository members, ChoreService chores, HomeState homeState) {
+                           MemberRepository members, SharedDeviceRepository sharedDevices,
+                           ChoreService chores, HomeState homeState) {
         this.items = items;
         this.customLists = customLists;
         this.homes = homes;
         this.reminders = reminders;
         this.members = members;
+        this.sharedDevices = sharedDevices;
         this.chores = chores;
         this.homeState = homeState;
     }
@@ -182,12 +186,12 @@ public class ListItemService {
      * phones editing anything else here.
      *
      * @return the slot, or empty when the day is (now) clear
-     * @throws IllegalArgumentException if the member is not in that home
+     * @throws IllegalArgumentException if the author is not in that home
      */
     @Transactional
-    public Optional<ListItem> setDinner(String homeCode, LocalDate day, Long memberId, String text) {
+    public Optional<ListItem> setDinner(String homeCode, LocalDate day, Author author, String text) {
         Objects.requireNonNull(day, "day");
-        memberOf(homeCode, memberId);
+        memberOf(homeCode, author);
         String clean = InputLimits.clip(text == null ? null : text.trim(), InputLimits.LIST_ITEM);
         List<ListItem> existing = items.findByHomeCodeAndKindAndDayBetweenOrderByDayAscIdAsc(
                 homeCode, ListKind.DINNER, day, day);
@@ -213,12 +217,12 @@ public class ListItemService {
         }
         ListItem slot;
         if (existing.isEmpty()) {
-            slot = new ListItem(homeCode, ListKind.DINNER, clean, memberId);
+            slot = new ListItem(homeCode, ListKind.DINNER, clean, author.memberId());
             slot.setDay(day);
         } else {
             slot = existing.get(0);
             slot.setText(clean);
-            slot.setCreatedByMemberId(memberId);
+            slot.setCreatedByMemberId(author.memberId());
             slot.setCreatedAt(Instant.now());
         }
         if (!extras.isEmpty()) {
@@ -233,21 +237,21 @@ public class ListItemService {
      * Adds a line. Blank text adds nothing and returns empty; oversized text is clipped, following
      * the app-wide truncate-don't-reject rule (see {@link InputLimits}).
      *
-     * @throws IllegalArgumentException if the member is not in that home
+     * @throws IllegalArgumentException if the author is not in that home
      */
     @Transactional
-    public Optional<ListItem> add(String homeCode, ListKind kind, Long memberId, String text) {
-        return add(homeCode, kind, null, memberId, text);
+    public Optional<ListItem> add(String homeCode, ListKind kind, Author author, String text) {
+        return add(homeCode, kind, null, author, text);
     }
 
     /**
-     * {@link #add(String, ListKind, Long, String)} onto a custom list when {@code listId} is set;
+     * {@link #add(String, ListKind, Author, String)} onto a custom list when {@code listId} is set;
      * the line is then a to-do whatever {@code kind} says. Returns empty if that list is gone —
      * another phone may have deleted it a moment ago.
      */
     @Transactional
-    public Optional<ListItem> add(String homeCode, ListKind kind, Long listId, Long memberId, String text) {
-        Member member = memberOf(homeCode, memberId);
+    public Optional<ListItem> add(String homeCode, ListKind kind, Long listId, Author author, String text) {
+        memberOf(homeCode, author);
         String clean = InputLimits.clip(text == null ? null : text.trim(), InputLimits.LIST_ITEM);
         if (clean == null || clean.isBlank()) {
             return Optional.empty();
@@ -255,7 +259,7 @@ public class ListItemService {
         if (listId != null && findList(homeCode, listId).isEmpty()) {
             return Optional.empty();
         }
-        ListItem line = new ListItem(homeCode, listId == null ? kind : ListKind.TODO, clean, member.getId());
+        ListItem line = new ListItem(homeCode, listId == null ? kind : ListKind.TODO, clean, author.memberId());
         line.setListId(listId);
         // After the last open line, in a list that may have been arranged: on one nobody ever
         // dragged every line sits at 0 and a new 0 would still sort last by createdAt, but after a
@@ -273,16 +277,16 @@ public class ListItemService {
      * Ticked state, author and reminder are kept: fixing a typo is not a new line.
      *
      * @return false if there is no such line, it is a dinner slot, or the text is blank
-     * @throws IllegalArgumentException if the member is not in the line's home
+     * @throws IllegalArgumentException if the author is not in the line's home
      */
     @Transactional
-    public boolean rename(Long itemId, Long memberId, String text) {
+    public boolean rename(Long itemId, Author author, String text) {
         Optional<ListItem> found = items.findById(itemId);
         if (found.isEmpty()) {
             return false;
         }
         ListItem item = found.get();
-        memberOf(item.getHomeCode(), memberId);
+        memberOf(item.getHomeCode(), author);
         String clean = InputLimits.clip(text == null ? null : text.trim(), InputLimits.LIST_ITEM);
         if (item.getKind() == ListKind.DINNER || clean == null || clean.isBlank()) {
             return false;
@@ -300,21 +304,21 @@ public class ListItemService {
      * ticker and time, so two phones racing to the same line do not flip it back and forth.
      *
      * @return false if there is no such line
-     * @throws IllegalArgumentException if the member is not in the line's home
+     * @throws IllegalArgumentException if the author is not in the line's home
      */
     @Transactional
-    public boolean setDone(Long itemId, Long memberId, boolean done) {
+    public boolean setDone(Long itemId, Author author, boolean done) {
         Optional<ListItem> found = items.findById(itemId);
         if (found.isEmpty()) {
             return false;
         }
         ListItem item = found.get();
-        memberOf(item.getHomeCode(), memberId);
+        memberOf(item.getHomeCode(), author);
         if (done == item.isDone()) {
             return true;
         }
         item.setDoneAt(done ? Instant.now() : null);
-        item.setDoneByMemberId(done ? memberId : null);
+        item.setDoneByMemberId(done ? author.memberId() : null);
         items.save(item);
         if (done) {
             // Doing it settles it: a reminder about a ticked line — pending or already fired and
@@ -329,16 +333,16 @@ public class ListItemService {
      * Removes a line outright. Any member of the home may do this — a shared list is shared.
      *
      * @return false if there is no such line
-     * @throws IllegalArgumentException if the member is not in the line's home
+     * @throws IllegalArgumentException if the author is not in the line's home
      */
     @Transactional
-    public boolean delete(Long itemId, Long memberId) {
+    public boolean delete(Long itemId, Author author) {
         Optional<ListItem> found = items.findById(itemId);
         if (found.isEmpty()) {
             return false;
         }
         ListItem item = found.get();
-        memberOf(item.getHomeCode(), memberId);
+        memberOf(item.getHomeCode(), author);
         reminders.deleteByItemId(item.getId());
         items.delete(item);
         touchAndBump(item.getHomeCode());
@@ -358,11 +362,11 @@ public class ListItemService {
      * nothing — the caller redraws its preview in that case, since no bump is coming.
      *
      * @return true if the order changed
-     * @throws IllegalArgumentException if the member is not in that home
+     * @throws IllegalArgumentException if the author is not in that home
      */
     @Transactional
-    public boolean placeItem(String homeCode, Long memberId, Long itemId, Long beforeItemId) {
-        memberOf(homeCode, memberId);
+    public boolean placeItem(String homeCode, Author author, Long itemId, Long beforeItemId) {
+        memberOf(homeCode, author);
         if (itemId == null || itemId.equals(beforeItemId)) {
             return false; // "before itself" is where it already is, not "to the end"
         }
@@ -466,17 +470,17 @@ public class ListItemService {
      * Makes a new named list. Any member may: lists are shared like everything else in a home.
      *
      * @return the list, or empty for a blank name or once the home has {@link InputLimits#CUSTOM_LISTS}
-     * @throws IllegalArgumentException if the member is not in that home
+     * @throws IllegalArgumentException if the author is not in that home
      */
     @Transactional
-    public Optional<CustomList> createList(String homeCode, Long memberId, String name) {
-        Member member = memberOf(homeCode, memberId);
+    public Optional<CustomList> createList(String homeCode, Author author, String name) {
+        memberOf(homeCode, author);
         String clean = InputLimits.clip(name == null ? null : name.trim(), InputLimits.LIST_NAME);
         if (clean == null || clean.isBlank()
                 || customLists.countByHomeCode(homeCode) >= InputLimits.CUSTOM_LISTS) {
             return Optional.empty();
         }
-        CustomList saved = customLists.save(new CustomList(homeCode, clean, member.getId()));
+        CustomList saved = customLists.save(new CustomList(homeCode, clean, author.memberId()));
         touchAndBump(homeCode);
         return Optional.of(saved);
     }
@@ -485,11 +489,11 @@ public class ListItemService {
      * Renames one of the home's own lists. Blank names change nothing.
      *
      * @return false if the list is gone or the name is blank
-     * @throws IllegalArgumentException if the member is not in that home
+     * @throws IllegalArgumentException if the author is not in that home
      */
     @Transactional
-    public boolean renameList(String homeCode, Long listId, Long memberId, String name) {
-        memberOf(homeCode, memberId);
+    public boolean renameList(String homeCode, Long listId, Author author, String name) {
+        memberOf(homeCode, author);
         Optional<CustomList> found = findList(homeCode, listId);
         String clean = InputLimits.clip(name == null ? null : name.trim(), InputLimits.LIST_NAME);
         if (found.isEmpty() || clean == null || clean.isBlank()) {
@@ -508,11 +512,11 @@ public class ListItemService {
      * no undo; the UI asks first.
      *
      * @return false if the list is already gone
-     * @throws IllegalArgumentException if the member is not in that home
+     * @throws IllegalArgumentException if the author is not in that home
      */
     @Transactional
-    public boolean deleteList(String homeCode, Long listId, Long memberId) {
-        memberOf(homeCode, memberId);
+    public boolean deleteList(String homeCode, Long listId, Author author) {
+        memberOf(homeCode, author);
         Optional<CustomList> found = findList(homeCode, listId);
         if (found.isEmpty()) {
             return false;
@@ -679,8 +683,8 @@ public class ListItemService {
     }
 
     private Member adminOf(String homeCode, Long memberId) {
-        Member member = memberOf(homeCode, memberId);
-        if (!member.isAdmin()) {
+        Member member = memberId == null ? null : memberOf(homeCode, Author.member(memberId));
+        if (member == null || !member.isAdmin()) {
             throw new IllegalArgumentException("Only an admin changes the home's lists");
         }
         return member;
@@ -692,9 +696,21 @@ public class ListItemService {
         purgeStaleDone(Instant.now());
     }
 
-    /** The member, if they belong to the home — the same line ChoreReminderService holds. */
-    private Member memberOf(String homeCode, Long memberId) {
-        Member member = memberId == null ? null : members.findById(memberId).orElse(null);
+    /**
+     * The author, who must belong to the home: a member of it, or its shared device — which
+     * writes lines with no name on them, so the member is null then. Both are read back from the
+     * database rather than trusted from the caller, so a device that was unpaired a moment ago,
+     * or one of another home, writes nothing.
+     */
+    private Member memberOf(String homeCode, Author author) {
+        if (author.isDevice()) {
+            if (sharedDevices.findById(author.sharedDeviceId())
+                    .filter(d -> d.getHomeCode().equals(homeCode)).isEmpty()) {
+                throw new IllegalArgumentException("Device is not paired to this home");
+            }
+            return null;
+        }
+        Member member = members.findById(author.memberId()).orElse(null);
         if (member == null || !member.getHomeCode().equals(homeCode)) {
             throw new IllegalArgumentException("Member does not belong to this home");
         }

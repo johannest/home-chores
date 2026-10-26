@@ -13,6 +13,7 @@ import com.homechores.domain.CompletionRepository;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
+import com.homechores.service.Author;
 import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
@@ -103,6 +104,7 @@ class SchemaEvolutionTest {
     @Autowired MemberRepository members;
     @Autowired CompletionRepository completions;
     @Autowired com.homechores.service.ListItemService lists;
+    @Autowired com.homechores.service.SharedDeviceService sharedDevices;
     @Autowired EntityManager em;
 
     private static final String CODE = "OLDHOME";
@@ -202,10 +204,11 @@ class SchemaEvolutionTest {
         assertTrue(service.pendingOtherHelp(CODE).isEmpty());
         assertTrue(service.groupsOf(CODE).isEmpty());
         assertTrue(lists.openItems(CODE, com.homechores.domain.ListKind.GROCERY).isEmpty());
+        assertTrue(sharedDevices.devicesOf(CODE).isEmpty());
         // ...and writable: the old family can start a shopping list right away.
         assertTrue(lists.add(CODE, com.homechores.domain.ListKind.GROCERY,
-                byName("Alex").getId(), "Milk").isPresent());
-        assertTrue(lists.setDinner(CODE, java.time.LocalDate.now(), byName("Alex").getId(), "Pasta")
+                Author.member(byName("Alex").getId()), "Milk").isPresent());
+        assertTrue(lists.setDinner(CODE, java.time.LocalDate.now(), Author.member(byName("Alex").getId()), "Pasta")
                 .isPresent(), "and plan a dinner");
     }
 
@@ -253,7 +256,7 @@ class SchemaEvolutionTest {
                 "writing order, as that list was always shown");
         assertTrue(lines.stream().allMatch(l -> l.getSortOrder() == 0), "the column default");
 
-        assertTrue(lists.placeItem(CODE, alex.getId(), lines.get(2).getId(), lines.get(0).getId()));
+        assertTrue(lists.placeItem(CODE, Author.member(alex.getId()), lines.get(2).getId(), lines.get(0).getId()));
         List<ListItem> after = lists.openItems(CODE, ListKind.GROCERY);
         assertEquals(List.of("Eggs", "Milk", "Bread"), after.stream().map(ListItem::getText).toList());
         for (int i = 0; i < after.size(); i++) {

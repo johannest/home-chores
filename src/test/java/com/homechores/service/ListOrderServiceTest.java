@@ -42,8 +42,8 @@ class ListOrderServiceTest {
     void byDefault_builtInsFirst_thenOwnListsInTheOrderMade() {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
-        CustomList a = lists.createList(code, alex.getId(), "A").orElseThrow();
-        CustomList b = lists.createList(code, alex.getId(), "B").orElseThrow();
+        CustomList a = lists.createList(code, Author.member(alex.getId()), "A").orElseThrow();
+        CustomList b = lists.createList(code, Author.member(alex.getId()), "B").orElseThrow();
 
         assertEquals(List.of("GROCERY", "TODO", "DINNER", "L:" + a.getId(), "L:" + b.getId()),
                 tokens(lists.listSlots(code)));
@@ -53,7 +53,7 @@ class ListOrderServiceTest {
     void moveList_swapsNeighbours_andStopsAtTheEnds() {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
-        CustomList a = lists.createList(code, alex.getId(), "A").orElseThrow();
+        CustomList a = lists.createList(code, Author.member(alex.getId()), "A").orElseThrow();
 
         assertTrue(lists.moveList(code, alex.getId(), "L:" + a.getId(), -1));
         assertTrue(lists.moveList(code, alex.getId(), "L:" + a.getId(), -1));
@@ -69,18 +69,18 @@ class ListOrderServiceTest {
     void theStoredOrder_healsItself() {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
-        CustomList a = lists.createList(code, alex.getId(), "A").orElseThrow();
+        CustomList a = lists.createList(code, Author.member(alex.getId()), "A").orElseThrow();
         Home home = homes.findById(code).orElseThrow();
         // Hand-written: a deleted list, garbage, a missing built-in (GROCERY) and no mention of A.
         home.setListOrder("L:424242,DINNER,nonsense,TODO");
         homes.save(home);
 
-        CustomList b = lists.createList(code, alex.getId(), "B").orElseThrow();
+        CustomList b = lists.createList(code, Author.member(alex.getId()), "B").orElseThrow();
         assertEquals(List.of("GROCERY", "DINNER", "TODO", "L:" + a.getId(), "L:" + b.getId()),
                 tokens(lists.listSlots(code)),
                 "dead tokens drop, a built-in goes back to its default place, own lists go last");
 
-        lists.deleteList(code, a.getId(), alex.getId());
+        lists.deleteList(code, a.getId(), Author.member(alex.getId()));
         assertEquals(List.of("GROCERY", "DINNER", "TODO", "L:" + b.getId()), tokens(lists.listSlots(code)));
     }
 
@@ -88,8 +88,8 @@ class ListOrderServiceTest {
     void switchingABuiltInOff_hidesIt_cancelsItsReminders_andKeepsItsLines() {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
-        ListItem milk = lists.add(code, ListKind.GROCERY, alex.getId(), "Milk").orElseThrow();
-        ListItem call = lists.add(code, ListKind.TODO, alex.getId(), "Call").orElseThrow();
+        ListItem milk = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk").orElseThrow();
+        ListItem call = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call").orElseThrow();
         reminders.schedule(milk.getId(), alex.getId(), Instant.now().plus(Duration.ofHours(2)), Locale.ENGLISH);
         reminders.schedule(call.getId(), alex.getId(), Instant.now().plus(Duration.ofHours(2)), Locale.ENGLISH);
 
@@ -123,7 +123,7 @@ class ListOrderServiceTest {
     void orderAndHiddenLists_surviveABackup_withListIdsRemapped() {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
-        CustomList a = lists.createList(code, alex.getId(), "Gifts").orElseThrow();
+        CustomList a = lists.createList(code, Author.member(alex.getId()), "Gifts").orElseThrow();
         lists.moveList(code, alex.getId(), "L:" + a.getId(), -1);
         lists.moveList(code, alex.getId(), "L:" + a.getId(), -1);
         lists.moveList(code, alex.getId(), "L:" + a.getId(), -1); // Gifts first

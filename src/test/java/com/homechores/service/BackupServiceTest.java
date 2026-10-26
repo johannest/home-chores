@@ -35,9 +35,9 @@ class BackupServiceTest {
     void customLists_surviveTheRoundTrip_withTheirLines() {
         Member alex = chores.createHome("Listful", "Alex");
         String code = alex.getHomeCode();
-        var gifts = lists.createList(code, alex.getId(), "Gifts").orElseThrow();
-        lists.add(code, ListKind.TODO, gifts.getId(), alex.getId(), "Book");
-        lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber");
+        var gifts = lists.createList(code, Author.member(alex.getId()), "Gifts").orElseThrow();
+        lists.add(code, ListKind.TODO, gifts.getId(), Author.member(alex.getId()), "Book");
+        lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call the plumber");
 
         String json = backup.export(code);
         assertTrue(json.contains("\"customLists\""));
@@ -65,12 +65,12 @@ class BackupServiceTest {
         Member alex = chores.createHome("Listful", "Alex");
         String code = alex.getHomeCode();
         Member sam = chores.joinHome(code, "Sam").orElseThrow();
-        lists.add(code, ListKind.GROCERY, alex.getId(), "Milk");
-        ListItem bread = lists.add(code, ListKind.GROCERY, sam.getId(), "Bread").orElseThrow();
-        lists.setDone(bread.getId(), sam.getId(), true);
-        lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber");
+        lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk");
+        ListItem bread = lists.add(code, ListKind.GROCERY, Author.member(sam.getId()), "Bread").orElseThrow();
+        lists.setDone(bread.getId(), Author.member(sam.getId()), true);
+        lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call the plumber");
         java.time.LocalDate today = java.time.LocalDate.now();
-        lists.setDinner(code, today, sam.getId(), "Pasta");
+        lists.setDinner(code, today, Author.member(sam.getId()), "Pasta");
 
         String json = backup.export(code);
         assertTrue(json.contains("\"listItems\""));
@@ -272,10 +272,10 @@ class BackupServiceTest {
     void anArrangedList_survivesTheRoundTrip_andAnOlderFileKeepsWritingOrder() {
         Member alex = chores.createHome("Listful", "Alex");
         String code = alex.getHomeCode();
-        ListItem milk = lists.add(code, ListKind.GROCERY, alex.getId(), "Milk").orElseThrow();
-        lists.add(code, ListKind.GROCERY, alex.getId(), "Bread");
-        ListItem eggs = lists.add(code, ListKind.GROCERY, alex.getId(), "Eggs").orElseThrow();
-        assertTrue(lists.placeItem(code, alex.getId(), eggs.getId(), milk.getId()));
+        ListItem milk = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk").orElseThrow();
+        lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Bread");
+        ListItem eggs = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Eggs").orElseThrow();
+        assertTrue(lists.placeItem(code, Author.member(alex.getId()), eggs.getId(), milk.getId()));
 
         String json = backup.export(code);
         assertTrue(json.contains("\"sortOrder\""));

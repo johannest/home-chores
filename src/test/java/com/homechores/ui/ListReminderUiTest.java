@@ -10,6 +10,7 @@ import com.homechores.domain.ListKind;
 import com.homechores.domain.ListReminder;
 import com.homechores.domain.ListReminderRepository;
 import com.homechores.domain.Member;
+import com.homechores.service.Author;
 import com.homechores.service.ChoreService;
 import com.homechores.service.ListItemService;
 import com.homechores.service.ListReminderService;
@@ -101,11 +102,11 @@ class ListReminderUiTest extends HomeChoresUiTest {
     void everyOpenLineCarriesABell_doneLinesAndDinnerDoNot() {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
-        lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber");
-        lists.add(code, ListKind.TODO, alex.getId(), "Fix the fence");
-        ListItem done = lists.add(code, ListKind.TODO, alex.getId(), "Buy paint").orElseThrow();
-        lists.setDone(done.getId(), alex.getId(), true);
-        lists.add(code, ListKind.GROCERY, alex.getId(), "Milk");
+        lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call the plumber");
+        lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Fix the fence");
+        ListItem done = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Buy paint").orElseThrow();
+        lists.setDone(done.getId(), Author.member(alex.getId()), true);
+        lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk");
 
         openLists(1); // To-do
         assertEquals(3, rows().size(), "two open, one ticked");
@@ -122,7 +123,7 @@ class ListReminderUiTest extends HomeChoresUiTest {
     void withoutVapidKeys_theBellIsNotOffered() {
         when(sender.isEnabled()).thenReturn(false);
         Member alex = signedIn("Alex");
-        lists.add(alex.getHomeCode(), ListKind.TODO, alex.getId(), "Call the plumber");
+        lists.add(alex.getHomeCode(), ListKind.TODO, Author.member(alex.getId()), "Call the plumber");
         openLists(1);
         assertTrue(bells().isEmpty(), "a reminder that cannot be delivered should not be offered");
     }
@@ -130,7 +131,7 @@ class ListReminderUiTest extends HomeChoresUiTest {
     @Test
     void tappingTheBell_offersTheQuickOptionsAndAPicker() {
         Member alex = signedIn("Alex");
-        lists.add(alex.getHomeCode(), ListKind.TODO, alex.getId(), "Call the plumber");
+        lists.add(alex.getHomeCode(), ListKind.TODO, Author.member(alex.getId()), "Call the plumber");
         openLists(1);
 
         test(bells().get(0)).click();
@@ -147,8 +148,8 @@ class ListReminderUiTest extends HomeChoresUiTest {
     void anArmedReminder_badgesItsLine_andOnlyThatOne() {
         Member alex = service.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
-        ListItem plumber = lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber").orElseThrow();
-        lists.add(code, ListKind.TODO, alex.getId(), "Fix the fence");
+        ListItem plumber = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call the plumber").orElseThrow();
+        lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Fix the fence");
         reminders.schedule(plumber.getId(), alex.getId(), Instant.now().plus(Duration.ofHours(2)),
                 Locale.ENGLISH);
         SessionContext.signIn(alex.getId(), code);
@@ -168,7 +169,7 @@ class ListReminderUiTest extends HomeChoresUiTest {
     void aFiredReminder_opensTheDialogOnArrival_andDismissClearsIt() {
         Member alex = service.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
-        ListItem plumber = lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber").orElseThrow();
+        ListItem plumber = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call the plumber").orElseThrow();
         reminders.schedule(plumber.getId(), alex.getId(), Instant.now().plus(Duration.ofHours(2)),
                 Locale.ENGLISH);
         ListReminder r = repo.findByItemId(plumber.getId()).orElseThrow();
@@ -195,7 +196,7 @@ class ListReminderUiTest extends HomeChoresUiTest {
     @Test
     void noFiredReminder_noDialog() {
         Member alex = signedIn("Alex");
-        lists.add(alex.getHomeCode(), ListKind.TODO, alex.getId(), "Call the plumber");
+        lists.add(alex.getHomeCode(), ListKind.TODO, Author.member(alex.getId()), "Call the plumber");
         assertTrue(dialogs().isEmpty());
     }
 }

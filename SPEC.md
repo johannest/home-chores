@@ -11,6 +11,9 @@ Terms in **bold** map to concepts in the code.
 - **Member** — a person in a home. Identified per device (a phone = a member): the member
   id and a per-device **secret** are kept in the browser's **local storage** and restored
   into each new session; the secret is what proves the device is that member.
+- **Shared device** — a tablet or phone the whole family uses (the one in the kitchen). Not
+  a member: it has its own secret, shows the board for nobody in particular, and whoever did
+  a chore picks their name when tapping it. Paired with the admin PIN; never an admin.
 - **Join / rejoin request** — a device asking an admin to let it in: either a first-time
   **join** (default) or an existing member **signing back in** after losing its stored
   identity (browsing data cleared). Held as `PENDING` / `APPROVED` / `REJECTED` with a
@@ -63,6 +66,8 @@ Terms in **bold** map to concepts in the code.
 | Approve / reject pending completions | — | ✅ |
 | Delete / correct any completion | — | ✅ |
 | Rename / remove members, promote / demote admins | — | ✅ |
+| Add a member who has no phone of their own | — | ✅ |
+| Pair a **shared family device** (with the admin PIN); unpair one | — | ✅ |
 | Ask to sign back in as an existing member | ✅ | ✅ |
 | Approve / reject a join or rejoin request | — | ✅ |
 | Change home settings (approval, rejoin gate, division style, booking hold, daily target, other help, PIN, name) | — | ✅ |
@@ -298,6 +303,19 @@ hold whatever screen the call came from.
   server let my session go — I see the same full-screen "Getting your chores…" card the app shows
   while it starts, instead of a 4px bar hidden under the camera island, so I know to wait rather
   than tap again or give up.
+- **US-61 A child without a phone is still on the board.** As an admin, I can add a family
+  member who has no phone of their own from the Members card — name them and accept the user
+  agreement on their behalf — so they have a leaderboard chip, a place in the rotation, credits
+  and statistics like everyone else. I log their chores for them (US-47), and the card shows
+  "no phone yet" under their name until the day they get one and sign in with "I'm already a
+  member" and the nickname I gave them.
+- **US-62 The kitchen tablet.** As a family, we keep one device on the counter that shows the
+  board for all of us: whose turn it is, who has booked what, who has a streak going. When one
+  of us does a chore — the child without a phone included — we tap the card on it and tap our
+  own face, and that is the confirmation: it counts for that person, with their locks checked
+  and their celebration shown. An admin pairs the device once with the home code and the admin
+  PIN (signing in as themselves would sign their own phone out), and can unpair it from the
+  Admin tab. The device is never an admin and has no reminders of its own.
 
 ### Phase 5
 
@@ -357,10 +375,35 @@ hold whatever screen the call came from.
   number, so it is the secret — not the id — that proves the device is that member: a
   hand-edited `localStorage` value cannot impersonate anyone. Issuing a new secret on each
   sign-in also cuts any previous device off, so an approved rejoin revokes a lost phone. A
-  stale or unverifiable entry (removed member, restored home, wrong secret) is cleared and
-  the user sent to the landing page. While the browser is being asked, a full-screen
+  stale or unverifiable entry is cleared and the user left on the landing page **with the
+  reason** (`DeviceIdentity.RestoreFailure`, shown in the card's `.auth-notice` with the Join
+  tab in front, where "sign me back in" is): `SECRET_REPLACED` — another browser signed in as
+  this member since, the usual cause when one phone holds the app both installed and in
+  Safari or a chat's in-app browser, each with its own local storage, so they revoke each
+  other in turns; `GONE` — the member is no longer in that home; `HOME_GONE`; `UNREADABLE` —
+  the pre-secret two-part format or a tampered value, which until now read as "never joined".
+  Nothing stored is the ordinary first visit and is not a failure. Each rejection leaves one
+  `INFO` line (`LandingView`): the kind and id, the reason, how the browser is running
+  (`DeviceIdentity.probeContext`: installed `standalone` or plain `browser`, and whether local
+  storage is writable at all) and a short label from the User-Agent (device, OS version,
+  browser and major version, `webview` for an iOS page outside Safari proper) — never a
+  name or a home code; §4.15's notice names this line. The browser's answer to the probe is
+  logged only if it is one of the four the probe can give (`DeviceIdentity.knownContext`,
+  otherwise `unknown`), since the browser writes it, and a visitor leaves at most 5 such
+  lines an hour (`MAX_REJECTION_LINES_PER_HOUR`): a real phone is refused once and then has
+  nothing stored, while a page reloaded in a loop must not fill the log. While the browser is being asked, a full-screen
   overlay covers the landing card, so a lookup that never answers leaves a working page.
 - **Leave**, self-removal and backup restore all clear the stored identity.
+- **A member without a device** (`ChoreService.addMemberWithoutDevice(homeCode, name,
+  adminId)`): an admin adds a member who has no phone from the Admin tab's Members card. The
+  member is an ordinary row with `deviceSecretHash == null` (`Member.hasDevice()` is false, and
+  the card reads "no phone yet"), so nothing can sign in as them until a phone goes through
+  "I'm already a member" by nickname (§4.1.1), which is why the service refuses a nickname
+  already in use in the home (case-insensitive, as that match is) and a blank one. The service
+  re-checks that the caller is an admin of that home. The dialog carries the same user-agreement
+  checkbox as the create and join forms — the admin accepts it on the child's behalf — so
+  `termsAcceptedAt` is stamped at creation like every other member's. Their chores are logged
+  through §4.3.3.
 
 #### 4.1.1 Joining and signing back in (admin-gated)
 Both doors into a home are gated by an admin by default, so knowing the home code is never
@@ -454,6 +497,71 @@ and the next interaction signs the phone straight back in.
   landing page's own copy of the card. An ordinary redraw — tens of milliseconds plus a round
   trip — never reaches it. While the connection itself is down the card yields to Vaadin's
   "Connection lost" message, and the first-stage bar is moved below `env(safe-area-inset-top)`.
+
+#### 4.1.3 The shared family device
+A member is one phone: signing a member in on a second device issues a new secret and cuts
+the first one off (§4.1). So a device the whole family uses — the tablet in the kitchen — is
+its own kind of identity, a **`SharedDevice`**, with a home, a name and a secret hash like a
+member's but no member of its own.
+
+- **Pairing** (`SharedDeviceService.pair(code, pin, name, defaultName)`), from "Set up a shared
+  family device" under the landing page's Join form: the home code and the **admin PIN** (with
+  no code typed yet, the link asks for one — "Enter your home code first, then pair the
+  device", `landing.device.needCode` — rather than borrowing sign-back-in's words). The PIN is
+  the admin credential, so pairing is the admin's consent and there is no separate gate or
+  setting; a wrong PIN counts against the same five-tries, fifteen-minute lock as claiming
+  admin and the rejoin bypass, and the landing page allows 10 pairing attempts per hour per
+  connection (`LandingView.MAX_PAIRINGS_PER_HOUR`). A home may hold at most
+  `SharedDevice.MAX_PER_HOME` = 5 devices. The browser stores `deviceId|homeCode|secret` under
+  `flashchores.device` (never alongside a member identity — writing one clears the other), the
+  landing page restores it the way it restores a member, and the server keeps only the SHA-256.
+  The device's idle lifetime is a member's (§4.1.2); expiry reloads back onto the same board.
+- **Unpairing**, from the Admin tab's **Shared devices** card (name, paired when, last seen):
+  `unpair(deviceId, adminId)` re-checks the caller is an admin of the device's home, deletes the
+  row — so the stored secret stops working at once — and bumps the home, which shows an open
+  board on that device out to the landing page, identity dropped. A device is not part of a
+  backup (it is a fact about a browser, not about the family) and survives a restore; deleting
+  the home deletes its devices.
+- **The board belongs to nobody.** `taskViews(homeCode, null)` evaluates only the locks about
+  *time* — season, interval, availability hours (in the device's own time zone) — and leaves
+  the locks about *who* (rotation, booking, streak) to the tap. The cards still carry the
+  badges those would have produced for someone: "Sam today", "🔖 Sam", "Sam ×3 🔒", so the
+  counter-top screen shows the family's state rather than one member's. No daily-target
+  ring (it is one person's), no ⏰ chips, no reminders, no "Admin?", no Leave; the header
+  says "📺 Kitchen tablet · shared device" as dark text on a near-white pill (`.device-badge`),
+  since white on the header gradient measures 2.6–2.9:1 (UX review row B) and this is the one
+  line saying whose board it is.
+- **The pick is the confirmation.** Tapping a card opens "Who did it?" with the family as
+  avatar chips; tapping a chip is the "yes". The dialog is named by its question and chore
+  (`aria-label`, shared with the member's "Did you do it?" through one `askDialog`), each chip's
+  accessible name is the member's name once (the face is `aria-hidden`), and a long name ends
+  in an ellipsis inside the chip rather than pushing the dialog sideways at 360px. `SharedDeviceService.complete(deviceId, taskId,
+  memberId, zone)` refuses unless the device, the member and the chore are in one home, then
+  runs `ChoreService.complete` for that member, so every lock in §4.3 applies to *them*: a
+  refusal names them ("Sam has done … 3× in a row", `blocked.named.*`), and a success is
+  their celebration, feedback and credits. The home's confirm-completion setting does not
+  apply here — there is nobody to skip the question for. The chip ids are captured in
+  server-side lambdas, never read back from the client.
+- **Booking** asks who ("Who will do it?") through `book(deviceId, taskId, memberId)`; a
+  booking on the device's board is anyone's to clear (`cancelBooking(deviceId, taskId)`), since
+  the device is the household's and a booking left behind by someone who went out would
+  otherwise block the kitchen. **Other help** asks who too (`logOtherHelp`) and waits for an
+  admin exactly as that member's own entry would.
+- **Undo**: the device has no member to ask `undoableCompletion` for, so the board remembers
+  the last completion it logged (`ChoresPanel.FromDevice`) and shows "Sam just did … · Undo"
+  for the usual `UNDO_WINDOW`, taking it back through `undoCompletion(id, memberId)` for that
+  member. The row is looked up through the same query, so one an admin has since unmarked
+  is gone here too.
+- **Lists**: lines added or ticked from the device carry no author (`createdByMemberId` /
+  `doneByMemberId` null; a ticked line reads "shared device"). Every list write takes an
+  **author** (`Author`: a member id or a shared-device id, exactly one), and `ListItemService`
+  reads either back from the database and refuses it unless it belongs to the home of the row
+  it touches: a device of another home, or one unpaired a moment ago while the home keeps
+  another, writes nothing. The session proves the device's secret; which home it is in is the
+  database's to say. The admin-only list settings still need an admin. No list reminders can
+  be set or answered from it.
+- **Stats**: "Whose statistics?" picks one member and shows their personal statistics — the
+  one place a member without a phone of their own sees their numbers.
 
 ### 4.2 Chores (CRUD — admin)
 - Create: name (required) + emoji (optional, default ✅) + **repeat every N days**
@@ -1228,7 +1336,11 @@ scales up, not the other way round.
   AWStats-style aggregate statistics) for availability and abuse/attack detection. The
   notice says so plainly, and says that those records are infrastructure-level, short-lived
   and never correlated with a member, a home or a home code — otherwise the "what we do NOT
-  store" claim reads as more absolute than the deployment can honour.
+  store" claim reads as more absolute than the deployment can honour. The one line the app
+  itself writes about a browser — a refused stored sign-in (§4.1): the member's or shared
+  device's id, the reason, how the browser runs and a short User-Agent label, never a name, a
+  home code or an IP address — is named in the notice as a narrow exception, with the log's
+  26-week retention (`logback-spring.xml`, `maxHistory`).
 - **Both reminder kinds are described.** The daily "nothing logged yet" reminder stores a
   time, a timezone and a push subscription; a per-chore snooze (§4.13b) stores which chore and
   when, until it fires. Each has its own bullet under "What data we store", each says when the
@@ -1388,10 +1500,54 @@ scales up, not the other way round.
   only the member's own row. `ChoreReminderServiceTest`: one member with more devices than the
   sweep cap is sent to no more than the cap.
 - **Admin actions re-checked at action time** (`RejoinServiceTest`, `ChoreServiceTest`,
-  `LogForMemberTest`, `CreditServiceTest`, `BackupServiceTest`): a member of the home and an
-  admin of another home can neither decide a request, approve or reject, log a chore for
-  someone, redeem, nor restore; redeeming for a member who is not in the home is refused too.
+  `LogForMemberTest`, `CreditServiceTest`, `BackupServiceTest`, `AddMemberTest`): a member of
+  the home and an admin of another home can neither decide a request, approve or reject, log a
+  chore for someone, redeem, restore, nor add a member without a device; redeeming for a member
+  who is not in the home is refused too.
   `HomeUiTest`: a demoted admin's already-open rename dialog saves nothing.
+- **A member without a device** (`AddMemberTest`): added trimmed, non-admin, with no device and
+  the agreement stamped, and an admin can log a chore for them; a blank or already-taken
+  nickname (case-insensitive) is refused; and the sign-back-in by nickname with the PIN later
+  gives them a device. `HomeUiTest`: the Members card's dialog adds them only once the agreement
+  is ticked, and then shows "no phone yet" under their name; a name of spaces keeps Add
+  disabled, and a taken one is refused naming it.
+- **The shared device** (`SharedDeviceTest`): pairs with the code and PIN and the secret proves
+  it (a wrong or blank one does not); a wrong PIN, an unknown home and a sixth device are
+  refused, and a blank name takes the default; wrong pairing guesses lock the PIN for claiming
+  too; only an admin of that home unpairs, after which the secret is dead; a completion from the
+  device counts for the member picked with their streak lock enforced; a member, chore or device
+  from another home is refused for completing, booking, clearing a booking and other help; it
+  books for the member picked and clears anyone's booking; other help from it waits for an
+  admin; the device's board locks on time only and still names whose turn and whose booking;
+  list lines from it have no author, nor may the device change the admin's list settings; another
+  home's tablet can neither tick, rename nor delete this home's lines, nor this home's tablet add
+  to theirs, and an unpaired device writes nothing even while its home keeps another; and devices are absent from a backup, survive a
+  restore and go with the home. `SharedDeviceUiTest`: three tabs, the header badge, no Admin?,
+  no Leave, no daily ring; tapping a card asks who, cancelling records nothing, a chip counts for
+  that member and the undo strip names them; under enforced rotation the card is not locked and
+  a wrong pick is refused in their name (the toast names Milla, not "you") and the right one
+  puts Alex on the undo strip; "I'll do it" asks for whom, and a booking — the picked member's or
+  one made on a phone — is cleared from the device; other help asks who, refuses a blank entry,
+  and waits for an admin in that member's name; the Stats tab picks whose; a list line from the
+  device has no author and no bell; an unpaired device is shown out. `HomeUiTest`: pairing with
+  the PIN signs the browser in as the device and a wrong PIN marks the field; with no home code
+  it asks for one in pairing's own words; a sixth device is refused with where to unpair one;
+  the Admin tab lists the devices and unpairing asks first (cancel keeps it).
+  `PairingRateLimitUiTest` (limiter on): the eleventh pairing attempt in an hour is refused
+  before the PIN is tried, even with the right PIN. `SchemaEvolutionTest`: the table
+  is created empty on an upgrade.
+- **A rejected stored identity is explained** (`DeviceIdentityTest`): a current value reads as
+  an identity, nothing stored is not a failure, and the pre-secret pair, a missing code or
+  secret and a non-numeric id read as unreadable; the browser label names the device, OS
+  version, browser and major version (and `webview` for an iOS page without the Safari
+  token), never the whole string. `HomeUiTest`: the current secret signs straight in with the
+  admin's lifetime; a replaced secret, a removed member and an older-version value stay on
+  the landing page signed out, with the matching notice and the Join tab in front; nothing
+  stored shows the plain card with Create in front; an unknown shared device is told it is
+  unpaired; a paired device's own secret signs it in as nobody, while its real id with a
+  made-up secret, or its real secret with another home's code, signs nothing in.
+  `DeviceIdentityTest`: only the probe's own four answers reach the log — a forged line or a
+  megabyte of text reads `unknown`.
 - **Stats render cost** (`StatsRenderCostTest`, Hibernate statistics): under the week lens a
   two-year-old completion is counted (all-time total, feedback per chore) but not loaded; the
   all-time lens loads it; the 💎 card loads the headline window and sums the rest.

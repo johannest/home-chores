@@ -81,10 +81,18 @@ public class PrivacyView extends VerticalLayout {
         // (server.tomcat.accesslog.enabled=false, no request-level logging), but the
         // hosting platform keeps the ordinary web-server records any site needs to stay
         // up and secure. Saying so here keeps the "what we do NOT store" claim above true
-        // rather than absolute.
+        // rather than absolute. The one line the app does write about a browser — a refused
+        // stored sign-in (LandingView.explain, §4.1) — is named too, with what it holds and
+        // how long the weekly log files are kept (logback-spring.xml, maxHistory 26).
         card.add(section("Server logs and hosting statistics",
                 "FlashChores itself stores no client information such as IP addresses, and it "
-                        + "keeps no request logs of its own. The hosting service the site runs on "
+                        + "keeps no request logs of its own. One narrow exception: when a "
+                        + "device's saved sign-in is refused, the app's log keeps one line with "
+                        + "the member's or shared device's number, the reason, and the kind of "
+                        + "browser (for example \"iPhone iOS 18, Safari 18\", and whether the app "
+                        + "was installed on the home screen), so that a phone which keeps losing "
+                        + "its sign-in can be helped. That line holds no name, home code or IP "
+                        + "address, and the log is deleted after 26 weeks. The hosting service the site runs on "
                         + "does keep the normal web-server records that any website needs — access "
                         + "logs and aggregate visitor statistics (AWStats-style: hit counts, "
                         + "referrers, browsers, error rates) — which are used only to keep the site "

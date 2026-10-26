@@ -23,6 +23,7 @@ import com.homechores.domain.RejoinRequest;
 import com.homechores.domain.RejoinRequestRepository;
 import com.homechores.domain.RejoinStatus;
 import com.homechores.domain.Seasons;
+import com.homechores.domain.SharedDeviceRepository;
 import com.homechores.domain.TimeWindows;
 import com.homechores.i18n.Translations;
 import java.security.SecureRandom;
@@ -85,6 +86,7 @@ public class ChoreService {
     private final ListItemRepository listItems;
     private final CustomListRepository customLists;
     private final ListReminderRepository listReminders;
+    private final SharedDeviceRepository sharedDevices;
     private final HomeState homeState;
     private final CreditService creditService;
     private final Translations translations;
@@ -96,7 +98,8 @@ public class ChoreService {
                         ChoreGroupRepository groups,
                         ChoreReminderRepository choreReminders, ListItemRepository listItems,
                         CustomListRepository customLists,
-                        ListReminderRepository listReminders, HomeState homeState,
+                        ListReminderRepository listReminders,
+                        SharedDeviceRepository sharedDevices, HomeState homeState,
                         CreditService creditService, Translations translations) {
         this.homes = homes;
         this.members = members;
@@ -109,6 +112,7 @@ public class ChoreService {
         this.listItems = listItems;
         this.customLists = customLists;
         this.listReminders = listReminders;
+        this.sharedDevices = sharedDevices;
         this.homeState = homeState;
         this.creditService = creditService;
         this.translations = translations;
@@ -291,13 +295,20 @@ public class ChoreService {
         }
         return members.findById(memberId)
                 .map(Member::getDeviceSecretHash)
-                .map(hash -> java.security.MessageDigest.isEqual(
-                        hash.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                        sha256(secret).getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .map(hash -> secretMatches(hash, secret))
                 .orElse(false);
     }
 
-    private static String sha256(String value) {
+    /** Whether {@code secret} is the one whose SHA-256 is {@code hash} — in constant time, so
+     *  how long a wrong guess takes says nothing about how close it was. Shared with the
+     *  shared device's secret (§4.1.3). */
+    static boolean secretMatches(String hash, String secret) {
+        return hash != null && java.security.MessageDigest.isEqual(
+                hash.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                sha256(secret).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    static String sha256(String value) {
         try {
             byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
                     .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -342,6 +353,7 @@ public class ChoreService {
         listReminders.deleteByHomeCode(norm);
         listItems.deleteByHomeCode(norm);
         customLists.deleteByHomeCode(norm);
+        sharedDevices.deleteByHomeCode(norm);
         members.deleteByHomeCode(norm);
         homes.deleteById(norm);
         homeState.bump(norm);
@@ -566,6 +578,32 @@ public class ChoreService {
     private Member adminOf(String homeCode, Long adminId) {
         return members.findAdmin(homeCode, adminId)
                 .orElseThrow(() -> new IllegalArgumentException("Not an admin of this home"));
+    }
+
+    /**
+     * An admin adding a member who has no phone of their own — a child, usually. The member
+     * exists like any other (leaderboard, rotation, credits, backups) but holds no device
+     * secret, so nothing can sign in as them until they get a phone and use "I'm already a
+     * member" by nickname, which is why the nickname must be unique in the home: that flow
+     * matches on it. Empty for a blank or already-taken name. The admin is the adult acting
+     * for them, and the dialog that calls this carries the user-agreement checkbox, so
+     * creation time is consent time here too.
+     */
+    @Transactional
+    public Optional<Member> addMemberWithoutDevice(String homeCode, String name, Long adminId) {
+        String norm = normalizeCode(homeCode);
+        adminOf(norm, adminId);
+        if (name == null || name.isBlank() || findMemberByName(norm, name).isPresent()) {
+            return Optional.empty();
+        }
+        return Optional.of(addMember(norm, name.trim(), false));
+    }
+
+    /** The home's PIN check for a caller that is not a member — pairing a shared device.
+     *  Shares the lock with the other two PIN doors, so one gate counts every wrong try. */
+    public boolean verifyAdminPin(String code, String pin) {
+        Home home = homes.findById(normalizeCode(code)).orElse(null);
+        return home != null && checkPin(home.getCode(), home.getAdminPin(), pin);
     }
 
     /** Attempts to grant admin rights to a member by verifying the home's admin PIN. */
@@ -1164,6 +1202,12 @@ public class ChoreService {
         }
         if (!inHours) {
             return LockReason.OUTSIDE_HOURS;
+        }
+        // A shared device's board belongs to nobody: the locks about *who* taps — rotation,
+        // booking, the streak — are decided at the tap, once a member has been picked. The
+        // card still carries the badge saying whose turn it is.
+        if (memberId == null) {
+            return LockReason.NONE;
         }
         if (rotating) {
             if (home.isRotationEnforced()
@@ -1966,7 +2010,7 @@ public class ChoreService {
     }
 
     /** A 128-bit secret for a rejoining device — long enough that it can't be guessed. */
-    private static String generateToken() {
+    static String generateToken() {
         byte[] bytes = new byte[16];
         RANDOM.nextBytes(bytes);
         StringBuilder sb = new StringBuilder(32);
@@ -1976,7 +2020,7 @@ public class ChoreService {
         return sb.toString();
     }
 
-    private static String normalizeCode(String code) {
+    static String normalizeCode(String code) {
         return code == null ? "" : code.trim().toUpperCase();
     }
 

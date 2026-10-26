@@ -8,6 +8,9 @@ import com.homechores.domain.RejoinStatus;
 import com.homechores.service.ChoreService;
 import com.homechores.service.HomeState;
 import com.homechores.service.RateLimiter;
+import com.homechores.service.SharedDeviceService;
+import com.homechores.service.SharedDeviceService.PairOutcome;
+import com.homechores.ui.DeviceIdentity.RestoreFailure;
 import com.vaadin.flow.component.AttachEvent;
 import com.vaadin.flow.component.Key;
 import com.vaadin.flow.component.button.Button;
@@ -34,17 +37,23 @@ import com.vaadin.flow.router.BeforeEnterObserver;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.router.RouterLink;
+import com.vaadin.flow.server.VaadinSession;
 import com.vaadin.flow.shared.Registration;
 import com.vaadin.flow.signals.Signal;
 import com.vaadin.flow.signals.local.ValueSignal;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Kahoot-style entry screen: create a new home or join an existing one with a code. */
 @Route("")
 @PageTitle("FlashChores")
 public class LandingView extends VerticalLayout implements BeforeEnterObserver {
 
+    private static final Logger log = LoggerFactory.getLogger(LandingView.class);
+
     private final ChoreService service;
+    private final SharedDeviceService sharedDevices;
     private final HomeState homeState;
     private final RateLimiter rateLimiter;
 
@@ -65,6 +74,13 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
      */
     private static final int MAX_REJOIN_LOOKUPS_PER_HOUR = 20;
 
+    /** Pairing attempts for a shared device per hour. Each one is a PIN guess, and the PIN's
+     *  own 5-tries lock is per home; this bounds the guessing across homes too. */
+    private static final int MAX_PAIRINGS_PER_HOUR = 10;
+
+    /** Log lines about a refused stored identity per visitor per hour (§4.1). */
+    private static final int MAX_REJECTION_LINES_PER_HOUR = 5;
+
     private static final java.time.Duration RATE_WINDOW = java.time.Duration.ofHours(1);
 
     /** Join-form code, kept as a field so a ?join= link can prefill it in beforeEnter. */
@@ -75,6 +91,8 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
     private final ValueSignal<Boolean> joining = new ValueSignal<>(false);
 
     private final Div card = new Div();
+    /** Why a device that had been signed in is looking at the join card (§4.1); hidden otherwise. */
+    private final Div notice = new Div();
     private final Div restoring = new Div();
     private final Div waiting = new Div();
 
@@ -83,8 +101,10 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
     /** The effect watching that request; one at a time, so a second wait replaces the first. */
     private Registration waitingEffect;
 
-    public LandingView(ChoreService service, HomeState homeState, RateLimiter rateLimiter) {
+    public LandingView(ChoreService service, SharedDeviceService sharedDevices,
+                       HomeState homeState, RateLimiter rateLimiter) {
         this.service = service;
+        this.sharedDevices = sharedDevices;
         this.homeState = homeState;
         this.rateLimiter = rateLimiter;
         addClassName("centered-page");
@@ -114,7 +134,13 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         createForm.bindVisible(Signal.computed(() -> !joining.get()));
         joinForm.bindVisible(joining);
 
-        card.add(langRow, title, sub, tabs, createForm, joinForm);
+        // A status region, not an alert: it is there when the card appears, so the screen
+        // reader reads it in order rather than interrupting with it.
+        notice.addClassName("auth-notice");
+        notice.getElement().setAttribute("role", "status");
+        notice.setVisible(false);
+
+        card.add(langRow, title, sub, notice, tabs, createForm, joinForm);
 
         buildRestoringCard();
         waiting.addClassName("auth-card");
@@ -271,7 +297,15 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         Paragraph rejoinHint = new Paragraph(T.tr("landing.rejoin.hint"));
         rejoinHint.addClassName("feedback-hint");
 
-        Div form = new Div(codeField, yourNameField, agree, join, rejoinHint, rejoin);
+        // The family's kitchen tablet: not a member, so it never joins — an admin pairs it with
+        // the PIN (§4.1.3). Under the join form because that is where "this device should show
+        // our board" is looked for.
+        Button pair = new Button(T.tr("landing.device.link"), VaadinIcon.DESKTOP.create(),
+                e -> openPairDialog(code.peek()));
+        pair.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+        pair.setWidthFull();
+
+        Div form = new Div(codeField, yourNameField, agree, join, rejoinHint, rejoin, pair);
         form.getStyle().set("display", "flex").set("flex-direction", "column")
                 .set("gap", "var(--lumo-space-m)").set("margin-top", "var(--lumo-space-m)");
         return form;
@@ -338,6 +372,79 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         name.addKeyPressListener(Key.ENTER, e -> me.click());
 
         VerticalLayout body = new VerticalLayout(intro, name, pin, me);
+        body.setPadding(false);
+        body.setSpacing(true);
+        body.setWidthFull();
+        d.add(body);
+        d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()));
+        d.open();
+    }
+
+    // ---- Pairing a shared family device ----------------------------------------
+
+    /**
+     * Home code plus admin PIN makes this browser the home's shared device. The PIN is asked
+     * here rather than an admin signing in on the tablet: a member is one phone, and signing
+     * the admin in here would sign their own phone out.
+     */
+    private void openPairDialog(String rawCode) {
+        if (rawCode == null || rawCode.isBlank()) {
+            warn(T.tr("landing.device.needCode"));
+            return;
+        }
+        Dialog d = new Dialog();
+        d.setHeaderTitle(T.tr("landing.device.title"));
+        d.setWidth("min(90vw, 24em)");
+
+        Span intro = new Span(T.tr("landing.device.intro"));
+        intro.addClassName("sub");
+
+        TextField name = new TextField(T.tr("landing.device.name"));
+        name.setPlaceholder(T.tr("landing.device.name.placeholder"));
+        name.setMaxLength(InputLimits.MEMBER_NAME);
+        name.setWidthFull();
+
+        TextField pin = new TextField(T.tr("claim.pin"));
+        pin.setMaxLength(4);
+        pin.setWidthFull();
+
+        Button pair = new Button(T.tr("landing.device.pair"), e -> {
+            if (!rateLimiter.allow("pair:" + clientKey(), MAX_PAIRINGS_PER_HOUR, RATE_WINDOW)) {
+                warn(T.tr("landing.rateLimited"));
+                return;
+            }
+            PairOutcome outcome = sharedDevices.pair(rawCode, pin.getValue(), name.getValue(),
+                    T.tr("landing.device.name.placeholder"));
+            switch (outcome.result()) {
+                case PAIRED -> {
+                    d.close();
+                    var paired = outcome.paired();
+                    SessionContext.signInDevice(paired.device().getId(), paired.device().getHomeCode());
+                    SessionContext.setDeviceSecret(paired.secret());
+                    SessionContext.applyTimeout(false);
+                    DeviceIdentity.rememberDevice(paired.device().getId(),
+                            paired.device().getHomeCode(), paired.secret());
+                    getUI().ifPresent(ui -> ui.navigate(HomeView.class));
+                }
+                case WRONG_PIN -> {
+                    pin.setInvalid(true);
+                    pin.setErrorMessage(T.tr("claim.wrong"));
+                }
+                case TOO_MANY -> {
+                    d.close();
+                    warn(T.tr("landing.device.tooMany"));
+                }
+                default -> {
+                    d.close();
+                    warn(T.tr("landing.join.notFound", rawCode.trim().toUpperCase()));
+                }
+            }
+        });
+        pair.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        pair.setWidthFull();
+        pin.addKeyPressListener(Key.ENTER, e -> pair.click());
+
+        VerticalLayout body = new VerticalLayout(intro, name, pin, pair);
         body.setPadding(false);
         body.setSpacing(true);
         body.setWidthFull();
@@ -444,38 +551,120 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         if (SessionContext.isSignedIn()) {
             return; // beforeEnter already forwarded to the board
         }
-        DeviceIdentity.read(stored -> {
-            if (stored.isPresent() && restoreFrom(stored.get())) {
+        DeviceIdentity.read(this::restoreMember);
+    }
+
+    /**
+     * Signs the browser in from its stored member identity. When that is refused the reason
+     * is explained and logged, the value cleared, and the shared-device identity tried next.
+     * Package-private so the UI tests can feed it a reading: a browserless UI never answers
+     * the local-storage read that {@link #onAttach} starts.
+     */
+    void restoreMember(DeviceIdentity.Reading reading) {
+        if (reading.stored().isPresent()) {
+            Optional<RestoreFailure> failure = restoreFrom(reading.stored().get());
+            if (failure.isEmpty()) {
                 return;
             }
-            if (stored.isPresent()) {
-                DeviceIdentity.forget(); // points at a member or home that no longer exists
+            explain("member", reading.stored().get().id(), failure.get());
+        } else if (reading.unreadable()) {
+            explain("member", null, RestoreFailure.UNREADABLE);
+        }
+        DeviceIdentity.readDevice(this::restoreSharedDevice);
+    }
+
+    /** The shared-device counterpart of {@link #restoreMember}; falls through to a pending rejoin. */
+    void restoreSharedDevice(DeviceIdentity.Reading reading) {
+        if (reading.stored().isPresent()) {
+            Optional<RestoreFailure> failure = restoreDevice(reading.stored().get());
+            if (failure.isEmpty()) {
+                return;
             }
-            checkPendingRejoin();
-        });
+            explain("device", reading.stored().get().id(), failure.get());
+        } else if (reading.unreadable()) {
+            explain("device", null, RestoreFailure.UNREADABLE);
+        }
+        checkPendingRejoin();
+    }
+
+    /**
+     * Tells the user why their device is on the join card, in the card itself, with the Join
+     * tab (where "sign me back in" lives) in front; drops the dead value; and leaves one log
+     * line — the id and the reason, with how the browser is running — and never a name or a
+     * home code. Until this existed a phone that kept forgetting its family looked exactly
+     * like one that had never joined, on the server and to its owner.
+     */
+    private void explain(String kind, Long id, RestoreFailure failure) {
+        DeviceIdentity.forget();
+        notice.setText(T.tr(messageKeyFor(kind, failure)));
+        notice.setVisible(true);
+        tabs.setSelectedTab(joinTab);
+        String browser = DeviceIdentity.browserLabel(
+                VaadinSession.getCurrent().getBrowser().getUserAgent());
+        Object who = id == null ? "-" : id; // an unreadable value names nobody
+        // The value is the browser's to write, so a page reloaded in a loop must not be able to
+        // fill the log: a real phone is refused once and then has nothing stored.
+        if (rateLimiter.allow("rejected:" + clientKey(), MAX_REJECTION_LINES_PER_HOUR, RATE_WINDOW)) {
+            DeviceIdentity.probeContext(context -> log.info(
+                    "Stored {} identity {} rejected: {} ({}; {})", kind, who, failure, context, browser));
+        }
+    }
+
+    /** A member hears who replaced them; a shared device only that it is no longer paired. */
+    private static String messageKeyFor(String kind, RestoreFailure failure) {
+        if (failure == RestoreFailure.UNREADABLE) {
+            return "landing.restore.stale";
+        }
+        if (kind.equals("device")) {
+            return "landing.restore.unpaired";
+        }
+        return failure == RestoreFailure.SECRET_REPLACED
+                ? "landing.restore.replaced" : "landing.restore.gone";
+    }
+
+    /** The shared-device counterpart of {@link #restoreFrom}: the device must still be paired
+     *  to that home and hold the secret issued at pairing. Empty means signed in. */
+    private Optional<RestoreFailure> restoreDevice(DeviceIdentity.Stored stored) {
+        var device = sharedDevices.find(stored.id());
+        if (device.isEmpty() || !device.get().getHomeCode().equals(stored.homeCode())) {
+            return Optional.of(RestoreFailure.GONE);
+        }
+        if (service.findHome(stored.homeCode()).isEmpty()) {
+            return Optional.of(RestoreFailure.HOME_GONE);
+        }
+        if (!sharedDevices.verify(stored.id(), stored.secret())) {
+            return Optional.of(RestoreFailure.SECRET_REPLACED);
+        }
+        SessionContext.signInDevice(stored.id(), stored.homeCode());
+        SessionContext.setDeviceSecret(stored.secret());
+        SessionContext.applyTimeout(false);
+        getUI().ifPresent(ui -> ui.navigate(HomeView.class));
+        return Optional.empty();
     }
 
     /**
      * Signs in from a stored identity, if the member and home are both still there and the
      * stored secret is the one issued to this member's device. The secret is the actual
      * proof — member ids are guessable, so without it a hand-written localStorage value
-     * would sign anyone in as any member.
+     * would sign anyone in as any member. Empty means signed in; otherwise why not.
      */
-    private boolean restoreFrom(DeviceIdentity.Stored stored) {
-        Optional<Member> m = service.findMember(stored.memberId());
-        if (m.isEmpty() || !m.get().getHomeCode().equals(stored.homeCode())
-                || service.findHome(stored.homeCode()).isEmpty()) {
-            return false;
+    private Optional<RestoreFailure> restoreFrom(DeviceIdentity.Stored stored) {
+        Optional<Member> m = service.findMember(stored.id());
+        if (m.isEmpty() || !m.get().getHomeCode().equals(stored.homeCode())) {
+            return Optional.of(RestoreFailure.GONE);
+        }
+        if (service.findHome(stored.homeCode()).isEmpty()) {
+            return Optional.of(RestoreFailure.HOME_GONE);
         }
         String secret = stored.secret();
-        if (!service.verifyDeviceSecret(stored.memberId(), secret)) {
-            return false;
+        if (!service.verifyDeviceSecret(stored.id(), secret)) {
+            return Optional.of(RestoreFailure.SECRET_REPLACED);
         }
         SessionContext.signIn(m.get().getId(), m.get().getHomeCode());
         SessionContext.setDeviceSecret(secret);
         SessionContext.applyTimeout(m.get().isAdmin());
         getUI().ifPresent(ui -> ui.navigate(HomeView.class));
-        return true;
+        return Optional.empty();
     }
 
     /** Picks a rejoin request back up after a reload — including one decided while away. */

@@ -39,10 +39,10 @@ class ListItemServiceTest {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
 
-        lists.add(code, ListKind.GROCERY, alex.getId(), "Milk");
-        lists.add(code, ListKind.GROCERY, alex.getId(), "  Bread  ");
-        lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber");
-        lists.add(code, ListKind.GROCERY, alex.getId(), "x".repeat(500));
+        lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk");
+        lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "  Bread  ");
+        lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call the plumber");
+        lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "x".repeat(500));
 
         List<ListItem> groceries = lists.openItems(code, ListKind.GROCERY);
         assertEquals(List.of("Milk", "Bread", "x".repeat(160)),
@@ -57,10 +57,10 @@ class ListItemServiceTest {
         Member alex = chores.createHome("Listy", "Alex");
         Member other = chores.createHome("Elsewhere", "Sam");
 
-        assertTrue(lists.add(alex.getHomeCode(), ListKind.GROCERY, alex.getId(), "   ").isEmpty());
+        assertTrue(lists.add(alex.getHomeCode(), ListKind.GROCERY, Author.member(alex.getId()), "   ").isEmpty());
         assertTrue(lists.openItems(alex.getHomeCode(), ListKind.GROCERY).isEmpty());
         assertThrows(IllegalArgumentException.class,
-                () -> lists.add(alex.getHomeCode(), ListKind.GROCERY, other.getId(), "Milk"),
+                () -> lists.add(alex.getHomeCode(), ListKind.GROCERY, Author.member(other.getId()), "Milk"),
                 "a member of another home cannot write on this list");
     }
 
@@ -69,9 +69,9 @@ class ListItemServiceTest {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
         Member sam = chores.joinHome(code, "Sam").orElseThrow();
-        ListItem milk = lists.add(code, ListKind.GROCERY, alex.getId(), "Milk").orElseThrow();
+        ListItem milk = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk").orElseThrow();
 
-        assertTrue(lists.setDone(milk.getId(), sam.getId(), true));
+        assertTrue(lists.setDone(milk.getId(), Author.member(sam.getId()), true));
         ListItem ticked = lists.doneItems(code, ListKind.GROCERY).get(0);
         assertEquals("Milk", ticked.getText());
         assertEquals(sam.getId(), ticked.getDoneByMemberId(), "Sam ticked it");
@@ -81,27 +81,27 @@ class ListItemServiceTest {
 
         // Ticking again keeps the original ticker — two phones racing must not flip it.
         Instant firstTick = ticked.getDoneAt();
-        assertTrue(lists.setDone(milk.getId(), alex.getId(), true));
+        assertTrue(lists.setDone(milk.getId(), Author.member(alex.getId()), true));
         assertEquals(sam.getId(), repo.findById(milk.getId()).orElseThrow().getDoneByMemberId());
         assertEquals(firstTick, repo.findById(milk.getId()).orElseThrow().getDoneAt());
 
-        assertTrue(lists.setDone(milk.getId(), alex.getId(), false));
+        assertTrue(lists.setDone(milk.getId(), Author.member(alex.getId()), false));
         ListItem back = repo.findById(milk.getId()).orElseThrow();
         assertNull(back.getDoneAt());
         assertNull(back.getDoneByMemberId());
         assertEquals(1, lists.openItems(code, ListKind.GROCERY).size());
 
-        assertFalse(lists.setDone(999_999L, alex.getId(), true), "no such line");
+        assertFalse(lists.setDone(999_999L, Author.member(alex.getId()), true), "no such line");
     }
 
     @Test
     void tickedLines_hideAfterADay_andThePurgeReclaimsThem() {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
-        ListItem old = lists.add(code, ListKind.GROCERY, alex.getId(), "Old").orElseThrow();
-        ListItem fresh = lists.add(code, ListKind.GROCERY, alex.getId(), "Fresh").orElseThrow();
-        lists.setDone(old.getId(), alex.getId(), true);
-        lists.setDone(fresh.getId(), alex.getId(), true);
+        ListItem old = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Old").orElseThrow();
+        ListItem fresh = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Fresh").orElseThrow();
+        lists.setDone(old.getId(), Author.member(alex.getId()), true);
+        lists.setDone(fresh.getId(), Author.member(alex.getId()), true);
         Instant now = Instant.now();
         old.setDoneAt(now.minus(Duration.ofHours(25)));
         fresh.setDoneAt(now.minus(Duration.ofHours(23)));
@@ -125,11 +125,11 @@ class ListItemServiceTest {
     void clearDone_emptiesOnlyThatListsTickedLines() {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
-        ListItem milk = lists.add(code, ListKind.GROCERY, alex.getId(), "Milk").orElseThrow();
-        lists.add(code, ListKind.GROCERY, alex.getId(), "Bread");
-        ListItem call = lists.add(code, ListKind.TODO, alex.getId(), "Call").orElseThrow();
-        lists.setDone(milk.getId(), alex.getId(), true);
-        lists.setDone(call.getId(), alex.getId(), true);
+        ListItem milk = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk").orElseThrow();
+        lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Bread");
+        ListItem call = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call").orElseThrow();
+        lists.setDone(milk.getId(), Author.member(alex.getId()), true);
+        lists.setDone(call.getId(), Author.member(alex.getId()), true);
 
         assertEquals(1, lists.clearDone(code, ListKind.GROCERY));
 
@@ -145,17 +145,17 @@ class ListItemServiceTest {
         String code = alex.getHomeCode();
         Member sam = chores.joinHome(code, "Sam").orElseThrow();
         Member stranger = chores.createHome("Elsewhere", "Kim");
-        ListItem milk = lists.add(code, ListKind.GROCERY, alex.getId(), "Milk").orElseThrow();
+        ListItem milk = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk").orElseThrow();
 
         assertThrows(IllegalArgumentException.class,
-                () -> lists.delete(milk.getId(), stranger.getId()));
+                () -> lists.delete(milk.getId(), Author.member(stranger.getId())));
         assertThrows(IllegalArgumentException.class,
-                () -> lists.setDone(milk.getId(), stranger.getId(), true));
+                () -> lists.setDone(milk.getId(), Author.member(stranger.getId()), true));
         assertTrue(repo.findById(milk.getId()).isPresent());
 
-        assertTrue(lists.delete(milk.getId(), sam.getId()), "Sam did not write it, but it is shared");
+        assertTrue(lists.delete(milk.getId(), Author.member(sam.getId())), "Sam did not write it, but it is shared");
         assertTrue(repo.findById(milk.getId()).isEmpty());
-        assertFalse(lists.delete(milk.getId(), sam.getId()), "already gone");
+        assertFalse(lists.delete(milk.getId(), Author.member(sam.getId())), "already gone");
     }
 
     // ---- Dinner week ----------------------------------------------------------
@@ -167,24 +167,24 @@ class ListItemServiceTest {
         Member sam = chores.joinHome(code, "Sam").orElseThrow();
         LocalDate today = LocalDate.now();
 
-        ListItem pasta = lists.setDinner(code, today, alex.getId(), "  Pasta  ").orElseThrow();
+        ListItem pasta = lists.setDinner(code, today, Author.member(alex.getId()), "  Pasta  ").orElseThrow();
         assertEquals("Pasta", pasta.getText(), "trimmed");
         assertEquals(today, pasta.getDay());
         assertEquals(alex.getId(), pasta.getCreatedByMemberId());
 
-        ListItem soup = lists.setDinner(code, today, sam.getId(), "Soup").orElseThrow();
+        ListItem soup = lists.setDinner(code, today, Author.member(sam.getId()), "Soup").orElseThrow();
         assertEquals(pasta.getId(), soup.getId(), "a day has one slot: the row is rewritten, not doubled");
         assertEquals(sam.getId(), soup.getCreatedByMemberId(), "and it says who set it last");
         assertEquals(1, lists.dinners(code, today, today).size());
         assertEquals("Soup", lists.dinners(code, today, today).get(today).getText());
 
-        assertTrue(lists.setDinner(code, today, alex.getId(), "   ").isEmpty(), "blank clears");
+        assertTrue(lists.setDinner(code, today, Author.member(alex.getId()), "   ").isEmpty(), "blank clears");
         assertTrue(lists.dinners(code, today, today).isEmpty());
         assertTrue(repo.findById(pasta.getId()).isEmpty(), "the row is gone, not blanked");
-        assertTrue(lists.setDinner(code, today, alex.getId(), "").isEmpty(), "clearing a clear day is a no-op");
+        assertTrue(lists.setDinner(code, today, Author.member(alex.getId()), "").isEmpty(), "clearing a clear day is a no-op");
 
         String longText = "x".repeat(500);
-        assertEquals(160, lists.setDinner(code, today, alex.getId(), longText).orElseThrow().getText().length());
+        assertEquals(160, lists.setDinner(code, today, Author.member(alex.getId()), longText).orElseThrow().getText().length());
     }
 
     @Test
@@ -192,10 +192,10 @@ class ListItemServiceTest {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
         LocalDate today = LocalDate.now();
-        lists.setDinner(code, today.minusDays(1), alex.getId(), "Yesterday");
-        lists.setDinner(code, today, alex.getId(), "Today");
-        lists.setDinner(code, today.plusDays(7), alex.getId(), "Same weekday next week");
-        lists.setDinner(code, today.plusDays(8), alex.getId(), "Beyond the window");
+        lists.setDinner(code, today.minusDays(1), Author.member(alex.getId()), "Yesterday");
+        lists.setDinner(code, today, Author.member(alex.getId()), "Today");
+        lists.setDinner(code, today.plusDays(7), Author.member(alex.getId()), "Same weekday next week");
+        lists.setDinner(code, today.plusDays(8), Author.member(alex.getId()), "Beyond the window");
 
         Map<LocalDate, ListItem> week = lists.dinners(code, today, today.plusDays(7));
 
@@ -209,9 +209,9 @@ class ListItemServiceTest {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
         LocalDate today = LocalDate.now();
-        ListItem old = lists.setDinner(code, today.minusDays(8), alex.getId(), "Old").orElseThrow();
-        ListItem recent = lists.setDinner(code, today.minusDays(6), alex.getId(), "Recent").orElseThrow();
-        ListItem planned = lists.setDinner(code, today.plusDays(3), alex.getId(), "Planned").orElseThrow();
+        ListItem old = lists.setDinner(code, today.minusDays(8), Author.member(alex.getId()), "Old").orElseThrow();
+        ListItem recent = lists.setDinner(code, today.minusDays(6), Author.member(alex.getId()), "Recent").orElseThrow();
+        ListItem planned = lists.setDinner(code, today.plusDays(3), Author.member(alex.getId()), "Planned").orElseThrow();
 
         double quiet = homeState.revision(code).peek();
         assertEquals(1, lists.purgeStaleDone(Instant.now()));
@@ -227,7 +227,7 @@ class ListItemServiceTest {
         Member alex = chores.createHome("Listy", "Alex");
         Member stranger = chores.createHome("Elsewhere", "Kim");
         assertThrows(IllegalArgumentException.class,
-                () -> lists.setDinner(alex.getHomeCode(), LocalDate.now(), stranger.getId(), "Pasta"));
+                () -> lists.setDinner(alex.getHomeCode(), LocalDate.now(), Author.member(stranger.getId()), "Pasta"));
     }
 
     /**
@@ -242,27 +242,27 @@ class ListItemServiceTest {
         String code = alex.getHomeCode();
 
         double r0 = homeState.revision(code).peek();
-        ListItem milk = lists.add(code, ListKind.GROCERY, alex.getId(), "Milk").orElseThrow();
+        ListItem milk = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk").orElseThrow();
         double r1 = homeState.revision(code).peek();
         assertTrue(r1 > r0, "add");
-        lists.setDone(milk.getId(), alex.getId(), true);
+        lists.setDone(milk.getId(), Author.member(alex.getId()), true);
         double r2 = homeState.revision(code).peek();
         assertTrue(r2 > r1, "tick");
         lists.clearDone(code, ListKind.GROCERY);
         double r3 = homeState.revision(code).peek();
         assertTrue(r3 > r2, "clear done");
-        lists.add(code, ListKind.TODO, alex.getId(), "Call").ifPresent(
-                c -> lists.delete(c.getId(), alex.getId()));
+        lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call").ifPresent(
+                c -> lists.delete(c.getId(), Author.member(alex.getId())));
         double r4 = homeState.revision(code).peek();
         assertTrue(r4 > r3, "delete");
 
         LocalDate today = LocalDate.now();
-        lists.setDinner(code, today, alex.getId(), "Pasta");
+        lists.setDinner(code, today, Author.member(alex.getId()), "Pasta");
         double r5 = homeState.revision(code).peek();
         assertTrue(r5 > r4, "setting a dinner");
-        lists.setDinner(code, today, alex.getId(), "Pasta");
+        lists.setDinner(code, today, Author.member(alex.getId()), "Pasta");
         assertEquals(r5, homeState.revision(code).peek(), "saving the same text again changes nothing");
-        lists.setDinner(code, today, alex.getId(), "");
+        lists.setDinner(code, today, Author.member(alex.getId()), "");
         assertTrue(homeState.revision(code).peek() > r5, "clearing");
     }
 
@@ -278,26 +278,26 @@ class ListItemServiceTest {
     void placeItem_reordersTheOpenLines_andANewLineStillGoesLast() {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
-        ListItem milk = lists.add(code, ListKind.GROCERY, alex.getId(), "Milk").orElseThrow();
-        ListItem bread = lists.add(code, ListKind.GROCERY, alex.getId(), "Bread").orElseThrow();
-        ListItem eggs = lists.add(code, ListKind.GROCERY, alex.getId(), "Eggs").orElseThrow();
+        ListItem milk = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk").orElseThrow();
+        ListItem bread = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Bread").orElseThrow();
+        ListItem eggs = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Eggs").orElseThrow();
 
-        assertTrue(lists.placeItem(code, alex.getId(), eggs.getId(), milk.getId()));
+        assertTrue(lists.placeItem(code, Author.member(alex.getId()), eggs.getId(), milk.getId()));
         assertEquals(List.of("Eggs", "Milk", "Bread"), texts(lists.openItems(code, ListKind.GROCERY)),
                 "dropped before the milk");
-        assertTrue(lists.placeItem(code, alex.getId(), milk.getId(), null));
+        assertTrue(lists.placeItem(code, Author.member(alex.getId()), milk.getId(), null));
         assertEquals(List.of("Eggs", "Bread", "Milk"), texts(lists.openItems(code, ListKind.GROCERY)),
                 "no neighbour means the end");
 
-        assertFalse(lists.placeItem(code, alex.getId(), milk.getId(), null), "let go where it was");
-        assertFalse(lists.placeItem(code, alex.getId(), bread.getId(), bread.getId()), "before itself");
+        assertFalse(lists.placeItem(code, Author.member(alex.getId()), milk.getId(), null), "let go where it was");
+        assertFalse(lists.placeItem(code, Author.member(alex.getId()), bread.getId(), bread.getId()), "before itself");
 
-        lists.add(code, ListKind.GROCERY, alex.getId(), "Butter");
+        lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Butter");
         assertEquals(List.of("Eggs", "Bread", "Milk", "Butter"), texts(lists.openItems(code, ListKind.GROCERY)),
                 "a new line goes after the arranged ones, not to the top at 0");
 
-        lists.setDone(eggs.getId(), alex.getId(), true);
-        lists.setDone(eggs.getId(), alex.getId(), false);
+        lists.setDone(eggs.getId(), Author.member(alex.getId()), true);
+        lists.setDone(eggs.getId(), Author.member(alex.getId()), false);
         assertEquals(List.of("Eggs", "Bread", "Milk", "Butter"), texts(lists.openItems(code, ListKind.GROCERY)),
                 "ticking and unticking keeps a line's place");
     }
@@ -308,25 +308,25 @@ class ListItemServiceTest {
     void placeItem_refusesStrangers_otherHomesLines_otherLists_tickedLines_andDinners() {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
-        ListItem milk = lists.add(code, ListKind.GROCERY, alex.getId(), "Milk").orElseThrow();
-        ListItem bread = lists.add(code, ListKind.GROCERY, alex.getId(), "Bread").orElseThrow();
-        ListItem plumber = lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber").orElseThrow();
-        ListItem pasta = lists.setDinner(code, LocalDate.now(), alex.getId(), "Pasta").orElseThrow();
+        ListItem milk = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk").orElseThrow();
+        ListItem bread = lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Bread").orElseThrow();
+        ListItem plumber = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call the plumber").orElseThrow();
+        ListItem pasta = lists.setDinner(code, LocalDate.now(), Author.member(alex.getId()), "Pasta").orElseThrow();
         Member kim = chores.createHome("Elsewhere", "Kim");
-        ListItem theirs = lists.add(kim.getHomeCode(), ListKind.GROCERY, kim.getId(), "Theirs").orElseThrow();
+        ListItem theirs = lists.add(kim.getHomeCode(), ListKind.GROCERY, Author.member(kim.getId()), "Theirs").orElseThrow();
         List<String> before = texts(lists.openItems(code, ListKind.GROCERY));
 
         assertThrows(IllegalArgumentException.class,
-                () -> lists.placeItem(code, kim.getId(), bread.getId(), milk.getId()), "not in this home");
-        assertFalse(lists.placeItem(code, alex.getId(), theirs.getId(), milk.getId()), "another home's line");
-        assertFalse(lists.placeItem(code, alex.getId(), bread.getId(), theirs.getId()),
+                () -> lists.placeItem(code, Author.member(kim.getId()), bread.getId(), milk.getId()), "not in this home");
+        assertFalse(lists.placeItem(code, Author.member(alex.getId()), theirs.getId(), milk.getId()), "another home's line");
+        assertFalse(lists.placeItem(code, Author.member(alex.getId()), bread.getId(), theirs.getId()),
                 "another home's line as the neighbour");
-        assertFalse(lists.placeItem(code, alex.getId(), bread.getId(), plumber.getId()),
+        assertFalse(lists.placeItem(code, Author.member(alex.getId()), bread.getId(), plumber.getId()),
                 "a neighbour on another list");
-        assertFalse(lists.placeItem(code, alex.getId(), pasta.getId(), null), "a dinner slot");
-        lists.setDone(bread.getId(), alex.getId(), true);
-        assertFalse(lists.placeItem(code, alex.getId(), bread.getId(), milk.getId()), "a ticked line");
-        lists.setDone(bread.getId(), alex.getId(), false);
+        assertFalse(lists.placeItem(code, Author.member(alex.getId()), pasta.getId(), null), "a dinner slot");
+        lists.setDone(bread.getId(), Author.member(alex.getId()), true);
+        assertFalse(lists.placeItem(code, Author.member(alex.getId()), bread.getId(), milk.getId()), "a ticked line");
+        lists.setDone(bread.getId(), Author.member(alex.getId()), false);
 
         assertEquals(before, texts(lists.openItems(code, ListKind.GROCERY)), "nothing moved");
         assertEquals(List.of("Theirs"), texts(lists.openItems(kim.getHomeCode(), ListKind.GROCERY)));
@@ -339,12 +339,12 @@ class ListItemServiceTest {
     void displayOrder_putsDueRemindersFirst_farOffOnesLast_andTheRestInBetween() {
         Member alex = chores.createHome("Listy", "Alex");
         String code = alex.getHomeCode();
-        ListItem a = lists.add(code, ListKind.TODO, alex.getId(), "A next month").orElseThrow();
-        ListItem b = lists.add(code, ListKind.TODO, alex.getId(), "B plain").orElseThrow();
-        ListItem c = lists.add(code, ListKind.TODO, alex.getId(), "C this afternoon").orElseThrow();
-        ListItem d = lists.add(code, ListKind.TODO, alex.getId(), "D plain").orElseThrow();
-        ListItem e = lists.add(code, ListKind.TODO, alex.getId(), "E fired yesterday").orElseThrow();
-        ListItem f = lists.add(code, ListKind.TODO, alex.getId(), "F tomorrow 9:00").orElseThrow();
+        ListItem a = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "A next month").orElseThrow();
+        ListItem b = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "B plain").orElseThrow();
+        ListItem c = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "C this afternoon").orElseThrow();
+        ListItem d = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "D plain").orElseThrow();
+        ListItem e = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "E fired yesterday").orElseThrow();
+        ListItem f = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "F tomorrow 9:00").orElseThrow();
 
         ZoneId utc = ZoneId.of("UTC");
         LocalDate today = LocalDate.of(2026, 10, 16);
@@ -369,7 +369,7 @@ class ListItemServiceTest {
         assertEquals("F tomorrow 9:00", shown.get(2).getText(), "its day has come: above the plain lines");
 
         // The plain lines follow the family's order, not their writing order.
-        assertTrue(lists.placeItem(code, alex.getId(), d.getId(), b.getId()));
+        assertTrue(lists.placeItem(code, Author.member(alex.getId()), d.getId(), b.getId()));
         shown = ListItemService.displayOrder(lists.openItems(code, ListKind.TODO), reminders, today, utc);
         assertEquals(List.of("D plain", "B plain"), texts(shown.subList(2, 4)));
 
