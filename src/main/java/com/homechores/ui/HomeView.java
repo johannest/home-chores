@@ -4,6 +4,7 @@ import com.homechores.domain.Home;
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListReminder;
 import com.homechores.domain.Member;
+import com.homechores.domain.Trophy;
 import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
@@ -139,6 +140,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         listPanel = new ListPanel(listService, service, listReminderService, reminderService,
                 pushSender, viewer);
         statsPanel = new StatsPanel(statsService, service, viewer);
+        choresPanel.onShowTrophies(this::showTrophies);
         adminPanel = new AdminPanel(service, creditService, backupService, listService,
                 sharedDevices, homeCode, memberId);
         // Initial render happens from the Signal.effect registered in onAttach.
@@ -199,6 +201,35 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         // After the board, so the dialog lands on top of a drawn page. The sweep bumps HomeState
         // when a list reminder fires, which is what brings this here live on an open board.
         showFiredReminders();
+        showUnseenTrophies();
+    }
+
+    /**
+     * A trophy earned while this member was not the one looking — an admin approved or logged
+     * the chore — or owned since before trophies existed. The approval's HomeState bump is what
+     * brings it here live. Marked seen before the dialog opens, so the next redraw cannot show
+     * it twice. Not on the shared device: it is nobody's in particular.
+     */
+    private void showUnseenTrophies() {
+        if (viewer.isDevice()) {
+            return;
+        }
+        List<Trophy> unseen = service.unseenTrophies(memberId);
+        if (unseen.isEmpty()) {
+            return;
+        }
+        service.markTrophiesSeen(memberId);
+        String name = service.findMember(memberId).map(Member::getName).orElse("");
+        Celebrations.showUnseenTrophies(unseen, name, this::showTrophies);
+    }
+
+    /** Switches to the member's own statistics, where the trophy shelf is the first card. */
+    private void showTrophies() {
+        selected = PanelTab.STATS;
+        statsPanel.showMine();
+        buildChrome();
+        UI.getCurrent().getPage().executeJs(
+                "document.body.scrollTop = 0; document.documentElement.scrollTop = 0;");
     }
 
     // ---- Unanswered list reminders -----------------------------------------

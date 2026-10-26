@@ -154,4 +154,22 @@ class BoardRenderCostTest {
         assertEquals(1.0, slope, 0.001,
                 "board render must stay at one statement per chore; " + slope + " means a new N+1");
     }
+
+    /** The leaderboard's trophy badges read every member's all-time count in one grouped query,
+     *  not one count per member per redraw. */
+    @Test
+    void trophyBadges_costOneStatement_howeverManyMembers() {
+        Member alex = service.createHome("Crowd", "Alex");
+        String code = alex.getHomeCode();
+        for (int i = 0; i < 5; i++) {
+            service.joinHome(code, "Member " + i);
+        }
+        em.flush();
+        em.clear();
+        stats().clear();
+
+        service.approvedCounts(code);
+
+        assertEquals(1, stats().getPrepareStatementCount());
+    }
 }

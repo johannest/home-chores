@@ -223,7 +223,7 @@ class OtherHelpTest {
         assertTrue(outcome.allowed());
         assertFalse(outcome.pending(), "no queue for the admin's own words");
         assertNull(outcome.task(), "still other help, not a chore");
-        assertEquals(4, outcome.creditsAwarded());
+        assertEquals(4, outcome.award().choreCredits());
         assertEquals(1, outcome.doneTodayAfter());
 
         Completion saved = service.recentCompletions(code, 1).get(0);

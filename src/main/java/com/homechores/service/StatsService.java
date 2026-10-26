@@ -14,6 +14,7 @@ import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
+import com.homechores.domain.Trophy;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -29,6 +30,7 @@ import java.util.Map;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Function;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 /** Read-only aggregations for the statistics / chart views. */
@@ -40,15 +42,46 @@ public class StatsService {
     private final ChoreTaskRepository tasks;
     private final CompletionRepository completions;
     private final CreditEntryRepository credits;
+    private final CreditService creditService;
 
     public StatsService(HomeRepository homes, MemberRepository members,
                         ChoreTaskRepository tasks, CompletionRepository completions,
-                        CreditEntryRepository credits) {
+                        CreditEntryRepository credits, CreditService creditService) {
         this.homes = homes;
         this.members = members;
         this.tasks = tasks;
         this.completions = completions;
         this.credits = credits;
+        this.creditService = creditService;
+    }
+
+    /**
+     * The member's trophy shelf: every rung of the ladder, earned or not, with the day each
+     * earned one was reached and what each pays in this home. Empty for a member of another home.
+     *
+     * <p>Costs a count, the home's reward rows, and one single-row query per earned trophy (the
+     * n-th approved completion, by {@code doneAt}) — at most eight, and only when the shelf is
+     * drawn, never on the board.
+     */
+    public TrophyShelf trophyShelf(Long memberId, String homeCode) {
+        if (members.findById(memberId).filter(m -> m.getHomeCode().equals(homeCode)).isEmpty()) {
+            return new TrophyShelf(0, List.of(), null);
+        }
+        long count = completions.countByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
+        Map<Trophy, Integer> rewards = creditService.trophyRewards(homeCode);
+        ZoneId zone = ZoneId.systemDefault();
+        List<ShelfTrophy> shelf = new ArrayList<>();
+        for (Trophy t : Trophy.values()) {
+            LocalDate on = null;
+            if (t.rung() <= count) {
+                on = completions.findByMemberIdAndStatusOrderByDoneAtAscIdAsc(memberId,
+                                CompletionStatus.APPROVED, PageRequest.of(t.rung() - 1, 1))
+                        .stream().findFirst()
+                        .map(c -> c.getDoneAt().atZone(zone).toLocalDate()).orElse(null);
+            }
+            shelf.add(new ShelfTrophy(t, on, rewards.getOrDefault(t, 0)));
+        }
+        return new TrophyShelf(count, shelf, Trophy.next(count).orElse(null));
     }
 
     /** How many columns a longer trend shows. Twelve is what fits a ~360px phone column at a
@@ -599,6 +632,19 @@ public class StatsService {
     }
 
     public record MemberDaily(Member member, long doneToday, int target) {
+    }
+
+    /** The trophy ladder as one member stands on it: {@code count} approved chores, every rung,
+     *  and the {@code next} one to aim for (null once the ladder is climbed). */
+    public record TrophyShelf(long count, List<ShelfTrophy> trophies, Trophy next) {
+    }
+
+    /** One rung of a shelf: the day it was reached ({@code null} = not yet) and the 💎 it pays
+     *  in this home (0 = nothing). */
+    public record ShelfTrophy(Trophy trophy, LocalDate earnedOn, int reward) {
+        public boolean earned() {
+            return earnedOn != null;
+        }
     }
 
     /** One member's chores by type under the lens — their own "My chores" chart, for the admin.

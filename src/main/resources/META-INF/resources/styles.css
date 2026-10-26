@@ -1157,6 +1157,132 @@ body.hold-dragging {
     grid-template-columns: repeat(3, 1fr);
 }
 
+/* ---- Trophies ---- */
+/* The shelf: the stat tiles' look, four to a row, eight rungs. A locked trophy greys its emoji
+   only — the name and the rung under it keep the label colour, so they stay as readable as on
+   an earned tile. */
+.trophy-shelf {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--lumo-space-xs);
+    margin: 0 0 var(--lumo-space-s);
+}
+.trophy-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 8px 2px;
+    min-width: 0;
+    text-align: center;
+    border-radius: var(--lumo-border-radius-m);
+    background: var(--lumo-contrast-5pct);
+    border: 1px solid transparent;
+}
+.trophy-tile .trophy-emoji {
+    font-size: 1.6rem;
+    line-height: 1.15;
+}
+.trophy-tile.locked .trophy-emoji {
+    filter: grayscale(1);
+    opacity: 0.45;
+}
+.trophy-tile .trophy-detail {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--lumo-secondary-text-color);
+}
+.trophy-tile.earned {
+    background: var(--lumo-primary-color-10pct);
+}
+.trophy-tile.next {
+    border-color: var(--lumo-primary-color);
+}
+/* Same yellow pill and colour as the card's credit (4.9:1, see .card-credit). */
+.trophy-tile .trophy-pays,
+.celebrate-dialog .trophy-reward {
+    background: hsla(45, 100%, 51%, 0.18);
+    color: light-dark(hsl(38, 92%, 30%), hsl(45, 95%, 65%));
+    border-radius: 999px;
+    padding: 0 6px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+.celebrate-dialog .trophy-reward {
+    margin: 0;
+    padding: 2px 12px;
+    font-size: 1rem;
+}
+.trophy-progress-caption {
+    margin: var(--lumo-space-xs) 0 4px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.trophy-progress {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--lumo-contrast-10pct);
+    overflow: hidden;
+}
+.trophy-progress-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--lumo-primary-color);
+}
+/* "Just 2 more to 🥈 Silver" under the ordinary celebration text. */
+.celebrate-dialog .trophy-near {
+    margin: 0;
+    font-weight: 700;
+}
+/* Several trophies unlocked at once: a row of emoji, smaller than a single one. */
+.celebrate-emoji.several {
+    font-size: 2.6rem;
+    letter-spacing: 0.1em;
+}
+.trophy-shine {
+    animation: pop 0.5s cubic-bezier(0.18, 0.89, 0.32, 1.28),
+               trophy-glow 1.6s ease-in-out 0.5s 2;
+}
+@keyframes trophy-glow {
+    50% { filter: drop-shadow(0 0 14px hsla(45, 100%, 55%, 0.9)); transform: scale(1.06); }
+}
+/* The leaderboard chip's best trophy, on the avatar's corner: the dot clips its contents, so
+   the badge sits on a wrapper beside it and takes no width of its own. */
+.avatar-wrap {
+    position: relative;
+    flex: 0 0 auto;
+    display: flex;
+}
+.trophy-badge {
+    position: absolute;
+    right: -5px;
+    bottom: -5px;
+    font-size: 0.75rem;
+    line-height: 1;
+    padding: 1px;
+    border-radius: 50%;
+    background: var(--lumo-base-color);
+    box-shadow: 0 0 0 1px var(--lumo-contrast-10pct);
+}
+.trophy-reward-field {
+    width: 6.5em;
+    flex: 0 0 auto;
+}
+/* Name and 💎 field on one line even on a phone, where a .list-row's label otherwise takes a 60%
+   basis and pushes the field onto a line of its own — eight rows would double in height. A long
+   name wraps inside its label instead. */
+@media (max-width: 640px) {
+    .list-row.trophy-reward-row {
+        flex-wrap: nowrap;
+    }
+    .list-row.trophy-reward-row .grow {
+        flex: 1 1 0;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .celebrate-emoji, .trophy-shine { animation: none; }
+}
+
 /* The redemption list under the 💎 tiles: day, what for, how many. The note gets the slack
    and wraps; the day and the amount never do, so a long "movie night with popcorn and the
    whole family" cannot push the number off a 360px screen. */

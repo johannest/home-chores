@@ -14,6 +14,8 @@ import com.homechores.service.StatsService.Period;
 import com.homechores.service.StatsService.PeriodCounts;
 import com.homechores.service.StatsService.Redemption;
 import com.homechores.service.StatsService.Redemptions;
+import com.homechores.service.StatsService.ShelfTrophy;
+import com.homechores.service.StatsService.TrophyShelf;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.html.Div;
@@ -74,6 +76,11 @@ class StatsPanel extends VerticalLayout {
         setWidthFull();
         content.setWidthFull();
         add(content);
+    }
+
+    /** Shows the member's own statistics rather than the home's — where the trophy shelf is. */
+    void showMine() {
+        showHome = false;
     }
 
     void refresh() {
@@ -147,6 +154,12 @@ class StatsPanel extends VerticalLayout {
                 + (s.doneToday() >= s.target() ? "  " + T.tr("stats.today.reached") : ""));
         today.getStyle().set("font-weight", "600").set("margin-top", "0");
         body.add(today);
+
+        // Above the period tiles, not among the charts: the tiles are the lens for everything
+        // under them, and trophies are all-time. Shown from the very first visit — an empty shelf
+        // with the first rung's progress bar is the invitation.
+        body.add(Charts.card(T.tr("stats.trophies"),
+                trophyShelf(stats.trophyShelf(forMember, homeCode))));
 
         body.add(headlineRow(s.counts()));
 
@@ -255,6 +268,77 @@ class StatsPanel extends VerticalLayout {
                 readonlyTile(d.balance(), T.tr("stats.redeemed.balance")));
         Div box = new Div(row);
         box.add(redemptionList(d.redemptions(), false));
+        return box;
+    }
+
+    /**
+     * The ladder as tiles, four to a row — earned ones in colour with the day, locked ones greyed
+     * with their rung and what they pay — then the next trophy's progress bar. The 💎 tiles' look
+     * but a list of their own: facts, not pickers, so no button role and no focus stop.
+     */
+    private static Div trophyShelf(TrophyShelf shelf) {
+        Div grid = new Div();
+        grid.addClassName("trophy-shelf");
+        grid.getElement().setAttribute("role", "list");
+        LocalDate today = LocalDate.now();
+        for (ShelfTrophy st : shelf.trophies()) {
+            String name = T.tr(st.trophy().nameKey());
+            Div tile = new Div();
+            tile.addClassName("trophy-tile");
+            tile.getElement().setAttribute("role", "listitem");
+            Span emoji = new Span(st.trophy().emoji());
+            emoji.addClassName("trophy-emoji");
+            emoji.getElement().setAttribute("aria-hidden", "true");
+            Span label = new Span(name);
+            label.addClassName("stat-label");
+            Span detail = new Span(st.earned() ? dayLabel(st.earnedOn(), today)
+                    : String.valueOf(st.trophy().rung()));
+            detail.addClassName("trophy-detail");
+            tile.add(emoji, label, detail);
+            String reward = st.reward() > 0 ? ", " + T.tr("stats.trophies.pays", st.reward()) : "";
+            if (st.earned()) {
+                tile.addClassName("earned");
+                tile.getElement().setAttribute("aria-label", T.tr("stats.trophies.earnedAria",
+                        name, dayLabel(st.earnedOn(), today)));
+            } else {
+                tile.addClassName("locked");
+                if (st.reward() > 0) {
+                    Span pays = new Span("💎 " + st.reward());
+                    pays.addClassName("trophy-pays");
+                    tile.add(pays);
+                }
+                tile.getElement().setAttribute("aria-label", T.tr("stats.trophies.lockedAria",
+                        name, st.trophy().rung()) + reward);
+            }
+            if (shelf.next() == st.trophy()) {
+                tile.addClassName("next");
+            }
+            grid.add(tile);
+        }
+        Div box = new Div(grid);
+        if (shelf.next() == null) {
+            Paragraph done = new Paragraph(T.tr("stats.trophies.all"));
+            done.addClassName("feedback-hint");
+            box.add(done);
+            return box;
+        }
+        long goal = shelf.next().rung();
+        Div fill = new Div();
+        fill.addClassName("trophy-progress-fill");
+        // Computed, so inline: the one value CSS cannot know.
+        fill.getStyle().set("width", (100.0 * shelf.count() / goal) + "%");
+        Div bar = new Div(fill);
+        bar.addClassName("trophy-progress");
+        bar.getElement().setAttribute("role", "progressbar");
+        bar.getElement().setAttribute("aria-valuemin", "0");
+        bar.getElement().setAttribute("aria-valuemax", String.valueOf(goal));
+        bar.getElement().setAttribute("aria-valuenow", String.valueOf(shelf.count()));
+        String nextName = T.tr(shelf.next().nameKey());
+        bar.getElement().setAttribute("aria-label", nextName);
+        Paragraph caption = new Paragraph(T.tr("stats.trophies.progress", shelf.next().emoji(),
+                nextName, shelf.count(), goal, goal - shelf.count()));
+        caption.addClassName("trophy-progress-caption");
+        box.add(caption, bar);
         return box;
     }
 

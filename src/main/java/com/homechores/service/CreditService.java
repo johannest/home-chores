@@ -11,9 +11,14 @@ import com.homechores.domain.MemberRepository;
 import com.homechores.domain.InputLimits;
 import com.homechores.domain.SpreeTier;
 import com.homechores.domain.SpreeTierRepository;
+import com.homechores.domain.Trophy;
+import com.homechores.domain.TrophyReward;
+import com.homechores.domain.TrophyRewardRepository;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
@@ -21,7 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Credit rewards: per-chore credits for challenging tasks, admin-configured spree
- * bonuses for consecutive-day streaks, balances, and admin redemptions.
+ * bonuses for consecutive-day streaks and trophy rewards, balances, and admin redemptions.
  */
 @Service
 public class CreditService {
@@ -32,15 +37,17 @@ public class CreditService {
 
     private final CreditEntryRepository credits;
     private final SpreeTierRepository tiers;
+    private final TrophyRewardRepository trophyRewards;
     private final CompletionRepository completions;
     private final MemberRepository members;
     private final HomeState homeState;
 
     public CreditService(CreditEntryRepository credits, SpreeTierRepository tiers,
-                        CompletionRepository completions, MemberRepository members,
-                        HomeState homeState) {
+                        TrophyRewardRepository trophyRewards, CompletionRepository completions,
+                        MemberRepository members, HomeState homeState) {
         this.credits = credits;
         this.tiers = tiers;
+        this.trophyRewards = trophyRewards;
         this.completions = completions;
         this.members = members;
         this.homeState = homeState;
@@ -52,12 +59,15 @@ public class CreditService {
 
     /**
      * Awards any credits due now that {@code memberId} has an APPROVED completion of
-     * {@code task}: the chore's own credit value, plus any spree tier just reached.
+     * {@code task}: the chore's own credit value, plus any spree tier and trophy just reached.
+     *
+     * @param memberTotal the member's approved count including this completion
      */
     @Transactional
     public Award onApprovedCompletion(ChoreTask task, Long memberId, String homeCode,
-                                      Long completionId) {
-        return award(homeCode, memberId, completionId, task.getCreditValue(), task.getName());
+                                      Long completionId, long memberTotal) {
+        return award(homeCode, memberId, completionId, task.getCreditValue(), task.getName(),
+                memberTotal);
     }
 
     /**
@@ -66,14 +76,15 @@ public class CreditService {
      */
     @Transactional
     public Award onApprovedHelp(String homeCode, Long memberId, Long completionId, int credits,
-                               String what) {
+                               String what, long memberTotal) {
         return award(homeCode, memberId, completionId, ChoreService.clampCredits(credits),
                 what == null || what.isBlank() ? "Other help"
-                        : InputLimits.clip(what, InputLimits.REASON));
+                        : InputLimits.clip(what, InputLimits.REASON),
+                memberTotal);
     }
 
     private Award award(String homeCode, Long memberId, Long completionId, int value,
-                        String reason) {
+                        String reason, long memberTotal) {
         int choreCredits = 0;
         if (value > 0) {
             credits.save(new CreditEntry(homeCode, memberId, value,
@@ -106,10 +117,32 @@ public class CreditService {
             }
         }
 
-        if (choreCredits > 0 || spreeCredits > 0) {
+        int trophyCredits = trophyReward(homeCode, memberId, completionId, memberTotal);
+
+        if (choreCredits > 0 || spreeCredits > 0 || trophyCredits > 0) {
             homeState.bump(homeCode);
         }
-        return new Award(choreCredits, spreeDays, spreeCredits);
+        return new Award(choreCredits, spreeDays, spreeCredits, trophyCredits);
+    }
+
+    /**
+     * Pays the home's reward for the trophy {@code memberTotal} has just reached, if it has one
+     * and that rung has not paid this member before. Only on the exact rung, so setting a reward
+     * never pays members who passed it earlier; and only once, so a member who drops below a rung
+     * (an admin deleted an older chore) and climbs back is not paid again.
+     */
+    private int trophyReward(String homeCode, Long memberId, Long completionId, long memberTotal) {
+        Trophy trophy = Trophy.reachedAt(memberTotal).orElse(null);
+        if (trophy == null) {
+            return 0;
+        }
+        int amount = trophyRewards.findByHomeCodeAndRung(homeCode, trophy.rung())
+                .map(TrophyReward::getCredits).orElse(0);
+        if (amount <= 0 || credits.existsByMemberIdAndTrophyRung(memberId, trophy.rung())) {
+            return 0;
+        }
+        credits.save(CreditEntry.trophy(homeCode, memberId, amount, trophy.rung(), completionId));
+        return amount;
     }
 
     private Set<LocalDate> approvedDays(Long memberId) {
@@ -174,11 +207,13 @@ public class CreditService {
         }
     }
 
-    /** Wipes every credit entry and spree tier of a home (used when the home is deleted). */
+    /** Wipes every credit entry, spree tier and trophy reward of a home (used when the home
+     *  is deleted). */
     @Transactional
     public void deleteForHome(String homeCode) {
         credits.deleteByHomeCode(homeCode);
         tiers.deleteByHomeCode(homeCode);
+        trophyRewards.deleteByHomeCode(homeCode);
     }
 
     // ---- Spree tier admin ---------------------------------------------------
@@ -206,10 +241,53 @@ public class CreditService {
         });
     }
 
+    // ---- Trophy rewards (admin) ----------------------------------------------
+
+    /** The 💎 each trophy pays in this home; a trophy that pays nothing is absent. */
+    public Map<Trophy, Integer> trophyRewards(String homeCode) {
+        Map<Trophy, Integer> out = new EnumMap<>(Trophy.class);
+        for (TrophyReward r : trophyRewards.findByHomeCodeOrderByRungAsc(homeCode)) {
+            Trophy.reachedAt(r.getRung()).ifPresent(t -> out.put(t, r.getCredits()));
+        }
+        return out;
+    }
+
+    /**
+     * Sets what a trophy pays in this home (0 = nothing). The same for every member of the home.
+     * Applies from the next member to reach the rung: nobody already past it is paid.
+     *
+     * @return false when {@code adminId} is not currently an admin of that home
+     */
+    @Transactional
+    public boolean setTrophyReward(String homeCode, Trophy trophy, int amount, Long adminId) {
+        if (members.findAdmin(homeCode, adminId).isEmpty()) {
+            return false;
+        }
+        int clamped = ChoreService.clampCredits(amount);
+        TrophyReward row = trophyRewards.findByHomeCodeAndRung(homeCode, trophy.rung()).orElse(null);
+        if (clamped == (row == null ? 0 : row.getCredits())) {
+            return true; // nothing to change, so nobody's board is redrawn
+        }
+        if (clamped == 0) {
+            trophyRewards.delete(row);
+        } else if (row == null) {
+            trophyRewards.save(new TrophyReward(homeCode, trophy.rung(), clamped));
+        } else {
+            row.setCredits(clamped);
+            trophyRewards.save(row);
+        }
+        homeState.bump(homeCode);
+        return true;
+    }
+
     /** Result of awarding credits for a completion, for celebration purposes. */
-    public record Award(int choreCredits, Integer spreeDays, int spreeCredits) {
+    public record Award(int choreCredits, Integer spreeDays, int spreeCredits, int trophyCredits) {
+
+        /** Nothing awarded: a blocked or still-pending completion. */
+        public static final Award NONE = new Award(0, null, 0, 0);
+
         public int total() {
-            return choreCredits + spreeCredits;
+            return choreCredits + spreeCredits + trophyCredits;
         }
     }
 }

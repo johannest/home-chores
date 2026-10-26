@@ -11,6 +11,7 @@ import com.homechores.domain.CompletionStatus;
 import com.homechores.domain.Feedback;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
+import com.homechores.domain.Trophy;
 import com.homechores.service.ChoreService.CompleteOutcome;
 import java.time.LocalDate;
 import java.util.List;
@@ -119,7 +120,7 @@ class ChoreServiceTest {
     }
 
     @Test
-    void approvalOff_countsImmediately_andHitsMilestoneAtFive() {
+    void approvalOff_countsImmediately_andReachesTheFirstTrophyAtFive() {
         Member alex = service.createHome("Nest", "Alex");
         List<ChoreTask> t = tasks(alex.getHomeCode());
 
@@ -131,7 +132,7 @@ class ChoreServiceTest {
         CompleteOutcome fifth = service.complete(t.get(1).getId(), alex.getId());
 
         assertEquals(5, service.completionCount(alex.getId()));
-        assertEquals(5, fifth.milestone(), "milestone fires at 5");
+        assertEquals(Trophy.SPROUT, fifth.trophy(), "the first trophy is reached at 5");
     }
 
     @Test
@@ -154,7 +155,7 @@ class ChoreServiceTest {
         assertTrue(pending.allowed());
         assertTrue(pending.pending());
         assertEquals(0, service.completionCount(alex.getId()), "pending doesn't count yet");
-        assertNull(pending.milestone());
+        assertNull(pending.trophy());
 
         assertEquals(1, service.pendingCount(alex.getHomeCode()));
         service.approve(pending.completionId(), alex.getId());

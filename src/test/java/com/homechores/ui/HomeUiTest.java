@@ -9,10 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.Completion;
 import com.homechores.domain.CompletionRepository;
+import com.homechores.domain.CompletionStatus;
 import com.homechores.domain.Home;
 import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import com.homechores.domain.Season;
+import com.homechores.domain.Trophy;
 import com.homechores.service.Author;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
@@ -36,11 +38,15 @@ import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
+import com.vaadin.flow.component.textfield.IntegerField;
 import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.server.VaadinSession;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.Locale;
@@ -1308,6 +1314,139 @@ class HomeUiTest extends HomeChoresUiTest {
                 .filter(d -> d.getClassNames().contains("celebrate-title"))
                 .map(d -> d.getElement().getTextRecursively())
                 .toList();
+    }
+
+    // ---- Trophies -----------------------------------------------------------------
+
+    /** {@code n} approved chores on the home's first chore, done over the past hours. */
+    private void approvedBefore(Member m, int n) {
+        Long task = service.tasksOf(m.getHomeCode()).get(0).getId();
+        for (int i = 0; i < n; i++) {
+            Completion c = new Completion(m.getHomeCode(), task, m.getId(), CompletionStatus.APPROVED);
+            c.setDoneAt(Instant.now().minus(Duration.ofHours(2L * (n - i))));
+            completions.save(c);
+        }
+    }
+
+    private List<Div> trophyTiles() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("trophy-tile") && usable(d))
+                .toList();
+    }
+
+    /** Celebration titles in dialogs that are still open. */
+    private List<String> openCelebrateTitles() {
+        return $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("celebrate-title") && usable(d))
+                .map(d -> d.getElement().getTextRecursively())
+                .toList();
+    }
+
+    @Test
+    void trophyShelf_isOnMyStats_withEveryRungAndTheNextOnesProgress() {
+        Member alex = service.createHome("Shelf", "Alex");
+        approvedBefore(alex, 7);
+        service.markTrophiesSeen(alex.getId());
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+        selectTab("Stats");
+
+        List<Div> tiles = trophyTiles();
+        assertEquals(8, tiles.size(), "every rung of the ladder");
+        assertTrue(tiles.get(0).getClassNames().contains("earned"), "🌱 at five");
+        assertTrue(tiles.get(1).getClassNames().contains("locked"));
+        assertTrue(tiles.get(1).getClassNames().contains("next"), "🧹 is the one to aim for");
+        assertNull(tiles.get(0).getElement().getAttribute("tabindex"), "a fact, not a control");
+        assertEquals("listitem", tiles.get(0).getElement().getAttribute("role"));
+        Div bar = $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("trophy-progress") && usable(d))
+                .findFirst().orElseThrow();
+        assertEquals("progressbar", bar.getElement().getAttribute("role"));
+        assertEquals("7", bar.getElement().getAttribute("aria-valuenow"));
+        assertEquals("10", bar.getElement().getAttribute("aria-valuemax"));
+    }
+
+    @Test
+    void aTrophyEarnedWhileAway_opensOnTheBoardOnce_andLeadsToTheShelf() {
+        Member alex = service.createHome("Away", "Alex");
+        approvedBefore(alex, 5); // e.g. approved by an admin; the seen marker is still 0
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+
+        assertEquals(List.of("New trophy: Sprout!"), openCelebrateTitles());
+        clickButton("See my trophies");
+        assertEquals(8, trophyTiles().size(), "straight onto the shelf");
+
+        navigate(PrivacyView.class);
+        navigate(HomeView.class);
+        assertTrue(openCelebrateTitles().isEmpty(), "shown once, not on every visit");
+    }
+
+    @Test
+    void severalUnseenTrophies_shareOneDialog() {
+        Member alex = service.createHome("Veteran", "Alex");
+        approvedBefore(alex, 26);
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+
+        assertEquals(List.of("3 new trophies!"), openCelebrateTitles());
+    }
+
+    @Test
+    void theLeaderboardChip_wearsTheBestTrophy_withAName() {
+        Member alex = service.createHome("Badges", "Alex");
+        approvedBefore(alex, 10);
+        service.markTrophiesSeen(alex.getId());
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+
+        Span badge = $(Span.class).all().stream()
+                .filter(sp -> sp.getClassNames().contains("trophy-badge") && usable(sp))
+                .findFirst().orElseThrow(() -> new AssertionError("no trophy on the chip"));
+        assertEquals("🧹", badge.getText());
+        assertEquals("Trophy: Helper", badge.getElement().getAttribute("aria-label"));
+    }
+
+    @Test
+    void tappingTowardsATrophy_saysHowNear_andReachingItShowsTheReward() {
+        Member alex = service.createHome("Climb", "Alex");
+        String code = alex.getHomeCode();
+        Home home = service.findHome(code).orElseThrow();
+        home.setConfirmCompletion(false);
+        service.saveHome(home);
+        creditService.setTrophyReward(code, Trophy.SPROUT, 7, alex.getId());
+        approvedBefore(alex, 3);
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+
+        clickChoreCard(1);
+        assertTrue($(Paragraph.class).all().stream().anyMatch(p -> usable(p)
+                        && "Just 1 more to 🌱 Sprout (+7 💎)!".equals(p.getText())),
+                "the fourth chore says the fifth earns a trophy");
+        clickButton("Done 🎉");
+
+        clickChoreCard(2);
+        assertEquals(List.of("New trophy: Sprout!"), openCelebrateTitles());
+        assertTrue($(Paragraph.class).all().stream().anyMatch(p -> usable(p)
+                && "+7 💎 reward".equals(p.getText())));
+    }
+
+    @Test
+    void admin_setsATrophysReward_inTheRewardsSection() {
+        Member alex = service.createHome("Payday", "Alex");
+        String code = alex.getHomeCode();
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Admin");
+        openSection("Rewards");
+
+        IntegerField silver = $(IntegerField.class).all().stream()
+                .filter(f -> "💎 reward for Silver".equals(f.getAriaLabel().orElse(null)))
+                .findFirst().orElseThrow(() -> new AssertionError("no Silver reward field"));
+        test(silver).setValue(20);
+
+        assertEquals(Map.of(Trophy.SILVER, 20),
+                creditService.trophyRewards(code));
     }
 
     // ---- Avatars -----------------------------------------------------------------

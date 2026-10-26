@@ -1,6 +1,7 @@
 package com.homechores.domain;
 
 import java.util.List;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -11,6 +12,21 @@ public interface CompletionRepository extends JpaRepository<Completion, Long> {
     long countByMemberIdAndStatus(Long memberId, CompletionStatus status);
 
     long countByHomeCodeAndStatus(String homeCode, CompletionStatus status);
+
+    /** Every member's all-time approved count in one grouped query — the leaderboard's trophy
+     *  badges, which must not cost a query per member on every redraw. A member with nothing
+     *  approved has no row. */
+    @Query("select new com.homechores.domain.MemberCount(c.memberId, count(c))"
+            + " from Completion c"
+            + " where c.homeCode = :homeCode"
+            + " and c.status = com.homechores.domain.CompletionStatus.APPROVED"
+            + " group by c.memberId")
+    List<MemberCount> approvedCountsByMember(@Param("homeCode") String homeCode);
+
+    /** A member's completions with this status in the order they were done, a page at a time —
+     *  a page of one at offset n-1 is the n-th, the day a trophy rung was reached. */
+    List<Completion> findByMemberIdAndStatusOrderByDoneAtAscIdAsc(Long memberId,
+            CompletionStatus status, Pageable page);
 
     /** Most recent completions of a given task, newest first (for the fairness streak check). */
     List<Completion> findByTaskIdOrderByDoneAtDesc(Long taskId);
@@ -83,7 +99,7 @@ public interface CompletionRepository extends JpaRepository<Completion, Long> {
     /** The newest completions of a home — the admin's correction list, which shows a
      *  page's worth and must not load a family's whole history to find it. */
     List<Completion> findByHomeCodeOrderByDoneAtDesc(String homeCode,
-            org.springframework.data.domain.Pageable pageable);
+            Pageable pageable);
 
     @Transactional
     void deleteByHomeCode(String homeCode);

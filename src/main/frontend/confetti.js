@@ -2,6 +2,9 @@
 // Exposed on window so it can be triggered from the server via Page.executeJs.
 (function () {
   function fire(intensity) {
+    // Seconds of flying squares across the whole screen are exactly what reduced motion asks
+    // to be spared; the dialog that accompanies every burst still says the same thing.
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     // 'fire' (3+ chores in one day) trades a smaller opening burst for side cannons and
     // a delayed second volley — more spectacle, similar total particle budget to 'big'.
     const count =

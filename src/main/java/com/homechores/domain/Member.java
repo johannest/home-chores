@@ -38,6 +38,15 @@ public class Member {
     private Instant joinedAt = Instant.now();
 
     /**
+     * The highest {@link Trophy} rung this member has been shown the unlock dialog for. A
+     * trophy earned while they were away — approved later, or logged for them by an admin — is
+     * above it, and is shown the next time they open the board. The DDL default is 0, so
+     * every member on the day trophies ship sees the ones they already own, once.
+     */
+    @Column(columnDefinition = "integer not null default 0")
+    private int trophiesSeen = 0;
+
+    /**
      * SHA-256 of the secret this member's device holds in its local storage. A member id is
      * a small sequential number anyone can guess; the secret is what actually proves "this
      * browser is that member". Only the hash is kept, so the database (and its backups)
@@ -139,6 +148,14 @@ public class Member {
 
     public void setJoinedAt(Instant joinedAt) {
         this.joinedAt = joinedAt;
+    }
+
+    public int getTrophiesSeen() {
+        return trophiesSeen;
+    }
+
+    public void setTrophiesSeen(int trophiesSeen) {
+        this.trophiesSeen = trophiesSeen;
     }
 
     public String getReminderTime() {
