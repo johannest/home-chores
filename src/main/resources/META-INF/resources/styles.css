@@ -308,6 +308,14 @@ vaadin-connection-indicator .v-loading-indicator {
     vertical-align: bottom;
 }
 
+/* The shared device's "what this screen is" pill. It is the one line telling the family whose
+   board this is, so it is dark on a near-white pill rather than white on the gradient, which
+   measures 2.6–2.9:1 (UX review row B). */
+.device-badge {
+    background: rgba(255, 255, 255, 0.92);
+    color: #1f2937;
+}
+
 /* Every header menu button (invite, "⋯"): a translucent pill on the gradient. The menu-bar
    button is a light-DOM child, so this just works. */
 .home-header vaadin-menu-bar-button {
@@ -1009,6 +1017,10 @@ body.hold-dragging {
 }
 
 .who-chip {
+    /* A 40-character name must not push the dialog sideways at 360px: the chip shrinks to the
+       row and its label ends in an ellipsis. */
+    max-width: 100%;
+    min-width: 0;
     min-height: 48px;
     padding: 4px 16px 4px 6px;
     border-radius: 999px;
@@ -1016,6 +1028,12 @@ body.hold-dragging {
     background: var(--lumo-base-color);
     font-weight: 600;
     cursor: pointer;
+}
+
+.who-chip::part(label) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .who-chip .avatar-dot {

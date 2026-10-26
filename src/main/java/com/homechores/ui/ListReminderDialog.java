@@ -2,6 +2,7 @@ package com.homechores.ui;
 
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListReminder;
+import com.homechores.service.Author;
 import com.homechores.service.ListItemService;
 import com.homechores.service.ListReminderService;
 import com.homechores.service.ListReminderService.QuickOption;
@@ -156,7 +157,7 @@ class ListReminderDialog extends Dialog {
 
         if (fired) {
             Button done = new Button(T.tr("listReminder.fired.done"), e -> {
-                lists.setDone(item.getId(), memberId, true); // also drops the reminder
+                lists.setDone(item.getId(), Author.member(memberId), true); // also drops the reminder
                 close();
                 toast(T.tr("listReminder.fired.doneToast", item.getText()));
                 onChange.run();

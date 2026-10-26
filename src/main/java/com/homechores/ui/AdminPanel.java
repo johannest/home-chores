@@ -807,7 +807,7 @@ class AdminPanel extends VerticalLayout {
                 new RouterLink(T.tr("landing.agree.link"), TermsView.class),
                 new Span(" " + T.tr("admin.addMember.agree.suffix"))));
         Button save = new Button(T.tr("admin.addMember.action"), e -> {
-            if (name.isEmpty() || !Boolean.TRUE.equals(agree.getValue()) || !stillAdmin()) {
+            if (name.getValue().isBlank() || !Boolean.TRUE.equals(agree.getValue()) || !stillAdmin()) {
                 return;
             }
             Optional<Member> added = service.addMemberWithoutDevice(homeCode, name.getValue(),
@@ -822,7 +822,7 @@ class AdminPanel extends VerticalLayout {
         });
         save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         save.setEnabled(false);
-        Runnable gate = () -> save.setEnabled(!name.isEmpty()
+        Runnable gate = () -> save.setEnabled(!name.getValue().isBlank()
                 && Boolean.TRUE.equals(agree.getValue()));
         name.setValueChangeMode(ValueChangeMode.EAGER);
         name.addValueChangeListener(e -> gate.run());

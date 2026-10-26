@@ -3,6 +3,7 @@ package com.homechores.ui;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.homechores.domain.ChoreTask;
@@ -17,13 +18,17 @@ import com.vaadin.flow.component.ClickEvent;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.ComponentUtil;
 import com.vaadin.flow.component.button.Button;
+import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
+import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
+import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.component.textfield.TextField;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.Test;
@@ -127,11 +132,64 @@ class SharedDeviceUiTest extends HomeChoresUiTest {
 
         clickChoreCard(alexIndex);
         click(chipButtons().get(1)); // Milla, but it is Alex's chore today
-        assertEquals(0, service.completionCount(milla.getId()), "refused, in her name");
+        assertEquals(0, service.completionCount(milla.getId()));
+        assertEquals("⭐ \"" + chores.get(alexIndex).getName() + "\" isn't Milla's assigned chore today.",
+                lastNotificationText(), "refused, in her name — not \"your\" on nobody's board");
 
         clickChoreCard(alexIndex);
         click(chipButtons().get(0));
         assertEquals(1, service.completionCount(alex.getId()));
+        assertTrue(spanTexts().stream().anyMatch(t -> t.startsWith("Alex just did")),
+                "the undo strip is Alex's now: " + spanTexts());
+    }
+
+    /** On the device "I'll do it" asks for whom, and a booking is anyone's to clear there —
+     *  the device is the household's, and a booking left by someone who went out would block
+     *  the kitchen. */
+    @Test
+    void booking_asksForWhom_andAnyonesBookingIsClearedHere() {
+        openAsDevice();
+        ChoreTask chore = service.tasksOf(code).get(0);
+
+        click(onCard(chore.getId(), "🔖 I'll do it"));
+        assertTrue(hasDivWithText("Who will do it?"));
+        click(chipButtons().get(1));
+        assertEquals(milla.getId(), bookedBy(chore));
+
+        click(onCard(chore.getId(), "Cancel booking"));
+        assertNull(bookedBy(chore), "Milla's booking, cleared from the kitchen");
+
+        service.bookChore(chore.getId(), alex.getId()); // Alex, on his own phone
+        awaitRedraw(() -> cardButton(chore.getId(), "Cancel booking").isPresent());
+        click(onCard(chore.getId(), "Cancel booking"));
+        assertNull(bookedBy(chore));
+    }
+
+    /** Other help asks who too, and waits for an admin in that member's name. */
+    @Test
+    void otherHelp_asksWho_andWaitsForAnAdminInTheirName() {
+        openAsDevice();
+        Div helpCard = $(Div.class).all().stream()
+                .filter(d -> d.getClassNames().contains("help-card") && usable(d))
+                .findFirst().orElseThrow();
+        ComponentUtil.fireEvent(helpCard, new ClickEvent<>(helpCard));
+        assertTrue(hasDivWithText("Who helped?"));
+        click(chipButtons().get(1));
+
+        Dialog form = $(Dialog.class).all().stream().filter(Dialog::isOpened)
+                .filter(d -> "Milla helped with something else".equals(d.getHeaderTitle()))
+                .findFirst().orElseThrow();
+        clickButton("Send for approval");
+        assertTrue(form.isOpened(), "nothing written is nothing sent");
+        $(TextArea.class).all().stream().filter(this::usable).findFirst().orElseThrow()
+                .setValue("Walked the dog");
+        clickButton("Send for approval");
+
+        assertFalse(form.isOpened());
+        assertEquals(1, service.pendingOtherHelpCount(code, milla.getId()));
+        assertEquals(0, service.pendingOtherHelpCount(code, alex.getId()));
+        assertTrue(spanTexts().stream().anyMatch(t -> t.startsWith("Milla just logged")),
+                spanTexts().toString());
     }
 
     @Test
@@ -173,6 +231,32 @@ class SharedDeviceUiTest extends HomeChoresUiTest {
     }
 
     // ---- helpers (the private ones in HomeUiTest, for the three this class needs) ----
+
+    private Long bookedBy(ChoreTask chore) {
+        return service.tasksOf(code).stream().filter(t -> t.getId().equals(chore.getId()))
+                .findFirst().orElseThrow().getBookedByMemberId();
+    }
+
+    /** A button on one chore's card, found by the card's {@code data-task-id}. */
+    private Optional<Button> cardButton(Long taskId, String text) {
+        return $(Div.class).all().stream()
+                .filter(d -> String.valueOf(taskId).equals(d.getElement().getAttribute("data-task-id"))
+                        && usable(d))
+                .flatMap(Div::getChildren)
+                .filter(c -> c instanceof Button b && text.equals(b.getText()))
+                .map(Button.class::cast).findFirst();
+    }
+
+    private Button onCard(Long taskId, String text) {
+        return cardButton(taskId, text)
+                .orElseThrow(() -> new AssertionError("No \"" + text + "\" on the card"));
+    }
+
+    private String lastNotificationText() {
+        List<Notification> open = $(Notification.class).all().stream()
+                .filter(Notification::isOpened).toList();
+        return test(open.get(open.size() - 1)).getText();
+    }
 
     private boolean usable(Component c) {
         Component cur = c;

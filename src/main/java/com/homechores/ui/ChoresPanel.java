@@ -45,6 +45,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 /** The chore board: daily progress, leaderboard, and tap-to-complete chore cards. */
 class ChoresPanel extends VerticalLayout {
@@ -610,42 +611,35 @@ class ChoresPanel extends VerticalLayout {
         // Booking controls — default division only, and only for a due chore. On the shared
         // device a booking is anyone's to clear (the device is the household's), and a fresh
         // one asks who it is for.
-        if (!rotating && view.due() && viewer.isDevice()) {
-            if (view.bookedById() != null) {
-                Button cancel = new Button(T.tr("board.cancelBooking"), e -> {
-                    sharedDevices.cancelBooking(viewer.deviceId(), taskId);
+        if (!rotating && view.due()) {
+            boolean device = viewer.isDevice();
+            if (device ? view.bookedById() != null : view.bookedByMe(memberId)) {
+                card.add(bookButton(T.tr("board.cancelBooking"), () -> {
+                    if (device) {
+                        sharedDevices.cancelBooking(viewer.deviceId(), taskId);
+                    } else {
+                        service.cancelBooking(taskId, memberId);
+                    }
                     refresh();
-                });
-                cancel.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
-                cancel.addClassName("book-btn");
-                card.add(cancel);
-            } else if (view.lockReason() == LockReason.NONE) {
-                Button book = new Button(T.tr("board.book"), e -> whoDialog(view.task().getEmoji(),
-                        view.task().getName(), T.tr("board.who.book"), m -> handleBookAs(taskId, m)));
-                book.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
-                book.addClassName("book-btn");
-                card.add(book);
-            }
-        } else if (!rotating && view.due()) {
-            if (view.bookedByMe(memberId)) {
-                Button cancel = new Button(T.tr("board.cancelBooking"), e -> {
-                    service.cancelBooking(taskId, memberId);
-                    refresh();
-                });
-                // Not LUMO_SMALL: at 30px tall and 6px under the tap-to-complete area, a slightly
-                // low thumb completed the chore instead of booking it. Full height plus the gap
-                // .book-btn adds in styles.css separates the two.
-                cancel.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
-                cancel.addClassName("book-btn");
-                card.add(cancel);
+                }));
             } else if (view.bookedById() == null && view.lockReason() == LockReason.NONE) {
-                Button book = new Button(T.tr("board.book"), e -> handleBook(taskId));
-                book.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
-                book.addClassName("book-btn");
-                card.add(book);
+                card.add(bookButton(T.tr("board.book"), device
+                        ? () -> whoDialog(view.task().getEmoji(), view.task().getName(),
+                                T.tr("board.who.book"), m -> handleBook(taskId, m))
+                        : () -> handleBook(taskId, null)));
             }
         }
         return card;
+    }
+
+    private static Button bookButton(String label, Runnable onClick) {
+        Button button = new Button(label, e -> onClick.run());
+        // Not LUMO_SMALL: at 30px tall and 6px under the tap-to-complete area, a slightly
+        // low thumb completed the chore instead of booking it. Full height plus the gap
+        // .book-btn adds in styles.css separates the two.
+        button.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        button.addClassName("book-btn");
+        return button;
     }
 
     /**
@@ -742,57 +736,25 @@ class ChoresPanel extends VerticalLayout {
         }
         if (viewer.isDevice()) {
             card.addClickListener(e -> whoDialog("🙋", T.tr("board.otherHelp"),
-                    T.tr("board.who.help"), this::openOtherHelpDialogFor));
+                    T.tr("board.who.help"), who -> openOtherHelpDialog(false, who)));
         } else {
-            card.addClickListener(e -> openOtherHelpDialog(admin));
+            card.addClickListener(e -> openOtherHelpDialog(admin, null));
         }
         return card;
-    }
-
-    /** Other help from the shared device, for the member just picked; it waits for an admin
-     *  exactly as their own entry would. */
-    private void openOtherHelpDialogFor(Member who) {
-        Dialog dialog = new Dialog();
-        dialog.setHeaderTitle(T.tr("board.otherHelp.titleFor", who.getName()));
-        dialog.setWidth("min(90vw, 24em)");
-        TextArea what = new TextArea(T.tr("board.otherHelp.what"));
-        what.setPlaceholder(T.tr("board.otherHelp.placeholder"));
-        what.setWidthFull();
-        what.setMaxLength(ChoreService.MAX_HELP_LENGTH);
-        what.setValueChangeMode(ValueChangeMode.EAGER);
-        what.setHelperText(T.tr("board.otherHelp.helper"));
-        what.focus();
-        Button send = new Button(T.tr("board.otherHelp.send"), e -> {
-            if (what.getValue() == null || what.getValue().isBlank()) {
-                what.setInvalid(true);
-                what.setErrorMessage(T.tr("board.otherHelp.required"));
-                return;
-            }
-            var logged = sharedDevices.logOtherHelp(viewer.deviceId(), who.getId(), what.getValue());
-            dialog.close();
-            logged.ifPresent(c -> lastFromDevice = new FromDevice(c.getId(), who.getId()));
-            Notification n = Toasts.show(
-                    logged.isPresent() ? T.tr("board.otherHelp.sent") : T.tr("board.otherHelp.off"),
-                    4000);
-            n.addThemeVariants(logged.isPresent() ? NotificationVariant.LUMO_SUCCESS
-                    : NotificationVariant.LUMO_CONTRAST);
-            refresh();
-        });
-        send.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
-        dialog.add(what);
-        dialog.getFooter().add(new Button(T.tr("common.cancel"), e -> dialog.close()), send);
-        dialog.open();
     }
 
     /**
      * Describe-what-you-did. For a member it goes to an admin to accept or decline. An admin's
      * own entry counts at once — their reading it is the approval
      * ({@code ChoreService.logOtherHelpAsAdmin}) — so they name the reward here, in the same
-     * field they would otherwise see when accepting somebody else's.
+     * field they would otherwise see when accepting somebody else's. On the shared device it
+     * is written {@code forWho}, the member just picked, and waits for an admin exactly as
+     * their own entry would.
      */
-    private void openOtherHelpDialog(boolean admin) {
+    private void openOtherHelpDialog(boolean admin, Member forWho) {
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle(T.tr("board.otherHelp.title"));
+        dialog.setHeaderTitle(forWho == null ? T.tr("board.otherHelp.title")
+                : T.tr("board.otherHelp.titleFor", forWho.getName()));
         dialog.setWidth("min(90vw, 24em)");
 
         Span intro = new Span(T.tr(admin ? "board.otherHelp.introAdmin" : "board.otherHelp.intro"));
@@ -832,7 +794,12 @@ class ChoresPanel extends VerticalLayout {
                 refresh();
                 return;
             }
-            boolean logged = service.logOtherHelp(homeCode, memberId, what.getValue()).isPresent();
+            Optional<Completion> entry = forWho == null
+                    ? service.logOtherHelp(homeCode, memberId, what.getValue())
+                    : sharedDevices.logOtherHelp(viewer.deviceId(), forWho.getId(), what.getValue());
+            entry.filter(c -> forWho != null)
+                    .ifPresent(c -> lastFromDevice = new FromDevice(c.getId(), forWho.getId()));
+            boolean logged = entry.isPresent();
             dialog.close();
             Notification n = Toasts.show(
                     logged ? T.tr("board.otherHelp.sent") : T.tr("board.otherHelp.off"),
@@ -873,7 +840,7 @@ class ChoresPanel extends VerticalLayout {
         boolean confirm = service.findHome(homeCode)
                 .map(Home::isConfirmCompletion).orElse(true);
         if (!confirm && !viewer.isDevice()) {
-            completeNow(taskId);
+            completeNow(taskId, null);
             return;
         }
         service.taskViews(homeCode, memberId, SessionContext.timeZone()).stream()
@@ -886,23 +853,25 @@ class ChoresPanel extends VerticalLayout {
                         // setting does not apply, since a board that belongs to nobody has
                         // nobody to skip the question for.
                         whoDialog(view.task().getEmoji(), view.task().getName(),
-                                T.tr("board.who.did"), m -> completeAs(taskId, m));
+                                T.tr("board.who.did"), m -> completeNow(taskId, m));
                     } else {
                         confirmDialog(view.task().getEmoji(), view.task().getName(),
-                                () -> completeNow(taskId));
+                                () -> completeNow(taskId, null));
                     }
                 });
     }
 
     /**
-     * "Who?" — the shared device's version of the confirm dialog: the chore, a question, and
-     * the family as big avatar chips. The ids live in the lambdas, never in the DOM, and the
-     * service re-checks that the member is in the device's home anyway.
+     * The board's question: the chore's emoji and name, a question under them, then the
+     * answers, each closing the dialog before it acts. Focus lands on the first answer, so the
+     * dialog is named by its question and chore — otherwise a screen reader hears only "Alex,
+     * button" with nothing to say what is being asked.
      */
-    private void whoDialog(String emoji, String title, String question, Consumer<Member> onPick) {
+    private void askDialog(String emoji, String title, String question, Component... answers) {
         Dialog dialog = new Dialog();
         dialog.setModal(true);
         dialog.addClassName("celebrate-dialog");
+        dialog.getElement().setAttribute("aria-label", question + " " + title);
 
         Div emojiEl = new Div();
         emojiEl.setText(emoji);
@@ -914,89 +883,64 @@ class ChoresPanel extends VerticalLayout {
         questionEl.setText(question);
         questionEl.addClassName("celebrate-text");
 
+        VerticalLayout layout = new VerticalLayout(emojiEl, titleEl, questionEl);
+        layout.add(answers);
+        layout.setAlignItems(FlexComponent.Alignment.CENTER);
+        layout.setPadding(false);
+        dialog.add(layout);
+        // Every answer, chips included, ends the question.
+        layout.getChildren().flatMap(c -> c instanceof Button ? Stream.of(c)
+                : c.getChildren()).filter(Button.class::isInstance).map(Button.class::cast)
+                .forEach(b -> b.addClickListener(e -> dialog.close()));
+        dialog.open();
+    }
+
+    /**
+     * "Who?" — the shared device's version of the confirm dialog: the family as big avatar
+     * chips. The ids live in the lambdas, never in the DOM, and the service re-checks that the
+     * member is in the device's home anyway.
+     */
+    private void whoDialog(String emoji, String title, String question, Consumer<Member> onPick) {
         Div chips = new Div();
         chips.addClassName("who-row");
         for (Member m : service.membersOf(homeCode)) {
-            Button chip = new Button(m.getName(), e -> {
-                dialog.close();
-                onPick.accept(m);
-            });
-            chip.setPrefixComponent(MemberAvatar.dot(m));
+            Button chip = new Button(m.getName(), e -> onPick.accept(m));
+            Div dot = MemberAvatar.dot(m);
+            // The name is the chip's label already; the face read out too says it twice.
+            dot.getElement().setAttribute("aria-hidden", "true");
+            chip.setPrefixComponent(dot);
             chip.addClassName("who-chip");
             chips.add(chip);
         }
-        Button cancel = new Button(T.tr("common.cancel"), e -> dialog.close());
+        Button cancel = new Button(T.tr("common.cancel"));
         cancel.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         cancel.setWidthFull();
-
-        VerticalLayout layout = new VerticalLayout(emojiEl, titleEl, questionEl, chips, cancel);
-        layout.setAlignItems(FlexComponent.Alignment.CENTER);
-        layout.setPadding(false);
-        dialog.add(layout);
-        dialog.open();
-    }
-
-    /** The device's tap, attributed to the member picked: every §4.3 lock runs for them. */
-    private void completeAs(Long taskId, Member who) {
-        CompleteOutcome outcome = sharedDevices.complete(viewer.deviceId(), taskId, who.getId(),
-                SessionContext.timeZone());
-        if (!outcome.allowed()) {
-            Celebrations.showBlocked(outcome, true);
-            refresh();
-            return;
-        }
-        lastFromDevice = new FromDevice(outcome.completionId(), who.getId());
-        Celebrations.afterComplete(service, outcome, this::undoLast);
-        refresh();
-    }
-
-    private void handleBookAs(Long taskId, Member who) {
-        if (!sharedDevices.book(viewer.deviceId(), taskId, who.getId())) {
-            Notification n = Notification.show(T.tr("board.booked.someoneElse"),
-                    3000, Notification.Position.MIDDLE);
-            n.addThemeVariants(NotificationVariant.LUMO_CONTRAST);
-        }
-        refresh();
+        askDialog(emoji, title, question, chips, cancel);
     }
 
     private void confirmDialog(String emoji, String choreName, Runnable onYes) {
-        Dialog dialog = new Dialog();
-        dialog.setModal(true);
-        dialog.addClassName("celebrate-dialog");
-
-        Div emojiEl = new Div();
-        emojiEl.setText(emoji);
-        emojiEl.addClassName("celebrate-emoji");
-        Div titleEl = new Div();
-        titleEl.setText(choreName);
-        titleEl.addClassName("celebrate-title");
-        Div question = new Div();
-        question.setText(T.tr("confirm.didYouDoIt"));
-        question.addClassName("celebrate-text");
-
-        Button yes = new Button(T.tr("confirm.yes"), e -> {
-            dialog.close();
-            onYes.run();
-        });
+        Button yes = new Button(T.tr("confirm.yes"), e -> onYes.run());
         yes.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_LARGE);
         yes.setWidthFull();
-        Button no = new Button(T.tr("confirm.notYet"), e -> dialog.close());
+        Button no = new Button(T.tr("confirm.notYet"));
         no.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         no.setWidthFull();
-
-        VerticalLayout layout = new VerticalLayout(emojiEl, titleEl, question, yes, no);
-        layout.setAlignItems(FlexComponent.Alignment.CENTER);
-        layout.setPadding(false);
-        dialog.add(layout);
-        dialog.open();
+        askDialog(emoji, choreName, T.tr("confirm.didYouDoIt"), yes, no);
     }
 
-    private void completeNow(Long taskId) {
-        CompleteOutcome outcome = service.complete(taskId, memberId, SessionContext.timeZone());
+    /** The tap, as this member's — or, on the shared device, as the member picked there
+     *  ({@code who}), with every §4.3 lock run for them. */
+    private void completeNow(Long taskId, Member who) {
+        CompleteOutcome outcome = who == null
+                ? service.complete(taskId, memberId, SessionContext.timeZone())
+                : sharedDevices.complete(viewer.deviceId(), taskId, who.getId(), SessionContext.timeZone());
         if (!outcome.allowed()) {
-            Celebrations.showBlocked(outcome);
+            Celebrations.showBlocked(outcome, who != null);
             refresh();
             return;
+        }
+        if (who != null) {
+            lastFromDevice = new FromDevice(outcome.completionId(), who.getId());
         }
         Celebrations.afterComplete(service, outcome, this::undoLast);
         refresh();
@@ -1075,8 +1019,11 @@ class ChoresPanel extends VerticalLayout {
         return ChoreService.describe(c, task);
     }
 
-    private void handleBook(Long taskId) {
-        if (!service.bookChore(taskId, memberId)) {
+    /** "I'll do it", as this member — or on the shared device as the member picked there. */
+    private void handleBook(Long taskId, Member who) {
+        boolean booked = who == null ? service.bookChore(taskId, memberId)
+                : sharedDevices.book(viewer.deviceId(), taskId, who.getId());
+        if (!booked) {
             Notification n = Notification.show(T.tr("board.booked.someoneElse"),
                     3000, Notification.Position.MIDDLE);
             n.addThemeVariants(NotificationVariant.LUMO_CONTRAST);

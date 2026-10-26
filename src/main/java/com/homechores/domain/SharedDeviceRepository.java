@@ -10,8 +10,6 @@ public interface SharedDeviceRepository extends JpaRepository<SharedDevice, Long
 
     long countByHomeCode(String homeCode);
 
-    boolean existsByHomeCode(String homeCode);
-
     @Transactional
     void deleteByHomeCode(String homeCode);
 }

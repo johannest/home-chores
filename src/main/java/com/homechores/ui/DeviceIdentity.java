@@ -133,7 +133,15 @@ final class DeviceIdentity {
             callback.accept("unknown");
             return;
         }
-        ui.getPage().executeJs(PROBE).then(String.class, callback);
+        ui.getPage().executeJs(PROBE).then(String.class, raw -> callback.accept(knownContext(raw)));
+    }
+
+    private static final Pattern CONTEXT = Pattern.compile("(standalone|browser),(storage-ok|storage-blocked)");
+
+    /** The probe's answer if it is one the probe can give, else {@code unknown}: the answer is
+     *  the browser's to write, and whatever it says ends up in the log. */
+    static String knownContext(String raw) {
+        return raw != null && CONTEXT.matcher(raw).matches() ? raw : "unknown";
     }
 
     /**

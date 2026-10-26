@@ -78,6 +78,9 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
      *  own 5-tries lock is per home; this bounds the guessing across homes too. */
     private static final int MAX_PAIRINGS_PER_HOUR = 10;
 
+    /** Log lines about a refused stored identity per visitor per hour (§4.1). */
+    private static final int MAX_REJECTION_LINES_PER_HOUR = 5;
+
     private static final java.time.Duration RATE_WINDOW = java.time.Duration.ofHours(1);
 
     /** Join-form code, kept as a field so a ?join= link can prefill it in beforeEnter. */
@@ -386,7 +389,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
      */
     private void openPairDialog(String rawCode) {
         if (rawCode == null || rawCode.isBlank()) {
-            warn(T.tr("landing.rejoin.needCode"));
+            warn(T.tr("landing.device.needCode"));
             return;
         }
         Dialog d = new Dialog();
@@ -599,8 +602,12 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         String browser = DeviceIdentity.browserLabel(
                 VaadinSession.getCurrent().getBrowser().getUserAgent());
         Object who = id == null ? "-" : id; // an unreadable value names nobody
-        DeviceIdentity.probeContext(context -> log.info(
-                "Stored {} identity {} rejected: {} ({}; {})", kind, who, failure, context, browser));
+        // The value is the browser's to write, so a page reloaded in a loop must not be able to
+        // fill the log: a real phone is refused once and then has nothing stored.
+        if (rateLimiter.allow("rejected:" + clientKey(), MAX_REJECTION_LINES_PER_HOUR, RATE_WINDOW)) {
+            DeviceIdentity.probeContext(context -> log.info(
+                    "Stored {} identity {} rejected: {} ({}; {})", kind, who, failure, context, browser));
+        }
     }
 
     /** A member hears who replaced them; a shared device only that it is no longer paired. */

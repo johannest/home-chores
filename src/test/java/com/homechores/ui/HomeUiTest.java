@@ -13,9 +13,11 @@ import com.homechores.domain.Home;
 import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import com.homechores.domain.Season;
+import com.homechores.service.Author;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
 import com.homechores.service.ListItemService;
+import com.homechores.service.SharedDeviceService;
 import com.vaadin.flow.component.ClickEvent;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.ComponentUtil;
@@ -30,6 +32,7 @@ import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.menubar.MenuBar;
+import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
@@ -59,6 +62,9 @@ class HomeUiTest extends HomeChoresUiTest {
 
     @Autowired
     ListItemService lists;
+
+    @Autowired
+    SharedDeviceService sharedDevices;
 
     /** Pin the UI language to English so the text-based lookups below are stable. */
     @BeforeEach
@@ -667,6 +673,133 @@ class HomeUiTest extends HomeChoresUiTest {
         assertNull(SessionContext.deviceId());
         assertEquals("This shared device was unpaired, or its home no longer exists.",
                 restoreNotice().getText());
+    }
+
+    private SharedDeviceService.Paired pairKitchen(Member admin) {
+        String pin = service.findHome(admin.getHomeCode()).orElseThrow().getAdminPin();
+        return sharedDevices.pair(admin.getHomeCode(), pin, "Kitchen", "Shared device").paired();
+    }
+
+    @Test
+    void storedDeviceIdentity_withItsSecret_signsInAsTheDevice() {
+        Member admin = service.createHome("Shared", "Alex");
+        SharedDeviceService.Paired kitchen = pairKitchen(admin);
+
+        landing().restoreSharedDevice(DeviceIdentity.parse(kitchen.device().getId() + "|"
+                + admin.getHomeCode() + "|" + kitchen.secret()));
+
+        assertInstanceOf(HomeView.class, getCurrentView());
+        assertEquals(kitchen.device().getId(), SessionContext.deviceId());
+        assertNull(SessionContext.memberId(), "the device is nobody");
+    }
+
+    /** Device ids count up from one, so the secret is the whole proof: a real id with a
+     *  made-up secret, or the real secret sent with another home's code, signs nothing in. */
+    @Test
+    void storedDeviceIdentity_withAForgedSecretOrAnotherHomesCode_isRefused() {
+        Member admin = service.createHome("Shared", "Alex");
+        SharedDeviceService.Paired kitchen = pairKitchen(admin);
+        Member other = service.createHome("Other", "Pat");
+
+        landing().restoreSharedDevice(DeviceIdentity.parse(kitchen.device().getId() + "|"
+                + admin.getHomeCode() + "|" + "0".repeat(32)));
+        assertInstanceOf(LandingView.class, getCurrentView());
+        assertNull(SessionContext.deviceId());
+        assertTrue(restoreNotice().isVisible());
+
+        landing().restoreSharedDevice(DeviceIdentity.parse(kitchen.device().getId() + "|"
+                + other.getHomeCode() + "|" + kitchen.secret()));
+        assertInstanceOf(LandingView.class, getCurrentView());
+        assertNull(SessionContext.deviceId());
+        assertFalse(SessionContext.isSignedIn());
+    }
+
+    // ---- Pairing a shared device, and unpairing it (§4.1.3) -----------------------
+
+    private Notification lastNotification() {
+        List<Notification> open = $(Notification.class).all().stream()
+                .filter(Notification::isOpened).toList();
+        return open.get(open.size() - 1);
+    }
+
+    private void openPairing(String code) {
+        navigate(LandingView.class);
+        $(Tabs.class).first().setSelectedIndex(1);
+        setField("Home code", code);
+        clickButton("Set up a shared family device");
+    }
+
+    @Test
+    void pairing_withTheAdminPin_makesThisBrowserTheDevice_andAWrongPinSaysSo() {
+        Member admin = service.createHome("Nest", "Alex");
+        String pin = service.findHome(admin.getHomeCode()).orElseThrow().getAdminPin();
+        openPairing(admin.getHomeCode());
+
+        setField("Device name", "Kitchen");
+        setField("Admin PIN", pin.equals("0000") ? "1111" : "0000");
+        clickButton("Pair this device");
+        TextField pinField = $(TextField.class).all().stream()
+                .filter(f -> "Admin PIN".equals(f.getLabel()) && usable(f)).findFirst().orElseThrow();
+        assertTrue(pinField.isInvalid());
+        assertEquals("Wrong PIN", pinField.getErrorMessage());
+        assertTrue(sharedDevices.devicesOf(admin.getHomeCode()).isEmpty());
+
+        setField("Admin PIN", pin);
+        clickButton("Pair this device");
+        assertInstanceOf(HomeView.class, getCurrentView());
+        assertNull(SessionContext.memberId(), "the device is nobody");
+        assertEquals(sharedDevices.devicesOf(admin.getHomeCode()).get(0).getId(), SessionContext.deviceId());
+        assertEquals("Kitchen", sharedDevices.devicesOf(admin.getHomeCode()).get(0).getName());
+    }
+
+    @Test
+    void pairing_withNoHomeCode_asksForIt_inThePairingsOwnWords() {
+        navigate(LandingView.class);
+        $(Tabs.class).first().setSelectedIndex(1);
+        clickButton("Set up a shared family device");
+        assertEquals("Enter your home code first, then pair the device.",
+                test(lastNotification()).getText(), "not \"sign back in\": nobody is signing in");
+    }
+
+    @Test
+    void pairing_aSixthDevice_isRefused_withWhereToUnpairOne() {
+        Member admin = service.createHome("Nest", "Alex");
+        String pin = service.findHome(admin.getHomeCode()).orElseThrow().getAdminPin();
+        for (int i = 0; i < 5; i++) {
+            sharedDevices.pair(admin.getHomeCode(), pin, "Tablet " + i, "Shared device");
+        }
+        openPairing(admin.getHomeCode());
+        setField("Admin PIN", pin);
+        clickButton("Pair this device");
+
+        assertInstanceOf(LandingView.class, getCurrentView());
+        assertEquals("This home already has as many shared devices as it can. Unpair one in the Admin tab first.",
+                test(lastNotification()).getText());
+        assertEquals(5, sharedDevices.devicesOf(admin.getHomeCode()).size());
+    }
+
+    @Test
+    void adminTab_listsTheSharedDevices_andUnpairingOneAsksFirst() {
+        Member admin = service.createHome("Nest", "Alex");
+        String code = admin.getHomeCode();
+        String pin = service.findHome(code).orElseThrow().getAdminPin();
+        sharedDevices.pair(code, pin, "Kitchen iPad", "Shared device");
+        SessionContext.signIn(admin.getId(), code);
+        navigate(HomeView.class);
+        selectTab("Admin");
+        openSection("Shared devices");
+        assertEquals("Shared devices (1)", adminSection("Shared devices").getSummaryText());
+        assertTrue($(Div.class).all().stream().filter(this::usable)
+                .anyMatch(d -> "Kitchen iPad".equals(d.getText())));
+
+        clickButton("Unpair");
+        clickButton("Cancel");
+        assertEquals(1, sharedDevices.devicesOf(code).size(), "cancelled: still paired");
+
+        clickButton("Unpair");
+        clickButton("Confirm");
+        assertTrue(sharedDevices.devicesOf(code).isEmpty());
+        awaitRedraw(() -> adminSection("Shared devices").getSummaryText().equals("Shared devices (0)"));
     }
 
     /** The wipe is irreversible, so a wrong code must not delete anything. */
@@ -1406,7 +1539,7 @@ class HomeUiTest extends HomeChoresUiTest {
         clickButton("Add");
         assertEquals(1, lists.openItems(code, ListKind.TODO).size(), "landed on the to-do list");
 
-        lists.add(code, ListKind.GROCERY, sam.getId(), "Milk"); // Sam's phone bumps the home
+        lists.add(code, ListKind.GROCERY, Author.member(sam.getId()), "Milk"); // Sam's phone bumps the home
 
         Tabs after = $(Tabs.class).all().stream()
                 .filter(t -> t.getClassNames().contains("list-kind-tabs") && usable(t))
@@ -1446,7 +1579,7 @@ class HomeUiTest extends HomeChoresUiTest {
         // A half-typed slot for tomorrow survives Alex planning another day on their phone.
         TextField tomorrow = dinnerFields().get(1);
         tomorrow.setValue("Tac");
-        lists.setDinner(code, today.plusDays(3), alex.getId(), "Pizza"); // bumps the home
+        lists.setDinner(code, today.plusDays(3), Author.member(alex.getId()), "Pizza"); // bumps the home
         assertEquals("Tac", dinnerFields().get(1).getValue(), "the draft is still there");
         assertEquals("Pasta", dinnerFields().get(0).getValue(), "today's saved slot too");
     }
@@ -1848,6 +1981,31 @@ class HomeUiTest extends HomeChoresUiTest {
         assertFalse(milla.hasDevice());
         assertTrue($(Span.class).all().stream().filter(this::usable)
                 .anyMatch(sp -> "no phone yet".equals(sp.getText())), "the card says so");
+    }
+
+    /** A name of spaces is no name, and a taken one is named back in the refusal. */
+    @Test
+    void membersCard_addMember_refusesABlankName_andNamesATakenOne() {
+        Member alex = service.createHome("Nest", "Alex");
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+        selectTab("Admin");
+        openSection("Members");
+
+        clickButton("Add a member without a phone");
+        acceptTerms();
+        setField("Name", "   ");
+        Button add = $(Button.class).all().stream()
+                .filter(b -> "Add".equals(labelOf(b)) && usable(b)).findFirst().orElseThrow();
+        assertFalse(add.isEnabled(), "spaces are not a name");
+
+        setField("Name", " Alex ");
+        assertTrue(add.isEnabled());
+        clickButton("Add");
+        Notification refused = $(Notification.class).all().stream()
+                .filter(Notification::isOpened).findFirst().orElseThrow();
+        assertEquals("There is already a member called Alex", test(refused).getText());
+        assertEquals(1, service.membersOf(alex.getHomeCode()).size());
     }
 
     /** The home-wide numbers are the admin's: a member's Stats has no sub-tabs at all. */

@@ -85,10 +85,6 @@ final class Celebrations {
         }
     }
 
-    static void showBlocked(CompleteOutcome o) {
-        showBlocked(o, false);
-    }
-
     /**
      * @param named true on the shared device, where "you" is nobody: the two messages that say
      *              "you" name the member the chore was tapped for instead

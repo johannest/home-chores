@@ -55,4 +55,14 @@ class DeviceIdentityTest {
         assertEquals("unknown browser", DeviceIdentity.browserLabel(null));
         assertEquals("other, other", DeviceIdentity.browserLabel("curl/8.4.0"));
     }
+
+    /** The probe's answer reaches the log, so only the four answers it can give get there. */
+    @Test
+    void knownContext_passesTheProbesOwnAnswers_andNothingElse() {
+        assertEquals("standalone,storage-ok", DeviceIdentity.knownContext("standalone,storage-ok"));
+        assertEquals("browser,storage-blocked", DeviceIdentity.knownContext("browser,storage-blocked"));
+        assertEquals("unknown", DeviceIdentity.knownContext(null));
+        assertEquals("unknown", DeviceIdentity.knownContext("browser,storage-ok\n2026-10-26 INFO forged line"));
+        assertEquals("unknown", DeviceIdentity.knownContext("x".repeat(1_000_000)));
+    }
 }

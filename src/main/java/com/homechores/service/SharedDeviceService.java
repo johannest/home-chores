@@ -9,8 +9,6 @@ import com.homechores.domain.MemberRepository;
 import com.homechores.domain.SharedDevice;
 import com.homechores.domain.SharedDeviceRepository;
 import com.homechores.service.ChoreService.CompleteOutcome;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
@@ -61,7 +59,7 @@ public class SharedDeviceService {
      */
     @Transactional
     public PairOutcome pair(String code, String pin, String name, String defaultName) {
-        String norm = code == null ? "" : code.trim().toUpperCase();
+        String norm = ChoreService.normalizeCode(code);
         if (chores.findHome(norm).isEmpty()) {
             return new PairOutcome(PairResult.UNKNOWN, null);
         }
@@ -86,8 +84,7 @@ public class SharedDeviceService {
             return false;
         }
         return devices.findById(deviceId)
-                .map(d -> MessageDigest.isEqual(d.getSecretHash().getBytes(StandardCharsets.UTF_8),
-                        ChoreService.sha256(secret).getBytes(StandardCharsets.UTF_8)))
+                .map(d -> ChoreService.secretMatches(d.getSecretHash(), secret))
                 .orElse(false);
     }
 

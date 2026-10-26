@@ -295,10 +295,17 @@ public class ChoreService {
         }
         return members.findById(memberId)
                 .map(Member::getDeviceSecretHash)
-                .map(hash -> java.security.MessageDigest.isEqual(
-                        hash.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                        sha256(secret).getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .map(hash -> secretMatches(hash, secret))
                 .orElse(false);
+    }
+
+    /** Whether {@code secret} is the one whose SHA-256 is {@code hash} — in constant time, so
+     *  how long a wrong guess takes says nothing about how close it was. Shared with the
+     *  shared device's secret (§4.1.3). */
+    static boolean secretMatches(String hash, String secret) {
+        return hash != null && java.security.MessageDigest.isEqual(
+                hash.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                sha256(secret).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     static String sha256(String value) {
@@ -2013,7 +2020,7 @@ public class ChoreService {
         return sb.toString();
     }
 
-    private static String normalizeCode(String code) {
+    static String normalizeCode(String code) {
         return code == null ? "" : code.trim().toUpperCase();
     }
 

@@ -3,6 +3,7 @@ package com.homechores.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -241,20 +242,51 @@ class SharedDeviceTest {
     }
 
     @Test
-    void listLinesFromTheDevice_haveNoAuthor_andOnlyAHomeWithADeviceMayWriteThem() {
+    void listLinesFromTheDevice_haveNoAuthor_andOnlyItsOwnHomesLinesTakeIt() {
         Member alex = service.createHome("Nest", "Alex");
         String code = alex.getHomeCode();
-        assertThrows(IllegalArgumentException.class,
-                () -> lists.add(code, ListKind.GROCERY, null, "Milk"), "no device paired yet");
-
-        pair(code);
-        var milk = lists.add(code, ListKind.GROCERY, null, "Milk").orElseThrow();
-        assertEquals(null, milk.getCreatedByMemberId());
-        assertTrue(lists.setDone(milk.getId(), null, true));
-        assertEquals(null, lists.find(milk.getId()).orElseThrow().getDoneByMemberId());
+        Author kitchen = Author.device(pair(code).device().getId());
+        var milk = lists.add(code, ListKind.GROCERY, kitchen, "Milk").orElseThrow();
+        assertNull(milk.getCreatedByMemberId());
+        assertTrue(lists.setDone(milk.getId(), kitchen, true));
+        assertNull(lists.find(milk.getId()).orElseThrow().getDoneByMemberId());
         assertThrows(IllegalArgumentException.class,
                 () -> lists.setListEnabled(code, null, ListKind.DINNER, false),
                 "but never the admin's settings");
+
+        // Another home with a tablet of its own: its lines are not the kitchen's to touch, and
+        // neither are this home's lines its tablet's.
+        Member pat = service.createHome("Other", "Pat");
+        String other = pat.getHomeCode();
+        Author theirs = Author.device(pair(other).device().getId());
+        var bread = lists.add(other, ListKind.GROCERY, Author.member(pat.getId()), "Bread")
+                .orElseThrow();
+        assertThrows(IllegalArgumentException.class, () -> lists.setDone(bread.getId(), kitchen, true));
+        assertThrows(IllegalArgumentException.class, () -> lists.rename(bread.getId(), kitchen, "x"));
+        assertThrows(IllegalArgumentException.class, () -> lists.delete(bread.getId(), kitchen));
+        assertThrows(IllegalArgumentException.class,
+                () -> lists.add(code, ListKind.GROCERY, theirs, "Eggs"));
+        assertEquals("Bread", lists.find(bread.getId()).orElseThrow().getText());
+        assertFalse(lists.find(bread.getId()).orElseThrow().isDone());
+    }
+
+    @Test
+    void anUnpairedDevice_writesNoLines_evenWhileTheHomeHasAnotherOne() {
+        Member alex = service.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+        Paired gone = pair(code);
+        pair(code); // the one that stays
+        var milk = lists.add(code, ListKind.GROCERY, Author.device(gone.device().getId()), "Milk")
+                .orElseThrow();
+        assertTrue(devices.unpair(gone.device().getId(), alex.getId()));
+
+        Author unpaired = Author.device(gone.device().getId());
+        assertThrows(IllegalArgumentException.class,
+                () -> lists.add(code, ListKind.GROCERY, unpaired, "Eggs"));
+        assertThrows(IllegalArgumentException.class, () -> lists.setDone(milk.getId(), unpaired, true));
+        assertThrows(IllegalArgumentException.class, () -> lists.delete(milk.getId(), unpaired));
+        assertThrows(IllegalArgumentException.class, () -> Author.member(null),
+                "no member and no device is nobody");
     }
 
     @Test

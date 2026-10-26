@@ -9,6 +9,7 @@ import com.homechores.domain.CustomList;
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
+import com.homechores.service.Author;
 import com.homechores.service.ChoreService;
 import com.homechores.service.ListItemService;
 import com.homechores.service.ListReminderService;
@@ -189,8 +190,8 @@ class ListEditUiTest extends HomeChoresUiTest {
     void deletingAList_asksFirst_thenLandsOnToDo() {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
-        CustomList gifts = lists.createList(code, alex.getId(), "Gifts").orElseThrow();
-        lists.add(code, ListKind.TODO, gifts.getId(), alex.getId(), "Book");
+        CustomList gifts = lists.createList(code, Author.member(alex.getId()), "Gifts").orElseThrow();
+        lists.add(code, ListKind.TODO, gifts.getId(), Author.member(alex.getId()), "Book");
         openLists(3);
         assertEquals(1, rows().size());
 
@@ -210,7 +211,7 @@ class ListEditUiTest extends HomeChoresUiTest {
     void renamingAList_relabelsItsTab() {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
-        lists.createList(code, alex.getId(), "Gifts");
+        lists.createList(code, Author.member(alex.getId()), "Gifts");
         openLists(3);
 
         clickMenuItem("Rename list");
@@ -228,11 +229,11 @@ class ListEditUiTest extends HomeChoresUiTest {
     void anotherPhoneDeletingTheShownList_fallsBackToToDo() {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
-        CustomList gifts = lists.createList(code, alex.getId(), "Gifts").orElseThrow();
+        CustomList gifts = lists.createList(code, Author.member(alex.getId()), "Gifts").orElseThrow();
         openLists(3);
         Member sam = service.joinHome(code, "Sam").orElseThrow();
 
-        lists.deleteList(code, gifts.getId(), sam.getId()); // bumps the home: the board redraws
+        lists.deleteList(code, gifts.getId(), Author.member(sam.getId())); // bumps the home: the board redraws
         awaitRedraw(() -> kindTabs().getSelectedIndex() == 1);
 
         assertEquals(1, kindTabs().getSelectedIndex());
@@ -241,7 +242,7 @@ class ListEditUiTest extends HomeChoresUiTest {
     @Test
     void tappingTheText_editsTheLine() {
         Member alex = signedIn("Alex");
-        ListItem milk = lists.add(alex.getHomeCode(), ListKind.GROCERY, alex.getId(), "Mlik").orElseThrow();
+        ListItem milk = lists.add(alex.getHomeCode(), ListKind.GROCERY, Author.member(alex.getId()), "Mlik").orElseThrow();
         openLists(0);
 
         Div text = $(Div.class, rows().get(0)).all().stream()
@@ -261,7 +262,7 @@ class ListEditUiTest extends HomeChoresUiTest {
     void theSwipeTray_editsAndDeletes() {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
-        lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber");
+        lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call the plumber");
         openLists(1);
 
         Div row = rows().get(0);
@@ -282,7 +283,7 @@ class ListEditUiTest extends HomeChoresUiTest {
     @Test
     void theUndoToast_opensAtTheBottom_notUnderTheCameraIsland() {
         Member alex = signedIn("Alex");
-        lists.add(alex.getHomeCode(), ListKind.TODO, alex.getId(), "Call the plumber");
+        lists.add(alex.getHomeCode(), ListKind.TODO, Author.member(alex.getId()), "Call the plumber");
         openLists(1);
         Div tray = $(Div.class, rows().get(0)).all().stream()
                 .filter(d -> d.getClassNames().contains("swipe-actions")).findFirst().orElseThrow();
@@ -299,7 +300,7 @@ class ListEditUiTest extends HomeChoresUiTest {
     void tappingTheReminderBadge_opensItsTime_readyToChange() {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
-        ListItem line = lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber").orElseThrow();
+        ListItem line = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call the plumber").orElseThrow();
         Instant due = reminders.schedule(line.getId(), alex.getId(),
                 Instant.now().plus(Duration.ofDays(2)), Locale.ENGLISH);
         openLists(1);
@@ -322,10 +323,10 @@ class ListEditUiTest extends HomeChoresUiTest {
     void remindersSortByDueDate_andHoldingAndDraggingAPlainLine_reordersIt() {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
-        ListItem milk = lists.add(code, ListKind.TODO, alex.getId(), "Milk").orElseThrow();
-        ListItem plumber = lists.add(code, ListKind.TODO, alex.getId(), "Call the plumber").orElseThrow();
-        ListItem eggs = lists.add(code, ListKind.TODO, alex.getId(), "Eggs").orElseThrow();
-        ListItem taxes = lists.add(code, ListKind.TODO, alex.getId(), "Taxes").orElseThrow();
+        ListItem milk = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Milk").orElseThrow();
+        ListItem plumber = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Call the plumber").orElseThrow();
+        ListItem eggs = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Eggs").orElseThrow();
+        ListItem taxes = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Taxes").orElseThrow();
         reminders.schedule(plumber.getId(), alex.getId(), Instant.now().plus(Duration.ofDays(20)), Locale.ENGLISH);
         reminders.schedule(taxes.getId(), alex.getId(), Instant.now().plus(Duration.ofMinutes(5)), Locale.ENGLISH);
         openLists(1);
@@ -358,12 +359,12 @@ class ListEditUiTest extends HomeChoresUiTest {
     void aDropNamingAnotherHomesLine_movesNothing_andACustomListArrangesToo() {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
-        ListItem milk = lists.add(code, ListKind.TODO, alex.getId(), "Milk").orElseThrow();
-        ListItem eggs = lists.add(code, ListKind.TODO, alex.getId(), "Eggs").orElseThrow();
+        ListItem milk = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Milk").orElseThrow();
+        ListItem eggs = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Eggs").orElseThrow();
         Member kim = service.createHome("Elsewhere", "Kim");
         String theirCode = kim.getHomeCode();
-        ListItem theirs = lists.add(theirCode, ListKind.TODO, kim.getId(), "Theirs").orElseThrow();
-        lists.add(theirCode, ListKind.TODO, kim.getId(), "Theirs too");
+        ListItem theirs = lists.add(theirCode, ListKind.TODO, Author.member(kim.getId()), "Theirs").orElseThrow();
+        lists.add(theirCode, ListKind.TODO, Author.member(kim.getId()), "Theirs too");
         openLists(1);
         ListPanel panel = $(ListPanel.class).first();
 
@@ -373,7 +374,7 @@ class ListEditUiTest extends HomeChoresUiTest {
         assertEquals(List.of("Theirs", "Theirs too"), lists.openItems(theirCode, ListKind.TODO).stream()
                 .map(ListItem::getText).toList(), "nor there");
 
-        lists.setDone(milk.getId(), alex.getId(), true);
+        lists.setDone(milk.getId(), Author.member(alex.getId()), true);
         awaitRedraw(() -> rows().stream().anyMatch(r -> r.getClassNames().contains("done")));
         Div ticked = rows().stream().filter(r -> r.getClassNames().contains("done")).findFirst().orElseThrow();
         assertFalse(ticked.getElement().hasAttribute("data-item-id"), "a ticked line cannot be lifted");
@@ -383,9 +384,9 @@ class ListEditUiTest extends HomeChoresUiTest {
         assertEquals(List.of("Eggs"), lists.openItems(code, ListKind.TODO).stream()
                 .map(ListItem::getText).toList(), "a ticked line is not arranged");
 
-        CustomList gifts = lists.createList(code, alex.getId(), "Gifts").orElseThrow();
-        ListItem socks = lists.add(code, ListKind.TODO, gifts.getId(), alex.getId(), "Socks").orElseThrow();
-        ListItem book = lists.add(code, ListKind.TODO, gifts.getId(), alex.getId(), "Book").orElseThrow();
+        CustomList gifts = lists.createList(code, Author.member(alex.getId()), "Gifts").orElseThrow();
+        ListItem socks = lists.add(code, ListKind.TODO, gifts.getId(), Author.member(alex.getId()), "Socks").orElseThrow();
+        ListItem book = lists.add(code, ListKind.TODO, gifts.getId(), Author.member(alex.getId()), "Book").orElseThrow();
         panel.show(ListKind.TODO, gifts.getId());
         assertEquals(List.of("Socks", "Book"), rowTexts());
         assertTrue(((Div) rows().get(0).getParent().orElseThrow()).getClassNames().contains("draggable"));
@@ -402,12 +403,12 @@ class ListEditUiTest extends HomeChoresUiTest {
     void theArrows_sitOnPlainLinesOnly_stopAtTheEnds_andMoveALine() {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
-        ListItem milk = lists.add(code, ListKind.TODO, alex.getId(), "Milk").orElseThrow();
-        lists.add(code, ListKind.TODO, alex.getId(), "Eggs");
-        lists.add(code, ListKind.TODO, alex.getId(), "Bread");
-        ListItem taxes = lists.add(code, ListKind.TODO, alex.getId(), "Taxes").orElseThrow();
+        ListItem milk = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Milk").orElseThrow();
+        lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Eggs");
+        lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Bread");
+        ListItem taxes = lists.add(code, ListKind.TODO, Author.member(alex.getId()), "Taxes").orElseThrow();
         reminders.schedule(taxes.getId(), alex.getId(), Instant.now().plus(Duration.ofMinutes(5)), Locale.ENGLISH);
-        lists.setDone(milk.getId(), alex.getId(), true);
+        lists.setDone(milk.getId(), Author.member(alex.getId()), true);
         openLists(1);
         assertEquals(List.of("Taxes", "Eggs", "Bread", "Milk"), rowTexts());
 

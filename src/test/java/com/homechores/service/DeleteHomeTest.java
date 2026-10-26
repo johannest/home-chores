@@ -42,7 +42,7 @@ class DeleteHomeTest {
         credits.addTier(code, 3, 10);
         service.addGroup(code, "Kitchen", "🍳");
         service.requestRejoin(code, sam.getId(), null);
-        lists.add(code, ListKind.GROCERY, alex.getId(), "Milk");
+        lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk");
 
         assertTrue(credits.balance(alex.getId()) > 0, "precondition: credits were earned");
         assertEquals(1, service.pendingRejoins(code).size());

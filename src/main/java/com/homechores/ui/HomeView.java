@@ -308,7 +308,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
             // member seeing their name missing from the header knows why.
             Span device = new Span(T.tr("home.device.badge", sharedDevices.find(viewer.deviceId())
                     .map(d -> d.getName()).orElse("")));
-            device.addClassName("chore-master");
+            device.addClassNames("chore-master", "device-badge");
             left.add(device);
         }
         statsService.lastWeekChoreMaster(homeCode).ifPresent(cm -> {

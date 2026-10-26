@@ -69,7 +69,7 @@ class ListReminderServiceTest {
     }
 
     private ListItem todo(String code, Long memberId, String text) {
-        return lists.add(code, ListKind.TODO, memberId, text).orElseThrow();
+        return lists.add(code, ListKind.TODO, Author.member(memberId), text).orElseThrow();
     }
 
     private Instant inTwoHours() {
@@ -163,13 +163,13 @@ class ListReminderServiceTest {
         reminders.schedule(milk.getId(), alex.getId(), inTwoHours(), null);
         reminders.schedule(bread.getId(), alex.getId(), inTwoHours(), null);
 
-        lists.setDone(milk.getId(), sam.getId(), true);
+        lists.setDone(milk.getId(), Author.member(sam.getId()), true);
         assertTrue(repo.findByItemId(milk.getId()).isEmpty(), "doing it settles it, whoever does it");
 
-        lists.setDone(milk.getId(), sam.getId(), false);
+        lists.setDone(milk.getId(), Author.member(sam.getId()), false);
         assertTrue(repo.findByItemId(milk.getId()).isEmpty(), "unticking does not bring it back");
 
-        lists.delete(bread.getId(), alex.getId());
+        lists.delete(bread.getId(), Author.member(alex.getId()));
         assertTrue(repo.findByItemId(bread.getId()).isEmpty(), "the line is gone");
     }
 
