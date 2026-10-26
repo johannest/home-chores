@@ -1377,6 +1377,9 @@ class AdminPanel extends VerticalLayout {
                     int value = e.getValue() == null ? 0 : Math.max(0, e.getValue());
                     creditService.setTrophyReward(homeCode, t, value, memberId);
                 }
+                // The field shows what the home stores, not what was typed: 5000 is kept as
+                // 1000, and a demoted admin's typing is kept as nothing at all.
+                amount.setValue(creditService.trophyRewards(homeCode).get(t));
             });
             Div row = new Div(label, amount);
             row.addClassNames("list-row", "trophy-reward-row");

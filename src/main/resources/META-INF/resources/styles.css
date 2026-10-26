@@ -1188,7 +1188,7 @@ body.hold-dragging {
     opacity: 0.45;
 }
 .trophy-tile .trophy-detail {
-    font-size: 0.7rem;
+    font-size: 0.75rem; /* the stat labels' floor: 0.7rem is 11px, which the UX review called unreadable */
     font-weight: 700;
     color: var(--lumo-secondary-text-color);
 }
@@ -1205,7 +1205,7 @@ body.hold-dragging {
     color: light-dark(hsl(38, 92%, 30%), hsl(45, 95%, 65%));
     border-radius: 999px;
     padding: 0 6px;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     font-weight: 700;
 }
 .celebrate-dialog .trophy-reward {

@@ -903,7 +903,9 @@ message and shows a matching badge on the card (`LockReason`):
 - **Spree tiers** (admin): list of `days → credits` rows, addable/deletable.
 - **Trophy rewards** (admin): one row per rung under the spree tiers — emoji, name, "50
   chores" and a 💎 field (empty = none), saved as soon as it changes and clamped to
-  `InputLimits.MAX_CREDITS`. The same for every member of the home. Stored as
+  `InputLimits.MAX_CREDITS`; the field then shows what the home stores (the clamped amount, or
+  the old one when a demoted admin's save was refused). The same for every member of the home.
+  Stored as
   `TrophyReward` rows only for rungs that pay; `CreditService.setTrophyReward` re-checks that
   the acting member is an admin of that home and takes a `Trophy`, never a free number.
 - **Balance** = earned − redeemed, per member.
@@ -1533,8 +1535,11 @@ scales up, not the other way round.
 - **Upgrade path** (`SchemaEvolutionTest`): the whole application booted with the production
   `ddl-auto=update` against a file database built from `legacy-schema.sql`, a pre-Phase-4
   FlashChores: the context starts at all, settings added since adopt their documented
-  default on an old home, historic rows still complete, aggregate and export, tables added
-  since are created empty and writable, chores from before groups existed keep their order
+  default on an old home, historic rows still complete, aggregate and export, a member's
+  `trophiesSeen` reads back its default 0 so that the trophies their historic count already
+  reaches are owned at once, shown once and paid nothing (and a historic 💎 row belongs to no
+  rung), tables added since are created empty and writable, chores from before groups existed
+  keep their order
   with the column default 0 until the first move, and list lines written without
   `sort_order` read in writing order with the default 0 until the first drag renumbers them.
 - **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest` through
@@ -1570,7 +1575,7 @@ scales up, not the other way round.
   and three at once share one "3 new trophies!" dialog; the leaderboard chip wears the best
   trophy with the label "Trophy: Helper"; the fourth tap says "Just 1 more to 🌱 Sprout (+7 💎)!"
   and the fifth unveils the trophy with its reward; an admin's 💎 field for a rung saves the
-  reward; and the session lifetime is the member's until the PIN is entered, and the admin's
+  reward and shows the stored amount; and the session lifetime is the member's until the PIN is entered, and the admin's
   from then on. `LoadingOverlayUiTest`: the loading card gets its text in the UI's language
   (Finnish, English, Swedish) from the same key as the landing page's restore card, appears at
   the indicator's second stage set to 1.5 s with the thin bar still first, and every new UI is

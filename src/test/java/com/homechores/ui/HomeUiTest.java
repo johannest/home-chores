@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.Locale;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -1440,13 +1441,20 @@ class HomeUiTest extends HomeChoresUiTest {
         selectTab("Admin");
         openSection("Rewards");
 
-        IntegerField silver = $(IntegerField.class).all().stream()
-                .filter(f -> "💎 reward for Silver".equals(f.getAriaLabel().orElse(null)))
+        // Every save bumps the home, and the redraw replaces the field: find it afresh each time.
+        Supplier<IntegerField> silver = () -> $(IntegerField.class).all().stream()
+                .filter(f -> "💎 reward for Silver".equals(f.getAriaLabel().orElse(null)) && usable(f))
                 .findFirst().orElseThrow(() -> new AssertionError("no Silver reward field"));
-        test(silver).setValue(20);
+        test(silver.get()).setValue(20);
 
         assertEquals(Map.of(Trophy.SILVER, 20),
                 creditService.trophyRewards(code));
+        assertEquals(20, silver.get().getValue(), "the field shows what the home stores");
+
+        test(silver.get()).setValue(null);
+
+        assertTrue(creditService.trophyRewards(code).isEmpty(), "empty means no reward");
+        assertNull(silver.get().getValue());
     }
 
     // ---- Avatars -----------------------------------------------------------------

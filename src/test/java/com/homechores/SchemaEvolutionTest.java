@@ -7,12 +7,15 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.homechores.domain.ChoreTask;
+import com.homechores.domain.Completion;
+import com.homechores.domain.CompletionStatus;
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListKind;
 import com.homechores.domain.CompletionRepository;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
+import com.homechores.domain.Trophy;
 import com.homechores.service.Author;
 import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
@@ -149,6 +152,32 @@ class SchemaEvolutionTest {
         assertNull(alex.getAvatar());
         assertNull(alex.getTermsAcceptedAt());
         assertNull(alex.getReminderTime());
+        assertEquals(0, alex.getTrophiesSeen(), "the column default: no unlock dialog shown yet");
+    }
+
+    /**
+     * A trophy is derived from the all-time count, so a family past a rung on upgrade day owns
+     * it at once, unpaid — and the seen marker's default 0 is what presents those trophies to
+     * the member, once. A 💎 row written before trophies existed belongs to no rung.
+     */
+    @Test
+    void trophiesOwnedBeforeTheyExisted_areShownOnceAfterTheUpgrade_andPaidNothing() {
+        Member alex = byName("Alex");
+        assertTrue(service.unseenTrophies(alex.getId()).isEmpty(), "one historic chore reaches nothing");
+        assertTrue(credits.ledger(CODE).stream().allMatch(e -> e.getTrophyRung() == 0),
+                "a historic 💎 row is no trophy's");
+
+        Long task = service.tasksOf(CODE).get(0).getId();
+        for (int i = 0; i < 4; i++) {
+            completions.save(new Completion(CODE, task, alex.getId(), CompletionStatus.APPROVED));
+        }
+
+        assertEquals(List.of(Trophy.SPROUT), service.unseenTrophies(alex.getId()),
+                "five approved chores: 🌱 is owned, and not yet shown");
+        assertEquals(3, credits.balance(alex.getId()), "owned, not paid");
+        service.markTrophiesSeen(alex.getId());
+        assertEquals(5, byName("Alex").getTrophiesSeen());
+        assertTrue(service.unseenTrophies(alex.getId()).isEmpty(), "shown once");
     }
 
     @Test
