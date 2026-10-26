@@ -2,14 +2,11 @@
 // incentives are for them. The script is docs/DEMO-VIDEOS-PLAN-2026-10-26.md, video 3. The
 // camera opens on a home that already exists, with Alex three approved chores in, so that the
 // fourth tap says "Just 1 more to 🌱 Sprout" and the fifth unlocks the trophy inside the video.
-// Everything before `start()` is set up off camera: mix.sh trims the recording to that moment.
-export default async function rewards(d) {
-  const { page, BASE, say, speechDone, settle, start, tap, type, typeSlow, pointAt, tab, card,
-    dialogButton, openSection, outro } = d;
-  // A payoff is looked at in silence for a moment after its line ends, before the hands move on.
-  const beat = async (ms) => { await speechDone(); await settle(ms); };
+// The `setup` export does that off camera: the recorder's first cut begins after it.
 
-  /* ---------- off camera: the home, its rules and rewards, and three chores done ---------- */
+/** Off camera: the home, its rules and rewards, and three chores done. */
+export async function setup(d) {
+  const { page, BASE, settle, tab, card, dialogButton, openSection } = d;
   await page.goto(BASE);
   await page.waitForSelector('vaadin-text-field');
   await page.locator('vaadin-text-field').nth(0).locator('input').fill('The Nest');
@@ -55,9 +52,13 @@ export default async function rewards(d) {
   }
   await page.evaluate(() => window.scrollTo(0, 0));
   await settle(800);
+}
 
-  /* ---------- on camera ---------- */
-  await start();
+export default async function rewards(d) {
+  const { page, say, speechDone, settle, tap, type, typeSlow, pointAt, tab, card, dialogButton,
+    openSection, outro } = d;
+  // A payoff is looked at in silence for a moment after its line ends, before the hands move on.
+  const beat = async (ms) => { await speechDone(); await settle(ms); };
   await settle(2000);
 
   // Earn: the pill, the tap, and how near the next trophy is.
