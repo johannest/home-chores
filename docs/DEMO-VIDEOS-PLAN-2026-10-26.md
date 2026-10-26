@@ -1,9 +1,10 @@
 # Demo videos — plan (2026-10-26)
 
-Status: **video 2 recorded** (`tools/demo-video/run.sh basics` → `video/flashchores-basics.mp4`,
-50.6 s, 15 lines, 71 % voiced). Videos 1 and 3 are scripts only. The recorder now plays a named
-scene set (`scenes/<name>.mjs`); see "What the recorder needs" for what videos 1 and 3 still
-require.
+Status: **videos 2 and 3 recorded** (`tools/demo-video/run.sh basics` →
+`video/flashchores-basics.mp4`, 50.6 s, 15 lines, 71 % voiced; `run.sh rewards` →
+`video/flashchores-rewards.mp4`, 61.2 s, 15 lines, 70 % voiced). Video 1 is a script only. The
+recorder plays a named scene set (`scenes/<name>.mjs`) and a scene can set the home up off
+camera before it calls `start()`; see "What the recorder needs" for what video 1 still requires.
 
 ## What the current video tells us
 
@@ -150,21 +151,23 @@ so the taps are quick.
 
 | t | Screen | Voice | Caption |
 |---:|---|---|---|
-| 0 | Board, a card with a 💎 5 pill | Some chores are worth more. Admins say how much. | 💎 5 on the card |
-| 5 | Tap it, confetti, "+5 💎" toast | Do it, and the diamonds are yours. | +5 💎 |
-| 10 | The celebration's "Just 1 more to 🌱 Sprout (+7 💎)!" line | And the app tells you when something bigger is close. | Just 1 more… |
-| 15 | Admin → Rewards → Spree bonuses row | Every day for a week? A spree bonus. | 7 days → 💎 |
-| 20 | Trophy rewards rows, 🌱 Sprout set to 7 | Trophies at 5, 10, 25 chores and up — each can pay. | 🌱 🧹 🥉 🥈 🏆 🏅 🎓 🦄 |
-| 26 | Board, fifth tap: the unlock dialog, shine, "+7 💎 reward" | Five chores in: your first trophy. | New trophy: Sprout! |
-| 31 | "See my trophies" → the shelf, progress bar 5 / 10 | Trophies are kept, not just celebrated. | Your shelf 🏆 |
-| 36 | Leaderboard chip with 🌱 on the avatar | Your best one sits on your chip, for all to see. | On the leaderboard |
-| 41 | Celebration dialog, "Oops — undo this" | Mis-tap? Undo, and the diamonds go back too. | Undo takes it back |
-| 46 | Admin → Rewards → Redeem, "Movie night" | Then spend them on something real. | 🍿 Movie night |
-| 51 | Stats: 💎 earned, redeemed, balance | Earned, redeemed, and what's left — all on Stats. | Earned · redeemed · balance |
-| 56 | Admin: the trophy field left empty | Don't want incentives? Leave it empty. Trophies still count. | Optional, always |
-| 61 | Outro card | Earn them. Keep them. Spend them together. | ⚡ FlashChores |
+| 2 | Board, the finger on "Cook dinner"'s 💎 5 pill | Some chores are worth more. Admins say how much. | 💎 5 on the card |
+| 5 | Tap it, confetti, "+5 💎 credits earned!" toast | Do it, and the diamonds are yours. | +5 💎 |
+| 8 | The celebration's "Just 1 more to 🌱 Sprout (+7 💎)!" line | And the app tells you when something bigger is close. | Just 1 more… |
+| 12 | Admin → Rewards: 7 days and 10 credits filled, "Add tier" | Every day for a week? A spree bonus. | 7 days → 💎 |
+| 16 | Trophy rewards rows, the finger on 🌱 Sprout's 💎 7 | Trophies at 5, 10, 25 chores and up — each can pay. | 🌱 🧹 🥉 🥈 🏆 🏅 🎓 🦄 |
+| 20 | Board, fifth tap: the unlock dialog, shine, "+7 💎 reward" | Five chores in: your first trophy. | New trophy: Sprout! |
+| 26 | "See my trophies" → the shelf, "Next: 🧹 Helper — 5 / 10" | Trophies are kept, not just celebrated. | Your shelf 🏆 |
+| 29 | The finger on the 🦄 Legend tile | Eight rungs, from five chores to a thousand. | 5 → 1000 chores |
+| 33 | Leaderboard chip "Alex 5 · 💎 12" with 🌱 on the avatar | Your best one sits on your chip, for all to see. | On the leaderboard |
+| 37 | Sixth tap (💎 17), "Oops — undo this", "Taken back" (💎 12) | Mis-tap? Undo, and the diamonds go back too. | Undo takes it back |
+| 42 | Admin → Rewards → Balances → Redeem | Then spend them on something real. | 🍿 Movie night |
+| 44 | Amount 10, "Movie night" typed, Redeem | Pick an amount, and say what it was for. | Amount · note |
+| 47 | Stats: 💎 earned 12 · redeemed 10 · balance 2, "Movie night 💎 10" | Earned, redeemed, and what's left — all on Stats. | Earned · redeemed · balance |
+| 52 | Admin → Rewards: the finger on 🧹 Helper's empty field | Don't want incentives? Leave it empty. Trophies still count. | Optional, always |
+| 57 | Outro card | Earn them. Keep them. Spend them together. | ⚡ FlashChores |
 
-13 lines, ≈ 110 words.
+15 lines, 125 words, recorded at 61.2 s and 70 % voiced.
 
 Notes
 - The "Just 1 more" line lands on the fourth tap, the trophy on the fifth: two taps, two
@@ -173,7 +176,20 @@ Notes
   shown being configured, not paid. Say so with the words ("Every day for a week?"), not a
   fake payout.
 - The undo line is here rather than in video 2 because the diamonds going back is the point;
-  the plain undo is implied by the dialog in video 2.
+  the plain undo is implied by the dialog in video 2. The mis-tap is a second "Cook dinner",
+  so the chip's 💎 visibly drops from 17 to 12.
+- **What was recorded** (`scenes/rewards.mjs`). Off camera, before `start()`: "The Nest" is
+  created with Alex as admin, "Ask did you do this?" is switched off (Chore rules), "Cook
+  dinner" gets 💎 5 (Chores → ⋯ → Edit chore → Reward credits), 🌱 Sprout gets 💎 7 (Rewards →
+  Trophy rewards), and Alex does Empty dishwasher, Take out trash and Vacuum; the admin
+  sections are folded again. That takes ≈ 12–14 s and `mix.sh` cuts it off.
+- Kokoro speaks the first draft's 13 lines (108 words) in 37.5 s, so the draft recorded at 52 s
+  and could not reach 60 s at 65 % voiced. Two lines were added where the picture earns a beat
+  — the shelf's ladder and the redeem dialog — and each payoff (the pill, "Just 1 more", the
+  unlock, the undo, the ledger) is held for a moment after its line ends (`beat()` in the
+  scene). The plan's own 13 lines are spoken word for word.
+- The redeem note is the one field typed on camera; the spree tier and the amount are filled
+  under the voice.
 
 ---
 
@@ -190,9 +206,12 @@ three videos, and for video 1's three screens:
    the same 540 × 1170 canvas** (an iPad on a counter stands either way), so all three streams
    share one frame size and `ffmpeg concat` splices them in script order without scaling. The
    script writes a cut list (which context, from when to when) beside `voice.json`.
-3. **Unrecorded setup.** A `setup()` step before `t0`: create the home, join Sam, pre-do the
-   chores a scene needs (three for the trophy, three in a row for the fairness lock), switch
-   confirmation off for video 3. The existing `run.sh` fresh-database start stays.
+3. ~~**Unrecorded setup.**~~ Done: the recording starts with the page, and a scene calls
+   `start()` once the camera matters; `voice.json` carries that moment as `startMs` (the lines'
+   times are relative to it) and `mix.sh` cuts the recording there with `-ss`. Video 3 creates
+   the home, switches confirmation off, sets the 💎 5 chore and the 🌱 Sprout reward and does
+   Alex's three chores before `start()`. Video 1 does the same with Sam joined and three of one
+   chore in a row for the fairness lock. The `run.sh` fresh-database start stays.
 4. ~~**`caption()` without `speech`.**~~ Done: a scene's unit is `say(speech, caption)`, which
    starts the voice and returns so the taps run under it; the next `say()` waits for the line
    to end. The serial `caption(text, hold, speech)` form is gone, and with it the original

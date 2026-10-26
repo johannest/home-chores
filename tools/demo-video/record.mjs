@@ -4,7 +4,9 @@
 // are injected into the page. The narration is spoken by Kokoro (tts.py) as the scenes play, and
 // a line never waits for the hands: `say()` starts the voice and returns, the scene taps under
 // it, and the next `say()` waits for the previous line to end. The clips and their start times
-// land in video/<name>/voice.json for mix.sh to lay under the video.
+// land in video/<name>/voice.json for mix.sh to lay under the video, with the moment the scene
+// called `start()`: what a scene set up before that — a home, chores already done — was recorded
+// too, and mix.sh cuts it off.
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -45,6 +47,13 @@ const ctx = await browser.newContext({
 });
 const page = await ctx.newPage();
 const t0 = Date.now();   // the recording starts with the page
+let startMs = 0;         // ...and the video, where the scene says so
+
+/** Where the video begins: everything the scene did before this is trimmed off by mix.sh. */
+async function start() {
+  await captionOff();
+  startMs = Date.now() - t0;
+}
 
 /* ---------- narration: one clip per line, never two at once ---------- */
 const lines = [];
@@ -228,6 +237,14 @@ async function point(locator, fx = 0.5, fy = 0.5) {
   return { x: b.x + b.width * fx, y: b.y + b.height * fy };
 }
 
+/** Rests the finger on a thing without touching it, so the viewer looks where the line points. */
+async function pointAt(locator, ms = 1200) {
+  const { x, y } = await point(locator);
+  await finger(x, y, 'down');
+  await page.waitForTimeout(ms);
+  await finger(x, y, 'up');
+}
+
 /* ---------- the app's own landmarks ---------- */
 const tab = (name) => page.locator('vaadin-tab', { hasText: name }).first();
 const card = (name) => page.locator('.task-card', { hasText: name }).first();
@@ -276,8 +293,8 @@ async function outro(tagline, spoken) {
 try {
   await scenes({
     page, BASE,
-    say, caption, captionOff, speechDone, settle,
-    tap, type, typeSlow, holdAndDrag, swipe, point,
+    say, caption, captionOff, speechDone, settle, start,
+    tap, type, typeSlow, holdAndDrag, swipe, point, pointAt,
     tab, card, line, chip, dialogButton, openSection, outro,
   });
 } catch (e) {
@@ -289,6 +306,9 @@ try {
 await ctx.close();   // flushes the video
 await browser.close();
 tts.stdin.end();
-writeFileSync(OUT + 'voice.json', JSON.stringify(lines, null, 1));
+writeFileSync(OUT + 'voice.json', JSON.stringify({
+  startMs,
+  lines: lines.map((l) => ({ ...l, at: l.at - startMs })),
+}, null, 1));
 console.log(`recorded ${NAME} to`, OUT);
 process.exit(0);

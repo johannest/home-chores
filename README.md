@@ -466,6 +466,7 @@ tools/
     ├── run.sh <name>             # production jar on a throwaway database, then record + mix
     ├── record.mjs                # Playwright plays scenes/<name>.mjs; the voice leads, the taps follow
     ├── scenes/basics.mjs         # "FlashChores in a minute" (docs/DEMO-VIDEOS-PLAN-2026-10-26.md)
+    ├── scenes/rewards.mjs        # "Diamonds, streaks and trophies": set up off camera, then start()
     ├── tts.py                    # speaks the lines with Kokoro, a local neural voice (.venv)
     ├── requirements.txt          # Kokoro for that venv (plus brew install espeak-ng)
     └── mix.sh <name>             # ffmpeg lays the voice under it -> video/flashchores-<name>.mp4
