@@ -33,6 +33,9 @@ import com.homechores.domain.MemberRepository;
 import com.homechores.domain.RejoinRequestRepository;
 import com.homechores.domain.SpreeTier;
 import com.homechores.domain.SpreeTierRepository;
+import com.homechores.domain.Trophy;
+import com.homechores.domain.TrophyReward;
+import com.homechores.domain.TrophyRewardRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -64,6 +67,7 @@ public class BackupService {
     private final CompletionRepository completions;
     private final CreditEntryRepository creditEntries;
     private final SpreeTierRepository spreeTiers;
+    private final TrophyRewardRepository trophyRewards;
     private final RejoinRequestRepository rejoins;
     private final HomeState homeState;
     private final ObjectMapper mapper = new ObjectMapper()
@@ -81,7 +85,8 @@ public class BackupService {
                         CustomListRepository customLists,
                         ListReminderRepository listReminders, CompletionRepository completions,
                         CreditEntryRepository creditEntries, SpreeTierRepository spreeTiers,
-                        RejoinRequestRepository rejoins, HomeState homeState) {
+                        TrophyRewardRepository trophyRewards, RejoinRequestRepository rejoins,
+                        HomeState homeState) {
         this.homes = homes;
         this.members = members;
         this.tasks = tasks;
@@ -93,6 +98,7 @@ public class BackupService {
         this.completions = completions;
         this.creditEntries = creditEntries;
         this.spreeTiers = spreeTiers;
+        this.trophyRewards = trophyRewards;
         this.rejoins = rejoins;
         this.homeState = homeState;
     }
@@ -111,7 +117,7 @@ public class BackupService {
                 home.getCounterResetAt(), home.getListOrder(), home.getHiddenLists());
         for (Member m : members.findByHomeCodeOrderByJoinedAtAsc(homeCode)) {
             b.members.add(new MemberDto(m.getId(), m.getName(), m.getColor(), m.isAdmin(),
-                    m.getJoinedAt(), m.getAvatar()));
+                    m.getJoinedAt(), m.getAvatar(), m.getTrophiesSeen()));
         }
         for (ChoreGroup g : groups.findByHomeCodeOrderBySortOrderAscIdAsc(homeCode)) {
             b.groups.add(new GroupDto(g.getId(), g.getName(), g.getEmoji(), g.getSortOrder()));
@@ -131,9 +137,13 @@ public class BackupService {
         for (SpreeTier t : spreeTiers.findByHomeCodeOrderByDaysAsc(homeCode)) {
             b.spreeTiers.add(new SpreeTierDto(t.getDays(), t.getCredits()));
         }
+        for (TrophyReward r : trophyRewards.findByHomeCodeOrderByRungAsc(homeCode)) {
+            b.trophyRewards.add(new TrophyRewardDto(r.getRung(), r.getCredits()));
+        }
         for (CreditEntry e : creditEntries.findByHomeCodeOrderByCreatedAtDesc(homeCode)) {
             b.credits.add(new CreditDto(e.getMemberId(), e.getAmount(), e.getType(),
-                    e.getReason(), e.getSpreeTierDays(), e.getCompletionId(), e.getCreatedAt()));
+                    e.getReason(), e.getSpreeTierDays(), e.getCompletionId(), e.getCreatedAt(),
+                    e.getTrophyRung()));
         }
         // The shared lists are family data (unlike reminders and push subscriptions), so a
         // restore brings back the half-finished shopping list too.
@@ -266,6 +276,7 @@ public class BackupService {
         completions.deleteByHomeCode(code);
         creditEntries.deleteByHomeCode(code);
         spreeTiers.deleteByHomeCode(code);
+        trophyRewards.deleteByHomeCode(code);
         tasks.deleteByHomeCode(code);
         groups.deleteByHomeCode(code);
         listItems.deleteByHomeCode(code);
@@ -274,6 +285,10 @@ public class BackupService {
 
         // Recreate members and tasks, remapping their (identity-generated) ids.
         Map<Long, Long> memberIdMap = new HashMap<>();
+        // Members from a file written before trophies existed: they are shown as having seen
+        // what they own once their completions are back, so a restore does not replay the
+        // unlock dialog for every trophy (a fresh install's one-off introduction does that).
+        List<Member> seenUnknown = new ArrayList<>();
         int memberIndex = 0;
         for (MemberDto m : b.members) {
             String name = InputLimits.clip(m.name, InputLimits.MEMBER_NAME);
@@ -285,8 +300,14 @@ public class BackupService {
             if (m.joinedAt != null) {
                 entity.setJoinedAt(m.joinedAt);
             }
+            if (m.trophiesSeen != null) {
+                entity.setTrophiesSeen(Math.clamp(m.trophiesSeen, 0, Trophy.LEGEND.rung()));
+            }
             Member saved = members.save(entity);
             memberIdMap.put(m.id, saved.getId());
+            if (m.trophiesSeen == null) {
+                seenUnknown.add(saved);
+            }
         }
         // Groups first: tasks point at them, and restore never trusts the ids in the file.
         Map<Long, Long> groupIdMap = new HashMap<>();
@@ -381,8 +402,17 @@ public class BackupService {
                         ChoreService.clampDays(st.days), ChoreService.clampCredits(st.credits)));
             }
         }
+        for (TrophyRewardDto tr : b.trophyRewards) {
+            int credits = ChoreService.clampCredits(tr.credits);
+            // Only rungs on the ladder, once each: a backup is hand-editable.
+            if (credits > 0 && Trophy.reachedAt(tr.rung).isPresent()
+                    && trophyRewards.findByHomeCodeAndRung(code, tr.rung).isEmpty()) {
+                trophyRewards.save(new TrophyReward(code, tr.rung, credits));
+            }
+        }
         int restoredCompletions = 0;
         Map<Long, Long> completionIdMap = new HashMap<>();
+        Map<Long, Long> approvedByMember = new HashMap<>();
         for (CompletionDto c : b.completions) {
             // A null taskId is an "other help" entry, not an orphan: it never had a chore,
             // and its own note is what it says. Only a task that no longer resolves is one.
@@ -402,7 +432,16 @@ public class BackupService {
             entity.setReviewedAt(c.reviewedAt);
             Completion savedCompletion = completions.save(entity);
             completionIdMap.put(c.id, savedCompletion.getId());
+            if (savedCompletion.getStatus() == CompletionStatus.APPROVED) {
+                approvedByMember.merge(newMember, 1L, Long::sum);
+            }
             restoredCompletions++;
+        }
+        for (Member m : seenUnknown) {
+            Trophy.best(approvedByMember.getOrDefault(m.getId(), 0L)).ifPresent(t -> {
+                m.setTrophiesSeen(t.rung());
+                members.save(m);
+            });
         }
         for (CreditDto cr : b.credits) {
             Long newMember = memberIdMap.get(cr.memberId);
@@ -415,6 +454,9 @@ public class BackupService {
                     completionIdMap.get(cr.completionId));
             if (cr.createdAt != null) {
                 entity.setCreatedAt(cr.createdAt);
+            }
+            if (Trophy.reachedAt(cr.trophyRung).isPresent()) {
+                entity.setTrophyRung(cr.trophyRung);
             }
             creditEntries.save(entity);
         }
@@ -495,6 +537,8 @@ public class BackupService {
         public List<TaskDto> tasks = new ArrayList<>();
         public List<CompletionDto> completions = new ArrayList<>();
         public List<SpreeTierDto> spreeTiers = new ArrayList<>();
+        /** Absent in backups written before trophies existed: Jackson leaves it empty. */
+        public List<TrophyRewardDto> trophyRewards = new ArrayList<>();
         public List<CreditDto> credits = new ArrayList<>();
         /** Absent in backups written before the shared lists existed: Jackson leaves it empty. */
         public List<ListItemDto> listItems = new ArrayList<>();
@@ -519,9 +563,10 @@ public class BackupService {
                           String listOrder, String hiddenLists) {
     }
 
-    /** {@code avatar} is absent in pre-avatar backups and deserializes to null — fine. */
+    /** {@code avatar} is absent in pre-avatar backups and deserializes to null — fine.
+     *  {@code trophiesSeen} is boxed: null marks a file from before trophies, see restore. */
     public record MemberDto(Long id, String name, String color, boolean admin, Instant joinedAt,
-                            String avatar) {
+                            String avatar, Integer trophiesSeen) {
     }
 
     /** Absent in pre-groups backups: Jackson leaves the array empty, and every task's groupId
@@ -541,8 +586,13 @@ public class BackupService {
     public record SpreeTierDto(int days, int credits) {
     }
 
+    public record TrophyRewardDto(int rung, int credits) {
+    }
+
+    /** {@code trophyRung} is 0 for every row but a trophy reward, and in older files. */
     public record CreditDto(Long memberId, int amount, CreditType type, String reason,
-                            int spreeTierDays, Long completionId, Instant createdAt) {
+                            int spreeTierDays, Long completionId, Instant createdAt,
+                            int trophyRung) {
     }
 
     /** A shared-list line. {@code doneAt}/{@code doneByMemberId} are null while it is open;

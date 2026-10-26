@@ -4,7 +4,7 @@ package com.homechores.domain;
 public enum CompletionStatus {
     /** Awaiting admin review (only when the home requires approval). */
     PENDING,
-    /** Counts toward stats, leaderboard, milestones. */
+    /** Counts toward stats, leaderboard, trophies. */
     APPROVED,
     /** Rejected by an admin; retained for audit, excluded from all counts. */
     REJECTED

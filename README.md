@@ -27,11 +27,12 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Division styles** | *Free-for-all* (default, fair rotation via the streak rule) or *Rotating*: every member gets one assigned chore per day, rotating daily. Rotation can be **enforced** (only your chore) or a highlighted suggestion. |
 | **Interval chores** | A chore can repeat every N days (e.g. water plants every 7 days). Until due again, the card shows "🕒 in Nd" and is locked. |
 | **Availability hours** | A chore can be limited to times of day in the member's local time (e.g. take the dog out 8–10 and 18–22). Outside the window the card shows "🕒 8–10, 18–22" and taps are blocked. |
-| **Celebrations & feedback** | Confetti, a *"New chore unlocked!"* popup, trophy 🏆 milestones at **5/10/25/50/100/250**, and escalating daily praise: the 2nd chore of the day gets 💪, the 3rd+ gets 🔥 with double-burst side-cannon confetti. Every completion also asks *"How was it?"* — 😖 / 🙂 / 😍. |
+| **Celebrations & feedback** | Confetti (skipped under reduced motion), a *"New chore unlocked!"* popup, and escalating daily praise: the 2nd chore of the day gets 💪, the 3rd+ gets 🔥 with double-burst side-cannon confetti. Every completion also asks *"How was it?"* — 😖 / 🙂 / 😍. |
+| **Trophies** | Eight trophies to keep, at **5 / 10 / 25 / 50 / 100 / 250 / 500 / 1000** approved chores — 🌱 Sprout, 🧹 Helper, 🥉 Bronze, 🥈 Silver, 🏆 Gold, 🏅 Medal of honour, 🎓 Diploma, 🦄 Legend. Each is unveiled with big confetti (or on the next board visit, when an admin approved or logged the chore). **My Stats** shows the shelf with the day each was earned and a progress bar to the next; the best one sits on the member's leaderboard chip, and the celebration says *"Just 2 more to 🥈 Silver"* when one is close. Admins can attach an optional **💎 reward** to any trophy, paid once to each member who reaches it from then on. |
 | **Today filter & done-today** | The board opens on a **Today** lens (anytime chores + interval chores that are due again; a weekly chore done recently stays parked), and a collapsible **"Done today (n)"** list under the progress ring shows who did what, home-wide. |
 | **Avatars & chore master** | Members pick an animal avatar from a CC0 set (Kenney's Animal Pack Redux, self-hosted — tap your own leaderboard chip), and last ISO week's most active member wears the **🥇 chore master** badge in the header. |
-| **Credits & rewards** | Chores can award **💎 credits** (great for challenging tasks) — the value shows on the chore's card — and admins can define **spree bonuses** (X days in a row → Y credits). Admins **redeem** credits for real-world rewards (e.g. movie night). Balances show on the leaderboard; what was redeemed, and for what, shows in Stats. |
-| **Badge counter reset** | The number in each member's leaderboard chip starts over **every month** by default; admins can pick weekly, yearly or never, and press **Reset counters now**. Only that badge resets — statistics, milestones and credits always count everything. |
+| **Credits & rewards** | Chores can award **💎 credits** (great for challenging tasks) — the value shows on the chore's card — and admins can define **spree bonuses** (X days in a row → Y credits) and **trophy rewards**. Admins **redeem** credits for real-world rewards (e.g. movie night). Balances show on the leaderboard; what was redeemed, and for what, shows in Stats. |
+| **Badge counter reset** | The number in each member's leaderboard chip starts over **every month** by default; admins can pick weekly, yearly or never, and press **Reset counters now**. Only that badge resets — statistics, trophies and credits always count everything. |
 | **Daily target** | The admin sets **1–3 chores expected per member per day** (default 1); each person sees a *done/target* progress ring. |
 | **Admin role (PIN)** | The creator is admin. Enter the admin PIN via **Admin?** in the header to (re)claim admin on any device. Admins can promote others. |
 | **Chore groups & order** | Admins can create groups (🍳 Kitchen, 🧺 Laundry) that become headings on the board, and arrange them: **hold a card on the board and drag it** to where it belongs (into another group too), or use the ↑/↓ items in the Admin tab. Ungrouped chores sit under *Other chores*. Deleting a group keeps its chores. Rearranging is purely cosmetic: it never changes who the daily rotation assigns what to. |
@@ -395,15 +396,18 @@ src/main/java/com/homechores/
 │   ├── ListItem.java             # a grocery / to-do line or a dinner slot
 │   ├── ListReminder.java         # the home's reminder about one list line (fired = unanswered)
 │   ├── FeedbackCount.java        # one row of the home's all-time reaction tally, grouped in the DB
+│   ├── MemberCount.java          # one member's all-time approved count, grouped in the DB
 │   ├── CreditEntry / SpreeTier   # credit rewards
+│   ├── Trophy.java               # the fixed trophy ladder (5 … 1000 chores), emoji and names
+│   ├── TrophyReward.java         # an admin's 💎 reward for reaching a trophy
 │   ├── RejoinRequest.java        # a device asking to sign back in as an existing member
 │   ├── SharedDevice.java         # the family's kitchen tablet: a home and a secret, no member
 │   ├── TimeWindows.java          # availability-hours parsing & evaluation
 │   └── (enums: CompletionStatus, Feedback, DivisionStyle, CreditType)
 ├── service/
 │   ├── ChoreService.java         # create/join, admin/PIN, complete, fairness, booking,
-│   │                             #   rotation, intervals, availability, approvals, milestones
-│   ├── CreditService.java        # chore credits, spree bonuses, balances, redemption
+│   │                             #   rotation, intervals, availability, approvals, trophies seen
+│   ├── CreditService.java        # chore credits, spree bonuses, trophy rewards, balances, redemption
 │   ├── StatsService.java         # chart aggregations, period lenses, week/month trends
 │   ├── ChoreReminderService.java # the one-shot snooze sweep (sibling of PushReminderService)
 │   ├── ListItemService.java      # the shared lists: add, tick, delete, dinner slots, purge
@@ -424,7 +428,7 @@ src/main/java/com/homechores/
     ├── HomeView.java             # header + Chores / Stats / Admin tab host, share links
     ├── ChoresPanel.java          # daily ring, leaderboard, chore cards + badges
     ├── ClientId.java             # parses an id read back from a browser event (drops)
-    ├── StatsPanel.java           # personal + home charts
+    ├── StatsPanel.java           # personal + home charts, the trophy shelf
     ├── AdminPanel.java           # approvals, settings, members, chores, rewards, backup,
     │                             #   danger zone (delete the whole home)
     ├── Charts.java               # dependency-free bar / segment / trend charts
@@ -432,7 +436,7 @@ src/main/java/com/homechores/
     ├── SnoozeDialog.java         # "remind me about this chore in 2h"
     ├── ListPanel.java            # Groceries / To-do / Dinner
     ├── ListReminderDialog.java   # "remind us about this line tomorrow 9:00" + snooze on fire
-    ├── Celebrations.java         # confetti + congratulation + feedback dialogs
+    ├── Celebrations.java         # confetti + congratulation + feedback + trophy dialogs
     ├── PrivacyView.java          # /privacy notice
     ├── LanguageSwitcher.java     # en/fi/sv select, persisted in a cookie
     ├── SessionExpiryInitListener.java  # silent expiry: back to the landing page, which restores
@@ -445,7 +449,7 @@ src/main/resources/
 ├── messages[_fi|_sv].properties  # UI texts (all three languages)
 ├── META-INF/resources/styles.css # app styling (Lumo tweaks + components)
 └── META-INF/resources/icons/     # PWA icons + iOS splash screens (generated set)
-src/main/frontend/confetti.js     # self-contained confetti (no CDN)
+src/main/frontend/confetti.js     # self-contained confetti (no CDN; off under reduced motion)
 src/main/frontend/loading-overlay.js # the loading card, built from the landing restore card's classes
 src/main/frontend/keyboard-inset.js  # how much of the page the on-screen keyboard covers (toasts)
 src/main/frontend/list-swipe.js   # swipe-to-reveal actions on list lines
@@ -458,12 +462,15 @@ tools/
 ├── release.sh                    # deploy or roll back a release
 ├── generate-icons.cjs            # regenerates the PWA icons + iOS splash screens
 ├── observability/                # Prometheus + Grafana setup for the Observability Kit
-└── demo-video/                   # the vertical demo video, captioned and narrated
-    ├── run.sh                    # production jar on a throwaway database, then record + mix
-    ├── record.mjs                # Playwright drives the app; each caption waits for its line
+└── demo-video/                   # the vertical demo videos, captioned and narrated
+    ├── run.sh <name>             # production jar on a throwaway database, then record + mix
+    ├── record.mjs                # Playwright plays scenes/<name>.mjs on one screen or several; the voice leads, the taps follow
+    ├── scenes/basics.mjs         # "FlashChores in a minute" (docs/DEMO-VIDEOS-PLAN-2026-10-26.md)
+    ├── scenes/rewards.mjs        # "Diamonds, streaks and trophies", on a home set up off camera
+    ├── scenes/ways.mjs           # "Three ways to run it": two phones and the kitchen tablet, on a home with history
     ├── tts.py                    # speaks the lines with Kokoro, a local neural voice (.venv)
     ├── requirements.txt          # Kokoro for that venv (plus brew install espeak-ng)
-    └── mix.sh                    # ffmpeg lays the voice under it -> video/flashchores-demo.mp4
+    └── mix.sh <name>             # ffmpeg splices the cut list and lays the voice under it -> video/flashchores-<name>.mp4
 ```
 
 ## Tests

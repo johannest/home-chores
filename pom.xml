@@ -21,8 +21,8 @@
         <java.version>25</java.version>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <vaadin.version>25.3.0</vaadin.version>
-        <archunit.version>1.5.0</archunit.version>
+        <vaadin.version>25.3.3</vaadin.version>
+        <archunit.version>1.5.1</archunit.version>
     </properties>
 
     <dependencyManagement>

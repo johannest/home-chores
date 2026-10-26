@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
+import com.homechores.domain.Trophy;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +41,7 @@ class DeleteHomeTest {
         service.complete(tasks.get(0).getId(), alex.getId());
         service.complete(tasks.get(1).getId(), sam.getId());
         credits.addTier(code, 3, 10);
+        credits.setTrophyReward(code, Trophy.SILVER, 20, alex.getId());
         service.addGroup(code, "Kitchen", "🍳");
         service.requestRejoin(code, sam.getId(), null);
         lists.add(code, ListKind.GROCERY, Author.member(alex.getId()), "Milk");
@@ -56,6 +58,7 @@ class DeleteHomeTest {
         assertTrue(service.groupsOf(code).isEmpty(), "chore groups go with the home");
         assertTrue(lists.openItems(code, ListKind.GROCERY).isEmpty(), "and so does the shopping list");
         assertTrue(credits.tiersOf(code).isEmpty());
+        assertTrue(credits.trophyRewards(code).isEmpty(), "trophy rewards go with the home");
         assertTrue(credits.ledger(code).isEmpty());
         assertEquals(0, credits.balance(alex.getId()));
         assertEquals(0, service.completionCount(alex.getId()));

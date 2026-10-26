@@ -15,6 +15,7 @@ import com.homechores.domain.Season;
 import com.homechores.domain.Seasons;
 import com.homechores.domain.SpreeTier;
 import com.homechores.domain.TimeWindows;
+import com.homechores.domain.Trophy;
 import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
@@ -33,6 +34,7 @@ import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.Component;
+import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.menubar.MenuBar;
@@ -1338,6 +1340,54 @@ class AdminPanel extends VerticalLayout {
 
     // ---- Rewards (credits) --------------------------------------------------
 
+    /**
+     * What each trophy pays, one row per rung of the fixed ladder. Saved as soon as a field
+     * changes: eight rows with a Save button each, or one for all, would be more to read than
+     * the numbers themselves. Empty means no reward.
+     */
+    private Div trophyRewards() {
+        Div box = new Div();
+        Div title = new Div();
+        title.setText(T.tr("admin.trophy.title"));
+        title.addClassName("sub");
+        title.getStyle().set("margin-top", "var(--lumo-space-m)");
+        Paragraph helper = new Paragraph(T.tr("admin.trophy.helper"));
+        helper.addClassName("feedback-hint");
+        box.add(title, helper);
+
+        Map<Trophy, Integer> rewards = creditService.trophyRewards(homeCode);
+        for (Trophy t : Trophy.values()) {
+            Div label = new Div();
+            label.setText(t.emoji() + " " + T.tr(t.nameKey()) + " · "
+                    + T.tr("admin.trophy.rung", t.rung()));
+            label.addClassName("grow");
+            IntegerField amount = new IntegerField();
+            amount.setMin(0);
+            amount.setMax(InputLimits.MAX_CREDITS);
+            amount.setPrefixComponent(new Span("💎"));
+            amount.setAriaLabel(T.tr("admin.trophy.amount", T.tr(t.nameKey())));
+            amount.addClassName("trophy-reward-field");
+            Integer current = rewards.get(t);
+            amount.setValue(current);
+            amount.addValueChangeListener(e -> {
+                if (!e.isFromClient()) {
+                    return;
+                }
+                if (stillAdmin()) {
+                    int value = e.getValue() == null ? 0 : Math.max(0, e.getValue());
+                    creditService.setTrophyReward(homeCode, t, value, memberId);
+                }
+                // The field shows what the home stores, not what was typed: 5000 is kept as
+                // 1000, and a demoted admin's typing is kept as nothing at all.
+                amount.setValue(creditService.trophyRewards(homeCode).get(t));
+            });
+            Div row = new Div(label, amount);
+            row.addClassNames("list-row", "trophy-reward-row");
+            box.add(row);
+        }
+        return box;
+    }
+
     private Details rewardsSection() {
         Details s = section(Section.REWARDS, T.tr("admin.rewards"), false);
 
@@ -1384,6 +1434,8 @@ class AdminPanel extends VerticalLayout {
         HorizontalLayout addRow = new HorizontalLayout(days, cr, addTier);
         addRow.setAlignItems(FlexComponent.Alignment.END);
         s.add(addRow);
+
+        s.add(trophyRewards());
 
         Div balTitle = new Div();
         balTitle.setText(T.tr("admin.balances.title"));

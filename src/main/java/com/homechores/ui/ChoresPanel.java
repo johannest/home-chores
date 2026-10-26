@@ -10,6 +10,7 @@ import com.homechores.domain.InputLimits;
 import com.homechores.domain.Member;
 import com.homechores.domain.Seasons;
 import com.homechores.domain.TimeWindows;
+import com.homechores.domain.Trophy;
 import com.homechores.service.ChoreReminderService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
@@ -122,6 +123,9 @@ class ChoresPanel extends VerticalLayout {
     /** Whether the "Done today" list is expanded — same plain-field trick as the lens. */
     private boolean doneTodayOpen = false;
 
+    /** Opens this member's trophy shelf; set by {@link HomeView}, which owns the tabs. */
+    private Runnable showTrophies = () -> { };
+
     /** From this many members the leaderboard drops names into tooltips (see renderLeaderboard). */
     static final int COMPACT_LEADERBOARD_FROM = 4;
 
@@ -166,6 +170,10 @@ class ChoresPanel extends VerticalLayout {
                 .addEventData("event.detail.taskId")
                 .addEventData("event.detail.groupId")
                 .addEventData("event.detail.beforeTaskId");
+    }
+
+    void onShowTrophies(Runnable showTrophies) {
+        this.showTrophies = showTrophies;
     }
 
     /**
@@ -289,6 +297,9 @@ class ChoresPanel extends VerticalLayout {
         // Highest count first; ties keep the join order (List.sort is stable), so a fresh home
         // with everyone at zero still lists the family in the order it was built.
         ranked.sort((a, b) -> Long.compare(counts.get(b.getId()), counts.get(a.getId())));
+        // Trophies follow the all-time count whatever the badge counts, so they come from one
+        // grouped query rather than another per-member count on every redraw.
+        Map<Long, Long> allTime = service.approvedCounts(homeCode);
         // Four or more members is where the chips stopped fitting: on a phone each named chip took
         // a row of its own, and a family of five spent 200px on the board's ranking before a single
         // chore. Compact chips keep the face (avatar or initials), the count and the credits, and
@@ -302,8 +313,22 @@ class ChoresPanel extends VerticalLayout {
         }
         for (Member m : ranked) {
             long count = counts.get(m.getId());
+            Trophy best = Trophy.best(allTime.getOrDefault(m.getId(), 0L)).orElse(null);
 
             Div dot = MemberAvatar.dot(m);
+            Div face = dot;
+            if (best != null) {
+                // On the avatar's corner rather than beside it: no extra width, so compact chips
+                // still fit three to a row at 360px. The dot clips its contents, hence the wrapper.
+                Span badge = new Span(best.emoji());
+                badge.addClassName("trophy-badge");
+                String label = T.tr("trophy.aria", T.tr(best.nameKey()));
+                badge.getElement().setAttribute("role", "img");
+                badge.getElement().setAttribute("aria-label", label);
+                badge.setTitle(label);
+                face = new Div(dot, badge);
+                face.addClassName("avatar-wrap");
+            }
 
             Span nameEl = new Span(m.getName());
             nameEl.addClassName("name");
@@ -315,7 +340,7 @@ class ChoresPanel extends VerticalLayout {
             Span countEl = new Span(String.valueOf(count));
             countEl.addClassName("count");
 
-            Div chip = new Div(dot, nameEl, countEl);
+            Div chip = new Div(face, nameEl, countEl);
             int credits = creditService.balance(m.getId());
             if (credits > 0) {
                 Span creditEl = new Span("💎 " + credits);
@@ -323,9 +348,11 @@ class ChoresPanel extends VerticalLayout {
                 chip.add(creditEl);
             }
             chip.addClassName("member-chip");
+            String trophyText = best == null ? ""
+                    : ", " + T.tr("trophy.aria", T.tr(best.nameKey()));
             if (compact) {
-                chip.setTitle(m.getName());
-                chip.getElement().setAttribute("aria-label", m.getName() + " " + count);
+                chip.setTitle(m.getName() + trophyText);
+                chip.getElement().setAttribute("aria-label", m.getName() + " " + count + trophyText);
             }
             if (m.getId().equals(memberId)) {
                 chip.addClassName("me");
@@ -788,7 +815,8 @@ class ChoresPanel extends VerticalLayout {
                 var outcome = service.logOtherHelpAsAdmin(homeCode, memberId, what.getValue(), amount);
                 dialog.close();
                 outcome.ifPresentOrElse(
-                        o -> Celebrations.afterComplete(service, o, this::undoLast),
+                        o -> Celebrations.afterComplete(service, creditService, o,
+                                this::undoLast, showTrophies),
                         () -> Toasts.show(T.tr("board.otherHelp.off"), 4000)
                                 .addThemeVariants(NotificationVariant.LUMO_CONTRAST));
                 refresh();
@@ -942,7 +970,9 @@ class ChoresPanel extends VerticalLayout {
         if (who != null) {
             lastFromDevice = new FromDevice(outcome.completionId(), who.getId());
         }
-        Celebrations.afterComplete(service, outcome, this::undoLast);
+        // On the shared device the member picked has no shelf of theirs to jump to here.
+        Celebrations.afterComplete(service, creditService, outcome, this::undoLast,
+                who == null ? showTrophies : null);
         refresh();
     }
 

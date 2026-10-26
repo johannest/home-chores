@@ -23,6 +23,9 @@ public interface CreditEntryRepository extends JpaRepository<CreditEntry, Long> 
             + " where e.memberId = :memberId and e.type = :type")
     long sumAmount(@Param("memberId") Long memberId, @Param("type") CreditType type);
 
+    /** Whether a trophy rung has already paid this member. */
+    boolean existsByMemberIdAndTrophyRung(Long memberId, int trophyRung);
+
     List<CreditEntry> findByHomeCodeOrderByCreatedAtDesc(String homeCode);
 
     /** One type of row for the whole home, newest first; the id breaks ties within a second. */

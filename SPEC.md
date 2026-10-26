@@ -38,8 +38,13 @@ Terms in **bold** map to concepts in the code.
   until done, cancelled, or expired.
 - **Division style** — how chores are divided: `DEFAULT` (free-for-all) or
   `ROTATING` (one assigned chore per member per day).
-- **Credit** — reward points (💎). Earned from a chore's credit value or a **spree
-  tier** (X consecutive days → Y credits); spent via an admin **redemption**.
+- **Credit** — reward points (💎). Earned from a chore's credit value, a **spree
+  tier** (X consecutive days → Y credits) or a **trophy reward**; spent via an admin
+  **redemption**.
+- **Trophy** — a rung of the fixed ladder of personal approved-chore counts
+  (5/10/25/50/100/250/500/1000, `Trophy`), each with an emoji and a name. A member owns every
+  rung their all-time count has reached; nothing is stored. An admin may attach a 💎
+  **trophy reward** to a rung (`TrophyReward`).
 - **Join link** — `/?join=CODE`; opens the landing page with the Join tab
   preselected and the code prefilled.
 
@@ -72,6 +77,7 @@ Terms in **bold** map to concepts in the code.
 | Approve / reject a join or rejoin request | — | ✅ |
 | Change home settings (approval, rejoin gate, division style, booking hold, daily target, other help, PIN, name) | — | ✅ |
 | Manage spree tiers, view balances, redeem credits | — | ✅ |
+| Set a 💎 reward per trophy | — | ✅ |
 | Backup / restore the family's data | — | ✅ |
 | Delete the home and all its data | — | ✅ |
 
@@ -108,8 +114,8 @@ hold whatever screen the call came from.
   4 / 5 / 10); the next tap is blocked until someone else does that chore. "No limit" turns
   the rule off for homes where one person genuinely owns a chore.
 - **US-07 Celebrations.** As a member, I see confetti on completion, a "new chore
-  unlocked" popup the first time I do a chore, and milestone trophies at
-  5/10/25/50/100/250 personal chores.
+  unlocked" popup the first time I do a chore, and a trophy at 5/10/25/50/100/250/500/1000
+  personal chores (US-63).
 - **US-08 Live sync.** As a member, when anyone completes a chore my screen updates
   live.
 
@@ -128,7 +134,7 @@ hold whatever screen the call came from.
   instantly.
 - **US-13 Approve / reject.** As an admin, I can see all pending completions (who,
   which chore, when, their feedback) and approve or reject each. Approved
-  completions count toward stats, leaderboard and milestones; rejected ones don't.
+  completions count toward stats, leaderboard and trophies; rejected ones don't.
 - **US-14 Completion correction.** As an admin, I can delete any completion to fix
   mistakes.
 - **US-15 Daily target.** As an admin, I can set how many chores each member is
@@ -360,6 +366,22 @@ hold whatever screen the call came from.
   translate pages, FlashChores declines: the app already speaks my language, and an automatic
   translation would rewrite home codes, member names and what people wrote about their own
   help.
+
+### Phase 7
+
+- **US-63 Trophies I keep.** As a member, reaching 5, 10, 25, 50, 100, 250, 500 and 1000
+  approved chores each earns me a trophy with its own emoji and name — 🌱 Sprout, 🧹 Helper,
+  🥉 Bronze, 🥈 Silver, 🏆 Gold, 🏅 Medal of honour, 🎓 Diploma, 🦄 Legend — unveiled with big
+  confetti. A trophy earned while I wasn't looking (an admin approved or logged the chore) is
+  unveiled the next time I open the board. My Stats shows my shelf: every trophy, the earned
+  ones with the day I reached them, the locked ones with what they pay, and a progress bar to
+  the next. My best trophy sits on my leaderboard chip, so the family sees it too.
+- **US-64 Trophy rewards (admin).** As an admin, I can attach a 💎 reward to any trophy in the
+  Rewards section. Each member who reaches that trophy from then on is paid it once; members
+  already past it when I set it are not paid, so a number typed in does not empty the bank.
+- **US-65 Almost there.** As a member, when my next trophy is three chores or fewer away, the
+  celebration after a chore says so — "Just 2 more to 🥈 Silver (+20 💎)!" — instead of the
+  board growing another progress element.
 
 ## 4. Functional specification
 
@@ -800,10 +822,40 @@ message and shows a matching badge on the card (`LockReason`):
 - Cards show "⭐ Your turn" (own) or "<name> today" (others). Enforced mode blocks
   other chores (`NOT_ASSIGNED`); suggested mode merely highlights.
 
-### 4.6 Counting, milestones, leaderboard
+### 4.6 Counting, trophies, leaderboard
 - A member's **count** = number of their `APPROVED` completions.
-- **Milestones** (5/10/25/50/100/250) evaluated on the member's approved count at the
-  moment a completion becomes approved.
+- **Trophies** (`Trophy`): a fixed ladder of eight rungs — 🌱 Sprout 5, 🧹 Helper 10, 🥉 Bronze
+  25, 🥈 Silver 50, 🏆 Gold 100, 🏅 Medal of honour 250, 🎓 Diploma 500, 🦄 Legend 1000. The emoji
+  avoid every glyph that already means something (👑 admin, 🥇 chore master, 💎, 🔥, 💪, 🌟, ⏳,
+  🙋). Not admin-editable: the admin's lever is the reward (§4.7).
+  - **Derived, never stored.** A member owns every rung their all-time count (`completionCount`,
+    chores plus accepted other help) has reached. Undoing or deleting the completion that
+    reached a rung takes the trophy back, as it takes back that completion's credits; members
+    who were past a rung on the day trophies shipped owned it that day. The badge counter
+    reset never touches trophies.
+  - **Reached** = the count after a completion becomes `APPROVED` lands exactly on a rung
+    (`CompleteOutcome.trophy`). Pending completions reach nothing.
+  - **Unlock dialog**: the trophy's emoji (a pop and a short golden glow, both off under
+    `prefers-reduced-motion`), "New trophy: Silver!", "50 chores done, Emma!", the reward line
+    "+20 💎 reward" when the rung pays, big confetti, the feedback row, **See my trophies**
+    (straight to the shelf) and Undo.
+  - **Never missed** (`Member.trophiesSeen`, the highest rung the member has been shown, DDL
+    default 0): the member's own tap marks its trophy seen; an admin's approval or logging does
+    not. Whenever a member's board is drawn (`HomeView`) and they own a rung above the marker,
+    one dialog shows it — "3 new trophies!" with their names when there are several — and the
+    marker moves up before it opens, so a redraw cannot show it twice. Not on the shared device.
+    With the default 0, every member's first visit after the upgrade presents the trophies they
+    already own, once.
+  - **Almost there**: when the next rung is `Celebrations.TROPHY_NEAR` = **3** or fewer chores
+    away, the ordinary celebration dialog adds "Just 2 more to 🥈 Silver (+20 💎)!" (the
+    reward only when set).
+  - **On the leaderboard chip**: the member's best trophy as a small badge on the avatar's
+    corner — no extra width, so compact chips still fit at 360px — with `role="img"` and the
+    label "Trophy: Helper", which the compact chip's accessible name carries too. Every
+    member's all-time count comes from **one** grouped query
+    (`CompletionRepository.approvedCountsByMember`), not a count per member per redraw.
+  - Confetti is skipped entirely under `prefers-reduced-motion` (`confetti.js`); the dialog
+    still says the same thing.
 - **new-chore** achievement = first `APPROVED` completion of that chore by that member.
 - Leaderboard shows each member with their **badge count** and 💎 credit balance
   (when > 0); admins are badged 👑. Ordered by badge count, highest first, ties in join order
@@ -813,7 +865,7 @@ message and shows a matching badge on the card (`LockReason`):
   MONTHLY; `Home.counterResetAt`: the admin's last "Reset counters now"). The badge counts
   `APPROVED` completions done since the later of the current period's start (server zone, weeks
   from Monday like the stats) and the manual reset (`ChoreService.badgeCount`). Only that
-  number: `completionCount`, milestones, credits, the chore master and every statistic stay
+  number: `completionCount`, trophies, credits, the chore master and every statistic stay
   all-time. "Reset counters now" asks first (the whole family's badges go to zero at once),
   stamps `counterResetAt` and bumps the home. A manual reset outlives a period boundary only
   until the next period starts. The column carries a DDL default, so existing homes adopt
@@ -831,7 +883,7 @@ message and shows a matching badge on the card (`LockReason`):
   blank weeks.
 - **Escalating daily celebrations**: the member's 2nd approved chore of the day gets a 💪
   dialog, the 3rd+ a 🔥 one with double-burst side-cannon confetti; precedence stays
-  pending > milestone > new-chore > daily tier. Pending completions keep the neutral ⏳
+  pending > trophy > new-chore > daily tier. Pending completions keep the neutral ⏳
   dialog — praise waits until the chore actually counts.
 
 ### 4.7 Credits & rewards
@@ -840,8 +892,22 @@ message and shows a matching badge on the card (`LockReason`):
   - spree check: the member's streak of consecutive days with ≥ 1 approved
     completion (server dates, ending today) is computed; if it exactly equals a
     tier's `days` and that tier hasn't been awarded for this streak already, the
-    tier's credits are awarded. Celebration toasts announce both.
+    tier's credits are awarded. Celebration toasts announce both;
+  - **trophy reward**: if the member's count now lands exactly on a trophy rung, the home's
+    reward for that rung is > 0, and no ledger row with that `trophyRung` exists for the
+    member, a `CreditEntry` (reason `trophy`, tagged with the rung and the completion) pays it.
+    Exact rung only, so setting a reward never pays members already past it; once per member
+    and rung, so climbing back over a rung after an admin deleted an older completion does not
+    pay twice; tagged with the completion, so undoing that chore takes the reward back. The
+    unlock dialog announces it.
 - **Spree tiers** (admin): list of `days → credits` rows, addable/deletable.
+- **Trophy rewards** (admin): one row per rung under the spree tiers — emoji, name, "50
+  chores" and a 💎 field (empty = none), saved as soon as it changes and clamped to
+  `InputLimits.MAX_CREDITS`; the field then shows what the home stores (the clamped amount, or
+  the old one when a demoted admin's save was refused). The same for every member of the home.
+  Stored as
+  `TrophyReward` rows only for rungs that pay; `CreditService.setTrophyReward` re-checks that
+  the acting member is an admin of that home and takes a `Trophy`, never a free number.
 - **Balance** = earned − redeemed, per member.
 - **On the card**: a chore with `creditValue > 0` carries a 💎 *n* pill under its name on the
   board (`.card-credit`, the leaderboard's yellow pill), so a member can see what a tap pays
@@ -884,6 +950,16 @@ message and shows a matching badge on the card (`LockReason`):
   an admin typing into a dialog). Only the *All time* lens, the member's own choice, loads the
   ledger whole. The period is then applied inside that single pass and the trends derived from
   the same per-day map. `StatsRenderCostTest` pins the number of rows a render loads.
+- **🏆 My trophies** (any member; on the shared device, the picked member's): the first card,
+  above the period tiles, since the tiles are the lens for what is under them and trophies are
+  all-time. The eight rungs as tiles four to a row (`role="list"`, no button role or focus
+  stop): earned ones tinted with the day reached (`doneAt` of the member's *n*-th approved
+  completion), locked ones with a greyed emoji, their rung, and a 💎 pill when they pay; the
+  next rung outlined. Under them "Next: 🥈 Silver — 38 / 50, 12 to go" over a progress bar
+  (`role="progressbar"`), or "Every trophy earned" at the top. Shown from the first visit — an
+  empty shelf with the first bar is the invitation. Cost: a count, the reward rows and one
+  single-row query per earned trophy, at most eight (`StatsService.trophyShelf`), only here.
+  Empty for a member of another home.
 - **My stats** (any member): total approved; the period tiles; bar chart of my chores by type
   under the lens; **💎 earned** and **💎 redeemed** (below); my feedback split; 7-day adherence;
   **12-week and 12-month trends**.
@@ -936,16 +1012,20 @@ message and shows a matching badge on the card (`LockReason`):
 - A list of all `PENDING` chore completions for the home, newest first, each with member,
   chore, time, feedback, and **Approve** / **Reject** actions. Other help is excluded here
   and listed separately (§4.3.2), though the Admin tab's badge counts both.
-- Approve → `APPROVED`, records reviewer/time, triggers milestone/new-chore/credit
-  evaluation.
+- Approve → `APPROVED`, records reviewer/time, triggers trophy/new-chore/credit
+  evaluation. The member sees a trophy it reached on their next board visit (§4.6).
 - Reject → `REJECTED` (retained for audit, excluded from all counts and fairness).
 - Live-updates when members submit; the Admin tab shows a pending-count badge.
 
 ### 4.11 Backup / restore (admin)
 - **Backup**: a JSON document `{ version, home, members[], groups[], tasks[], completions[],
-  spreeTiers[], credits[] }` for this home only (the "family DB"), offered as a
+  spreeTiers[], trophyRewards[], credits[] }` for this home only (the "family DB"), offered as a
   file download `home-chores-<code>-backup.json`. Tasks include interval, credit
-  value and availability windows; completions include the other-help `note`.
+  value and availability windows; completions include the other-help `note`; members their
+  `trophiesSeen`; credit rows their `trophyRung`. On restore, trophy rewards and paid rungs
+  are kept only for rungs on the ladder, and a member from a file written before trophies is
+  marked as having seen the trophies their restored completions reach, so a restore does not
+  replay a year of unlock dialogs.
 - **Restore**: upload a backup JSON. After a confirmation dialog warning that current
   data will be replaced, the home's data is deleted and recreated from the file, and
   home settings (name, PIN, approval, division style, booking hold, target) are
@@ -1208,7 +1288,7 @@ everyone in the home except the admin doing the logging.
   decide who *should* do a chore next; this records who *did* one. It clears any booking on
   the chore, as completing it normally would.
 - **Recorded `APPROVED`** whatever `requireApproval` says, with `reviewedByMemberId` set to
-  the admin, so the history shows whose word it was. Credits, milestones, the daily target and
+  the admin, so the history shows whose word it was. Credits, trophies, the daily target and
   spree streaks all follow for the member it was logged for, not the admin.
 - **Reversible** through the same Recent chores unmark (§4.3.1), credits included.
 
@@ -1410,7 +1490,7 @@ scales up, not the other way round.
 ## 6. Testing strategy
 - **Service unit tests (JUnit 5)** against an in-memory H2 profile: home create/join,
   admin PIN claim, fairness (incl. reset by another member, pending counting),
-  approval on/off effect on counts & milestones, feedback, daily target, booking
+  approval on/off effect on counts & trophies, feedback, daily target, booking
   (block/expiry/cancel/clear-on-complete), rotation (distinct daily assignments,
   enforcement, day advance), interval due-dates, availability windows (parsing,
   normalization, in/out-of-window completion via fixed-offset zones), credits &
@@ -1437,12 +1517,29 @@ scales up, not the other way round.
   and `placeChore` — before a neighbour, to a section's end, into another group via a neighbour,
   into an empty group, a no-op drop (same slot, before itself, the last card to the end), another
   home's neighbour refused, another home's *card* refused (the session's home scopes the drop),
-  and the rotation invariant again under drags.
+  and the rotation invariant again under drags; and trophies (`TrophyTest`): the ladder's
+  best / next / exact rung; the reward paid at the rung, once, and not below it; a rung with no
+  reward still reached; undoing the completion that reached it takes trophy and 💎 back and
+  re-doing pays again, net once; climbing back after an older completion is deleted is
+  celebrated but not paid twice; setting a reward is not retroactive; in an approval home a
+  pending chore reaches nothing, the approval reaches it and leaves it unseen for the member,
+  and marking it seen clears it; an admin's logging leaves it unseen; the member's own tap
+  marks it seen; trophies owned before the feature are all unseen once; only a current admin
+  of that home sets a reward (member, another home's admin and a demoted admin refused), it is
+  clamped and 0 removes it; `approvedCounts` groups the home by member, ignoring pending rows
+  and other homes; the shelf dates each earned rung by the *n*-th completion and names the
+  next with its reward, and is empty for another home's member; rewards, paid rungs and the
+  seen marker survive a backup round-trip, and a pre-trophy file restores with its trophies
+  seen. `BoardRenderCostTest` pins the leaderboard's counts at one statement for a home of six,
+  and `DeleteHomeTest` that trophy rewards go with the home.
 - **Upgrade path** (`SchemaEvolutionTest`): the whole application booted with the production
   `ddl-auto=update` against a file database built from `legacy-schema.sql`, a pre-Phase-4
   FlashChores: the context starts at all, settings added since adopt their documented
-  default on an old home, historic rows still complete, aggregate and export, tables added
-  since are created empty and writable, chores from before groups existed keep their order
+  default on an old home, historic rows still complete, aggregate and export, a member's
+  `trophiesSeen` reads back its default 0 so that the trophies their historic count already
+  reaches are owned at once, shown once and paid nothing (and a historic 💎 row belongs to no
+  rung), tables added since are created empty and writable, chores from before groups existed
+  keep their order
   with the column default 0 until the first move, and list lines written without
   `sort_order` read in writing order with the default 0 until the first drag renumbers them.
 - **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest` through
@@ -1472,7 +1569,13 @@ scales up, not the other way round.
   balance as plain tiles and the reward note in the list, and the admin's Home stats list the same
   row with the member's name, a blank note reads "(no note)" and past ten rows the card counts
   the ones it left out; the admin's Home stats fold each member's own chores and keep an open fold open across
-  a redraw; and the session lifetime is the member's until the PIN is entered, and the admin's
+  a redraw; the trophy shelf on My stats lists all eight rungs as non-focusable list items with
+  the earned one tinted, the next outlined and a progress bar saying 7 of 10; a trophy earned
+  while away opens on the board once, leads to the shelf, and is not shown on the next visit,
+  and three at once share one "3 new trophies!" dialog; the leaderboard chip wears the best
+  trophy with the label "Trophy: Helper"; the fourth tap says "Just 1 more to 🌱 Sprout (+7 💎)!"
+  and the fifth unveils the trophy with its reward; an admin's 💎 field for a rung saves the
+  reward and shows the stored amount; and the session lifetime is the member's until the PIN is entered, and the admin's
   from then on. `LoadingOverlayUiTest`: the loading card gets its text in the UI's language
   (Finnish, English, Swedish) from the same key as the landing page's restore card, appears at
   the indicator's second stage set to 1.5 s with the thin bar still first, and every new UI is

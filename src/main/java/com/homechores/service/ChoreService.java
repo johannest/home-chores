@@ -17,6 +17,7 @@ import com.homechores.domain.CustomListRepository;
 import com.homechores.domain.ListItemRepository;
 import com.homechores.domain.ListReminderRepository;
 import com.homechores.domain.Member;
+import com.homechores.domain.MemberCount;
 import com.homechores.domain.MemberRepository;
 import com.homechores.domain.PushSubscriptionRepository;
 import com.homechores.domain.RejoinRequest;
@@ -25,6 +26,7 @@ import com.homechores.domain.RejoinStatus;
 import com.homechores.domain.Seasons;
 import com.homechores.domain.SharedDeviceRepository;
 import com.homechores.domain.TimeWindows;
+import com.homechores.domain.Trophy;
 import com.homechores.i18n.Translations;
 import java.security.SecureRandom;
 import java.time.Duration;
@@ -33,6 +35,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -61,8 +64,6 @@ public class ChoreService {
      */
     public static final int MAX_IN_A_ROW = Home.DEFAULT_MAX_IN_A_ROW;
 
-    /** Milestones that trigger a big celebration (personal approved-chore counts). */
-    static final int[] MILESTONES = {5, 10, 25, 50, 100, 250};
 
     private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I/O/0/1
     /** Length of a shareable home code. 7 chars ≈ 34 billion combinations, so codes
@@ -1529,11 +1530,14 @@ public class ChoreService {
         if (approval) {
             return CompleteOutcome.pending(task, member, saved.getId());
         }
-        CreditService.Award award = creditService.onApprovedCompletion(
-                task, memberId, task.getHomeCode(), saved.getId());
         long memberTotal = completions.countByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
+        CreditService.Award award = creditService.onApprovedCompletion(
+                task, memberId, task.getHomeCode(), saved.getId(), memberTotal);
+        Trophy trophy = Trophy.reachedAt(memberTotal).orElse(null);
+        // The tap's own celebration shows this trophy, so the next board visit must not again.
+        markSeen(member, trophy);
         return CompleteOutcome.done(task, member, memberTotal, !alreadyDoneThisChore,
-                milestoneFor(memberTotal), rotating ? 0 : streak + 1, saved.getId(), award,
+                trophy, rotating ? 0 : streak + 1, saved.getId(), award,
                 doneTodayCount(memberId));
     }
 
@@ -1548,7 +1552,7 @@ public class ChoreService {
      *
      * <p>Recorded {@code APPROVED} whatever the home's approval setting says — an admin
      * logging it <em>is</em> the approval — with the admin kept as the reviewer so the
-     * history shows whose word it was. Credits and milestones follow as usual, and the
+     * history shows whose word it was. Credits and trophies follow as usual, and the
      * entry can be taken back from the admin's Recent chores list like any other.
      *
      * @param memberId the member who did the chore, not the admin doing the recording
@@ -1583,11 +1587,12 @@ public class ChoreService {
         touch(home);
         homeState.bump(task.getHomeCode());
 
-        CreditService.Award award = creditService.onApprovedCompletion(
-                task, memberId, task.getHomeCode(), saved.getId());
         long memberTotal = completions.countByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
+        CreditService.Award award = creditService.onApprovedCompletion(
+                task, memberId, task.getHomeCode(), saved.getId(), memberTotal);
+        // Not marked seen: the member was not the one looking, so their next board visit shows it.
         return CompleteOutcome.done(task, member, memberTotal, !alreadyDoneThisChore,
-                milestoneFor(memberTotal), 0, saved.getId(), award,
+                Trophy.reachedAt(memberTotal).orElse(null), 0, saved.getId(), award,
                 doneTodayCount(memberId));
     }
 
@@ -1659,10 +1664,12 @@ public class ChoreService {
         touch(home);
         homeState.bump(home.getCode());
 
-        CreditService.Award award = creditService.onApprovedHelp(
-                home.getCode(), adminId, saved.getId(), credits, saved.getNote());
         long total = completions.countByMemberIdAndStatus(adminId, CompletionStatus.APPROVED);
-        return Optional.of(CompleteOutcome.done(null, admin, total, false, milestoneFor(total), 0,
+        CreditService.Award award = creditService.onApprovedHelp(
+                home.getCode(), adminId, saved.getId(), credits, saved.getNote(), total);
+        Trophy trophy = Trophy.reachedAt(total).orElse(null);
+        markSeen(admin, trophy);
+        return Optional.of(CompleteOutcome.done(null, admin, total, false, trophy, 0,
                 saved.getId(), award, doneTodayCount(adminId)));
     }
 
@@ -1742,13 +1749,15 @@ public class ChoreService {
         touchHome(c.getHomeCode());
         homeState.bump(c.getHomeCode());
 
-        CreditService.Award award = task != null
-                ? creditService.onApprovedCompletion(task, c.getMemberId(), c.getHomeCode(), c.getId())
-                : creditService.onApprovedHelp(c.getHomeCode(), c.getMemberId(), c.getId(),
-                        credits, c.getNote());
         long memberTotal = completions.countByMemberIdAndStatus(c.getMemberId(), CompletionStatus.APPROVED);
+        CreditService.Award award = task != null
+                ? creditService.onApprovedCompletion(task, c.getMemberId(), c.getHomeCode(),
+                        c.getId(), memberTotal)
+                : creditService.onApprovedHelp(c.getHomeCode(), c.getMemberId(), c.getId(),
+                        credits, c.getNote(), memberTotal);
+        // Not marked seen: the admin approved it, the member sees it on their next board visit.
         return CompleteOutcome.done(task, member, memberTotal, task != null && !alreadyDoneThisChore,
-                milestoneFor(memberTotal), 0, c.getId(), award,
+                Trophy.reachedAt(memberTotal).orElse(null), 0, c.getId(), award,
                 doneTodayCount(c.getMemberId()));
     }
 
@@ -1858,9 +1867,42 @@ public class ChoreService {
         return members.countByHomeCode(normalizeCode(homeCode));
     }
 
-    /** Number of APPROVED completions by this member, ever (milestones, admin views, stats). */
+    /** Number of APPROVED completions by this member, ever (trophies, admin views, stats). */
     public long completionCount(Long memberId) {
         return completions.countByMemberIdAndStatus(memberId, CompletionStatus.APPROVED);
+    }
+
+    /** Every member's all-time approved count, by member id, in one query; a member with
+     *  nothing approved is absent. */
+    public Map<Long, Long> approvedCounts(String homeCode) {
+        Map<Long, Long> out = new HashMap<>();
+        for (MemberCount c : completions.approvedCountsByMember(normalizeCode(homeCode))) {
+            out.put(c.memberId(), c.count());
+        }
+        return out;
+    }
+
+    /**
+     * Trophies the member owns but has not been shown — earned while someone else was looking
+     * (an admin approved or logged the chore), or owned before trophies existed. Lowest first.
+     */
+    public List<Trophy> unseenTrophies(Long memberId) {
+        Member member = members.findById(memberId).orElse(null);
+        if (member == null) {
+            return List.of();
+        }
+        return Trophy.earned(completionCount(memberId)).stream()
+                .filter(t -> t.rung() > member.getTrophiesSeen()).toList();
+    }
+
+    /**
+     * Records that the member has now seen every trophy they own. Personal, so it never bumps
+     * {@link HomeState}: nothing on anybody else's screen depends on it.
+     */
+    @Transactional
+    public void markTrophiesSeen(Long memberId) {
+        members.findById(memberId).ifPresent(m ->
+                markSeen(m, Trophy.best(completionCount(memberId)).orElse(null)));
     }
 
     /**
@@ -1868,7 +1910,7 @@ public class ChoreService {
      * the home's current counter period start ({@link Home#getCounterReset()}, server zone,
      * weeks starting Monday like the stats) and the admin's last "reset now". With NEVER and no
      * manual reset this is {@link #completionCount}. Nothing else counts this way — statistics,
-     * milestones and credits stay all-time on purpose.
+     * trophies and credits stay all-time on purpose.
      */
     public long badgeCount(Long memberId, Home home) {
         Instant since = counterSince(home, Instant.now());
@@ -1935,13 +1977,12 @@ public class ChoreService {
 
     // ---- Helpers ------------------------------------------------------------
 
-    private static Integer milestoneFor(long total) {
-        for (int m : MILESTONES) {
-            if (total == m) {
-                return m;
-            }
+    /** Records that {@code member} has just been shown {@code trophy} (null = nothing to do). */
+    private void markSeen(Member member, Trophy trophy) {
+        if (trophy != null && trophy.rung() > member.getTrophiesSeen()) {
+            member.setTrophiesSeen(trophy.rung());
+            members.save(member);
         }
-        return null;
     }
 
     /** How a completion reads in a list: the chore's emoji+name, or the helper's own words. */
@@ -2074,14 +2115,13 @@ public class ChoreService {
             Member member,
             long memberTotal,
             boolean newChoreForMember,
-            Integer milestone,
+            /** The trophy this completion reached, or null. */
+            Trophy trophy,
             /** The member's run on this chore after completing it — or, for a STREAK block,
              *  the run that caused the block (so the message names the real number). */
             int newStreak,
             Long completionId,
-            int creditsAwarded,
-            Integer spreeDays,
-            int spreeCredits,
+            CreditService.Award award,
             /** The member's APPROVED completions today (server date) including this one;
              *  0 = not applicable (blocked, or pending — not counted until approved). */
             long doneTodayAfter) {
@@ -2093,20 +2133,19 @@ public class ChoreService {
         /** A STREAK block also reports the run that caused it, so the message can name it. */
         static CompleteOutcome blocked(LockReason reason, ChoreTask task, Member member, int streak) {
             return new CompleteOutcome(false, false, reason, task, member, 0, false, null, streak,
-                    null, 0, null, 0, 0);
+                    null, CreditService.Award.NONE, 0);
         }
 
         static CompleteOutcome pending(ChoreTask task, Member member, Long completionId) {
             return new CompleteOutcome(true, true, LockReason.NONE, task, member, 0, false, null, 0,
-                    completionId, 0, null, 0, 0);
+                    completionId, CreditService.Award.NONE, 0);
         }
 
         static CompleteOutcome done(ChoreTask task, Member member, long total, boolean newChore,
-                                    Integer milestone, int newStreak, Long completionId,
+                                    Trophy trophy, int newStreak, Long completionId,
                                     CreditService.Award award, long doneTodayAfter) {
             return new CompleteOutcome(true, false, LockReason.NONE, task, member, total, newChore,
-                    milestone, newStreak, completionId,
-                    award.choreCredits(), award.spreeDays(), award.spreeCredits(), doneTodayAfter);
+                    trophy, newStreak, completionId, award, doneTodayAfter);
         }
     }
 }

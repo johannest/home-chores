@@ -1,20 +1,34 @@
-// Records the vertical FlashChores demo with captions: Playwright drives a running app (run.sh
-// starts one on a fresh database) and the browser's own video recording keeps every frame.
-// Captions, the tap ripple and the finger dot are injected into the page. The narration is spoken
-// by Kokoro (tts.py) while recording, so each caption holds as long as its line takes; the clips and
-// their start times land in video/voice/ and video/voice.json for mix.sh to lay under the video.
+// Records one FlashChores demo video: `node record.mjs <name>` plays the scene set in
+// scenes/<name>.mjs against a running app (run.sh starts one on a fresh database) while the
+// browser's own video recording keeps every frame. Captions, the tap ripple and the finger dot
+// are injected into the page. The narration is spoken by Kokoro (tts.py) as the scenes play, and
+// a line never waits for the hands: `say()` starts the voice and returns, the scene taps under
+// it, and the next `say()` waits for the previous line to end.
+//
+// A scene set may use more than one screen — a second phone, the kitchen tablet — each its
+// own recorded browser context, and says which one is on camera with `onCamera()`. The clips
+// and their start times land in video/<name>/voice.json, and the cut list (which screen's
+// recording, from when to when) in video/<name>/cuts.json, for mix.sh to splice and voice.
+// A scene set's optional `setup` export runs before the camera rolls, so the home a video
+// opens on can have the history its story needs.
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
-const BASE = 'http://127.0.0.1:8120';
-const OUT = new URL('./video/', import.meta.url).pathname;
-const FAIL = new URL('./fail.png', import.meta.url).pathname;
+const NAME = process.argv[2] ?? 'basics';
+const BASE = `http://127.0.0.1:${process.env.DEMO_PORT ?? 8120}`;
+const OUT = new URL(`./video/${NAME}/`, import.meta.url).pathname;
+const FAIL = OUT + 'fail.png';
 
 // 9:19.5 phone-ish canvas, recorded 1:1. 540px wide keeps the app's mobile
-// breakpoint (max-width: 640px) active while being crisper than 390.
+// breakpoint (max-width: 640px) active while being crisper than 390. Every screen,
+// the tablet included, records at this one size so the cuts splice without scaling.
 const W = 540, H = 1170;
+
+const sceneModule = await import(`./scenes/${NAME}.mjs`);
+const scenes = sceneModule.default;
+mkdirSync(OUT + 'voice', { recursive: true });
 
 // The voice loads its model before the recording starts, so the first line costs no dead air.
 // DEMO_VOICE and DEMO_SPEED pass through to it.
@@ -28,20 +42,59 @@ const reply = async () => {
 };
 await reply(); // {"ready": true}
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/* ---------- screens: one recorded context each, and which one the camera shows ---------- */
 const browser = await chromium.launch();
-const ctx = await browser.newContext({
-  viewport: { width: W, height: H },
-  isMobile: true,
-  hasTouch: true,
-  deviceScaleFactor: 2,
-  recordVideo: { dir: OUT, size: { width: W, height: H } },
-  locale: 'en-US',
-});
-const page = await ctx.newPage();
-const t0 = Date.now();   // the recording starts with the page
+const screens = [];
+
+/** Opens another screen: its own context, storage and recording, at the shared canvas. */
+async function screen(name) {
+  const ctx = await browser.newContext({
+    viewport: { width: W, height: H },
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 2,
+    recordVideo: { dir: OUT, size: { width: W, height: H } },
+    locale: 'en-US',
+  });
+  const page = await ctx.newPage();
+  // Real touch input: list-swipe.js ignores mice, hold-drag wants a still hold.
+  const cdp = await ctx.newCDPSession(page);
+  const s = { name, ctx, page, cdp, t0: Date.now() };   // its recording starts with its page
+  screens.push(s);
+  return s;
+}
+
+let cam = await screen('phone');   // the first screen; a one-screen video never looks elsewhere
+
+// The cut list: which screen's recording the finished video shows, from when to when in
+// that recording. The camera is off while a scene set's `setup` runs.
+const cuts = [];
+let rolling = false;
+let played = 0;   // ms of finished video in the cuts already closed
+
+function openCut(s) {
+  cuts.push({ screen: s, from: Date.now() - s.t0, startedAt: Date.now() });
+}
+function closeCut() {
+  const cut = cuts.at(-1);
+  cut.to = Date.now() - cut.screen.t0;
+  played += cut.to - cut.from;
+}
+/** Where the finished video is now, in ms — what a narration line's start time is measured in. */
+const playhead = () => rolling ? played + (Date.now() - cuts.at(-1).startedAt) : 0;
+
+/** Puts a screen on camera: the helpers act on it from here, and the video cuts to it. */
+function onCamera(s) {
+  if (rolling && s !== cam) {
+    closeCut();
+    openCut(s);
+  }
+  cam = s;
+}
 
 /* ---------- narration: one clip per line, never two at once ---------- */
-mkdirSync(OUT + 'voice', { recursive: true });
 const lines = [];
 let speechUntil = 0;
 
@@ -51,23 +104,24 @@ async function speak(text) {
   return { file, ms: (await reply()).ms };
 }
 
+/** Waits for the line that is speaking, if any, to finish. */
 async function speechDone() {
   const wait = speechUntil - Date.now();
-  if (wait > 0) await page.waitForTimeout(wait);
+  if (wait > 0) await sleep(wait);
 }
 
-/** Starts a line now (after the previous one ends) and returns how long it speaks. */
+/** Starts a line as soon as the previous one has ended; returns how long it speaks. */
 async function narrate(text) {
   const clip = await speak(text);
   await speechDone();
-  lines.push({ file: clip.file, at: Date.now() - t0, text });
+  lines.push({ file: clip.file, at: playhead(), text });
   speechUntil = Date.now() + clip.ms + 250;
   return clip.ms + 250;
 }
 
-/* ---------- overlay helpers (captions + touch ripple), injected once ---------- */
+/* ---------- overlay helpers (captions + touch ripple), injected once per screen ---------- */
 async function installOverlay() {
-  await page.evaluate(() => {
+  await cam.page.evaluate(() => {
     if (document.getElementById('demo-caption')) return;
     const style = document.createElement('style');
     style.textContent = `
@@ -99,42 +153,69 @@ async function installOverlay() {
   });
 }
 
-async function caption(text, holdMs = 2300, speech) {
+/** Shows a caption and holds it; silent — a spoken line goes through say(). */
+async function caption(text, holdMs = 0) {
   await installOverlay(); // survives SPA nav; reinstalls after a reload
-  if (speech) holdMs = Math.max(holdMs, await narrate(speech));
-  await page.evaluate((t) => {
+  await cam.page.evaluate((t) => {
     const c = document.getElementById('demo-caption');
     c.classList.remove('show');
     setTimeout(() => { c.textContent = t; c.classList.add('show'); }, 120);
   }, text);
-  await page.waitForTimeout(holdMs);
+  if (holdMs > 0) await sleep(holdMs);
+}
+
+/**
+ * The unit of a scene: a spoken line with its caption. The voice starts (once the previous
+ * line has ended) and the scene carries on tapping under it. `lead` is the beat before the
+ * hands move, so the viewer hears what is about to happen.
+ */
+async function say(speech, text, { lead = 300 } = {}) {
+  const ms = await narrate(speech);
+  if (text != null) await caption(text);
+  await sleep(lead);
+  return ms;
 }
 
 async function captionOff() {
-  await page.evaluate(() => document.getElementById('demo-caption')?.classList.remove('show'));
+  await cam.page.evaluate(() => document.getElementById('demo-caption')?.classList.remove('show'));
 }
+
+const settle = (ms) => sleep(ms);
 
 /** Tap with a visible ripple so the viewer sees where the finger lands. */
 async function tap(locator) {
   const box = await locator.boundingBox();
   if (box) {
-    await page.evaluate(([x, y]) => {
+    await cam.page.evaluate(([x, y]) => {
       const r = document.createElement('div');
       r.className = 'demo-ripple';
       r.style.left = x + 'px'; r.style.top = y + 'px';
       document.body.appendChild(r);
       setTimeout(() => r.remove(), 600);
     }, [box.x + box.width / 2, box.y + box.height / 2]);
-    await page.waitForTimeout(320);
+    await sleep(320);
   }
   await locator.click();
 }
 
-/* ---------- real touch input: list-swipe.js ignores mice, hold-drag wants a still hold ---------- */
-const cdp = await ctx.newCDPSession(page);
+/** Types letter by letter — once per video, where watching the letters is the point. */
+async function typeSlow(locator, text) {
+  await locator.pressSequentially(text, { delay: 40 });
+  await locator.press('Tab'); // blur, so Vaadin fires its change event
+  await sleep(200);
+}
 
+/** Fills a field in one go, under the voice. */
+async function type(locator, text) {
+  await locator.click();
+  await cam.page.keyboard.insertText(text);
+  await locator.press('Tab');
+  await sleep(200);
+}
+
+/* ---------- real touch input, on the screen that is on camera ---------- */
 async function finger(x, y, state) {
-  await page.evaluate(([x, y, state]) => {
+  await cam.page.evaluate(([x, y, state]) => {
     let f = document.getElementById('demo-finger');
     if (!f) {
       f = document.createElement('div');
@@ -151,7 +232,7 @@ async function finger(x, y, state) {
   }, [x, y, state]);
 }
 
-const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent',
+const touch = (type, x, y) => cam.cdp.send('Input.dispatchTouchEvent',
   { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] });
 
 async function glide(x0, y0, x1, y1, ms, state) {
@@ -161,7 +242,7 @@ async function glide(x0, y0, x1, y1, ms, state) {
     const x = x0 + (x1 - x0) * e, y = y0 + (y1 - y0) * e;
     await touch('touchMove', x, y);
     await finger(x, y, state);
-    await page.waitForTimeout(ms / steps);
+    await sleep(ms / steps);
   }
 }
 
@@ -169,10 +250,10 @@ async function glide(x0, y0, x1, y1, ms, state) {
 async function holdAndDrag(from, to, { hold = 900, ms = 1300 } = {}) {
   await finger(from.x, from.y, 'down');
   await touch('touchStart', from.x, from.y);
-  await page.waitForTimeout(hold);
+  await sleep(hold);
   await finger(from.x, from.y, 'held');
   await glide(from.x, from.y, to.x, to.y, ms, 'held');
-  await page.waitForTimeout(350);
+  await sleep(350);
   await touch('touchEnd');
   await finger(to.x, to.y, 'up');
 }
@@ -181,7 +262,7 @@ async function holdAndDrag(from, to, { hold = 900, ms = 1300 } = {}) {
 async function swipe(from, dx, ms = 380) {
   await finger(from.x, from.y, 'down');
   await touch('touchStart', from.x, from.y);
-  await page.waitForTimeout(60);
+  await sleep(60);
   await glide(from.x, from.y, from.x + dx, from.y, ms, 'down');
   await touch('touchEnd');
   await finger(from.x + dx, from.y, 'up');
@@ -193,237 +274,89 @@ async function point(locator, fx = 0.5, fy = 0.5) {
   return { x: b.x + b.width * fx, y: b.y + b.height * fy };
 }
 
+/** Rests the finger on a thing without touching it, so the viewer looks where the line points. */
+async function pointAt(locator, ms = 1200) {
+  const { x, y } = await point(locator);
+  await finger(x, y, 'down');
+  await sleep(ms);
+  await finger(x, y, 'up');
+}
+
+/* ---------- the app's own landmarks, on the screen that is on camera ---------- */
+const tab = (name) => cam.page.locator('vaadin-tab', { hasText: name }).first();
+const card = (name) => cam.page.locator('.task-card', { hasText: name }).first();
+const line = (text) => cam.page.locator('.shared-list:not(.done) .list-item', { hasText: text }).first();
+const chip = (label) => cam.page.locator('.filter-chip', { hasText: label }).first();
+const dialogButton = (name) => cam.page.getByRole('dialog').getByRole('button', { name });
+
 async function openSection(title) {
+  const page = cam.page;
   const details = page.locator('vaadin-details.admin-section', {
     has: page.locator('vaadin-details-summary', { hasText: title }) }).first();
   if (await details.evaluate((d) => d.opened)) return; // a tap would fold it shut
   await tap(page.locator('vaadin-details-summary', { hasText: title }).first());
-  await page.waitForTimeout(500);
+  await sleep(500);
+  // Belt and braces: if the tap landed during a re-render, open the card directly.
   await page.evaluate((title) => {
     for (const d of document.querySelectorAll('vaadin-details.admin-section')) {
       if ((d.querySelector('vaadin-details-summary')?.textContent || '').startsWith(title)) d.opened = true;
     }
   }, title);
-  await page.waitForTimeout(300);
+  await sleep(300);
 }
 
-const card = (name) => page.locator('.task-card', { hasText: name }).first();
-const line = (text) => page.locator('.shared-list:not(.done) .list-item', { hasText: text }).first();
-const chip = (label) => page.locator('.filter-chip', { hasText: label }).first();
+/** The closing card every video shares, with its own tagline spoken over it. */
+async function outro(tagline, spoken) {
+  await cam.page.evaluate((tagline) => {
+    const o = document.createElement('div');
+    o.id = 'demo-outro';
+    o.style.cssText = `position:fixed;inset:0;z-index:99997;display:flex;flex-direction:column;
+      align-items:center;justify-content:center;gap:18px;color:#fff;text-align:center;
+      background:linear-gradient(135deg,#10b981,#0ea5e9);opacity:0;transition:opacity .6s ease;
+      font-family:-apple-system,'Segoe UI',Roboto,sans-serif;`;
+    o.innerHTML = `<div style="font-size:64px">⚡</div>
+      <div style="font-size:40px;font-weight:900">FlashChores</div>
+      <div style="font-size:22px;font-weight:600;opacity:.92">${tagline}</div>
+      <div style="font-size:17px;font-weight:600;opacity:.8;margin-top:12px">Vaadin Flow · Spring Boot · one tiny server</div>`;
+    document.body.appendChild(o);
+    requestAnimationFrame(() => { o.style.opacity = '1'; });
+  }, tagline);
+  await captionOff();
+  await narrate(spoken);
+  await speechDone();
+  await sleep(1200);
+}
 
-/* --------------------------------- the demo --------------------------------- */
+/* --------------------------------- the video --------------------------------- */
+const toolkit = {
+  get page() { return cam.page; },   // the screen on camera
+  BASE, screens, screen, onCamera,
+  say, caption, captionOff, speechDone, settle,
+  tap, type, typeSlow, holdAndDrag, swipe, point, pointAt,
+  tab, card, line, chip, dialogButton, openSection, outro,
+};
 try {
-
-// Scene 1 — landing + create a home
-await page.goto(BASE);
-await page.waitForSelector('vaadin-text-field');
-await caption('Meet FlashChores ⚡ family chores, zero nagging', 2300, 'Meet FlashChores. Family chores, with zero nagging.');
-// Type + blur so Vaadin fires its change event and enables the button.
-const homeName = page.locator('vaadin-text-field').nth(0).locator('input');
-await homeName.pressSequentially('The Nest', { delay: 40 });
-await homeName.press('Tab');
-await page.waitForTimeout(300);
-const yourName = page.locator('vaadin-text-field').nth(1).locator('input');
-await yourName.pressSequentially('Captain Mop', { delay: 40 });
-await yourName.press('Tab');
-await page.waitForTimeout(300);
-await caption('No accounts, no emails — just nicknames 🦸', 2000,
-  'No accounts, no emails. Just nicknames. Your real name never goes in.');
-await tap(page.getByRole('checkbox', { name: 'I agree' }));
-await page.waitForTimeout(300);
-await tap(page.locator('vaadin-button', { hasText: 'Create home' }));
-
-// Scene 2 — the share code dialog
-await page.waitForSelector('vaadin-dialog-overlay');
-await caption('One shared code invites the whole family', 2400, 'One shared code invites the whole family.');
-await tap(page.locator('vaadin-button', { hasText: "Let's go" }));
-await page.waitForTimeout(600);
-
-// Scene 3 — the board
-await page.waitForSelector('.task-card');
-await caption('Starter chores, ready to tap', 2000, 'You start with a board of everyday chores.');
-
-// Scene 4 — complete a chore, confetti
-await caption('Did one? Tap it 👇', 1600, 'Did one? Just tap it.');
-await tap(page.locator('.complete-area').first());
-await page.waitForSelector('vaadin-dialog-overlay');
-await tap(page.locator('vaadin-button', { hasText: 'Yes, I did it' }));
-await caption('Confetti. Obviously. 🎉', 2200);
-// The celebration asks "How was it?" — answer 😍 and close it.
-await tap(page.locator('.feedback-btn').nth(2));
-await page.waitForTimeout(500);
-await tap(page.getByRole('dialog').getByRole('button', { name: /^Done/ }));
-await page.waitForTimeout(500);
-
-// Scene 5 — book a chore
-await caption("Call dibs with “I'll do it” 🔖", 1800, "Call dibs with I'll do it, so nobody does it twice.");
-await tap(page.locator('.book-btn', { hasText: "I'll do it" }).first());
-await page.waitForTimeout(1200);
-
-// Scene 6 — arrange the board by hold-and-drag
-// The voice runs under the gesture rather than holding it up.
-await narrate('Admins arrange the board. Hold a card, and drag it where it belongs.');
-await caption('Admins arrange the board: hold a card…', 1600);
-const from = await point(card('Water plants'), 0.5, 0.35);
-const to = await point(card('Empty dishwasher'), 0.15, 0.35);
-await caption('…and drag it where it belongs ✋', 200);
-await holdAndDrag(from, to);
-await page.waitForTimeout(1200);
-await caption('Everyone’s phone updates live 📲', 1800, 'Every phone in the home updates live.');
-
-// Scene 7 — shared lists: add, reorder, swipe, tick
-await tap(page.getByRole('tab', { name: 'Lists' }));
-await page.waitForTimeout(700);
-await caption('Shared lists: groceries, to-dos, dinners 🛒', 1800, 'Shared lists, for groceries, to-dos and dinners.');
-const addBox = page.getByRole('textbox', { name: 'Add an item…' });
-for (const item of ['Milk', 'Eggs', 'Coffee', 'Bread', 'Bananas']) {
-  await addBox.pressSequentially(item, { delay: 35 });
-  await addBox.press('Enter');
-  await page.waitForTimeout(450);
-}
-await page.waitForTimeout(400);
-await caption('Hold a line to move it ✋', 1200, 'Hold a line to move it.');
-await holdAndDrag(await point(line('Bananas'), 0.3, 0.5), await point(line('Milk'), 0.3, 0.15), { ms: 1100 });
-await page.waitForTimeout(1200);
-await caption('Swipe left to delete or edit 👈', 900, 'Swipe left to delete or edit.');
-await swipe(await point(line('Coffee'), 0.75, 0.5), -230);
-await page.waitForTimeout(1600);
-await tap(line('Coffee').locator('.swipe-delete'));
-await page.waitForTimeout(1000);
-await caption('Got it? Tick it off ✅', 900, 'Got it? Tick it off.');
-await tap(line('Milk').locator('vaadin-checkbox'));
-await page.waitForTimeout(1500);
-await tap(page.getByRole('tab', { name: 'Chores' }));
-await page.waitForTimeout(600);
-
-// Scene 8 — admin: add a seasonal chore (shows frequency presets + seasons)
-await caption('Admins add chores in plain language…', 1800, 'Admins add chores in plain language.');
-await tap(page.locator('vaadin-tab', { hasText: 'Admin' }));
-await page.waitForTimeout(600);
-await tap(page.locator('vaadin-details-summary', { hasText: 'Chores' }).first());
-await page.waitForTimeout(700);
-// Belt and braces: if the tap landed during a re-render, open the card directly.
-await page.evaluate(() => {
-  for (const d of document.querySelectorAll('vaadin-details.admin-section')) {
-    const t = d.querySelector('vaadin-details-summary')?.textContent || '';
-    if (t.startsWith('Chores')) { d.opened = true; }
-  }
-});
-await page.waitForTimeout(400);
-await tap(page.locator('vaadin-button', { hasText: 'Add chore' }));
-// Dialog content is not a DOM descendant of vaadin-dialog-overlay in Vaadin 25 —
-// address the fields by their accessible labels instead.
-const choreName = page.getByLabel('Chore name');
-await choreName.waitFor();
-await choreName.pressSequentially('Shovel snow', { delay: 35 });
-await choreName.press('Tab');
-const choreEmoji = page.getByRole('dialog').getByRole('textbox', { name: 'Emoji' });
-await choreEmoji.click();
-await page.keyboard.insertText('❄️');
-await choreEmoji.press('Tab');
-await caption('“Once a year”, not “interval=365” 📅', 2000, 'Once a year. Not interval three sixty-five.');
-await tap(page.getByLabel('How often?'));
-await page.waitForTimeout(500);
-await tap(page.getByRole('option', { name: 'Once a year' }));
-await page.waitForTimeout(400);
-await caption('Winter only — gone from the board in July', 2200, 'Winter only, so it is gone from the board in July.');
-await tap(page.getByRole('checkbox', { name: 'Winter' }));
-await page.waitForTimeout(400);
-await tap(page.getByRole('button', { name: 'Save' }));
-await page.waitForTimeout(800);
-
-// Scene 9 — back to board: filter chips
-await tap(page.locator('vaadin-tab', { hasText: 'Chores' }).first());
-await page.waitForSelector('.filter-chip');
-await caption('Filters: due now, weekly, yearly…', 2000, 'Filters show what is due now, weekly, or yearly.');
-await tap(chip('Yearly'));
-await page.waitForTimeout(1400);
-await caption('Off-season chores wait their turn ❄️', 2200, 'Off-season chores wait their turn.');
-await tap(chip('Off-season'));
-await page.waitForTimeout(1600);
-await tap(chip('All'));
-await page.waitForTimeout(600);
-
-// Scene 10 — diamonds: reward a tough chore, earn it, cash it in
-await tap(page.locator('vaadin-tab', { hasText: 'Admin' }));
-await page.waitForTimeout(600);
-await caption('Tough chores can pay 💎 diamonds', 1800, 'Tough chores can pay diamonds.');
-await openSection('Chores');
-const vacuumRow = page.locator('.admin-section .list-row', { has: page.getByText('Vacuum', { exact: true }) }).first();
-await vacuumRow.scrollIntoViewIfNeeded();
-await tap(vacuumRow.locator('vaadin-menu-bar-button').first());
-await page.waitForTimeout(300);
-await tap(page.getByRole('menuitem', { name: 'Edit chore' }));
-// The dialog's first integer field is the hidden custom interval: find the reward by its label.
-const reward = page.getByRole('dialog').locator('vaadin-integer-field')
-  .filter({ has: page.getByRole('spinbutton', { name: 'Reward credits' }) });
-await reward.scrollIntoViewIfNeeded();
-for (let i = 0; i < 5; i++) await tap(reward.locator('[part~=increase-button]'));
-await page.waitForTimeout(400);
-await tap(page.getByRole('dialog').getByRole('button', { name: 'Save' }));
-await page.waitForTimeout(700);
-await tap(page.locator('vaadin-tab', { hasText: 'Chores' }).first());
-await page.waitForTimeout(600);
-await card('Vacuum').scrollIntoViewIfNeeded();
-await caption('Do it, and they’re yours', 1400, 'Do it, and the diamonds are yours.');
-await tap(card('Vacuum').locator('.complete-area'));
-await tap(page.locator('vaadin-button', { hasText: 'Yes, I did it' }));
-await page.waitForTimeout(2200);
-await tap(page.getByRole('dialog').getByRole('button', { name: /^Done/ }));
-await page.waitForTimeout(800);
-await captionOff();
-await tap(page.locator('vaadin-tab', { hasText: 'Admin' }));
-await page.waitForTimeout(600);
-await openSection('Rewards');
-await page.getByRole('button', { name: 'Redeem' }).scrollIntoViewIfNeeded();
-await caption('…then cash them in for a treat 🍿', 1600, 'Then cash them in for a real treat, like movie night.');
-await tap(page.getByRole('button', { name: 'Redeem' }));
-const note = page.getByRole('dialog').getByRole('textbox', { name: /Note/ });
-await note.waitFor();
-await note.pressSequentially('Movie night', { delay: 40 });
-await page.waitForTimeout(400);
-await tap(page.getByRole('dialog').getByRole('button', { name: 'Redeem' }));
-await page.waitForTimeout(900);
-
-// Scene 11 — stats
-await tap(page.locator('vaadin-tab', { hasText: 'Stats' }));
-await page.waitForTimeout(500);
-await narrate('Streaks, fairness and rewards, built in.');
-await caption('Streaks, fairness & rewards built in 🏆', 1200);
-// The 💎 cards appear once diamonds were earned and redeemed — scroll to them like a thumb would.
-await page.getByText('💎 Diamonds I earned').evaluate((el) => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
-await page.waitForTimeout(2200);
-await speechDone();
-
-// Scene 12 — outro
-await page.evaluate(() => {
-  const o = document.createElement('div');
-  o.id = 'demo-outro';
-  o.style.cssText = `position:fixed;inset:0;z-index:99997;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:18px;color:#fff;text-align:center;
-    background:linear-gradient(135deg,#10b981,#0ea5e9);opacity:0;transition:opacity .6s ease;
-    font-family:-apple-system,'Segoe UI',Roboto,sans-serif;`;
-  o.innerHTML = `<div style="font-size:64px">⚡</div>
-    <div style="font-size:40px;font-weight:900">FlashChores</div>
-    <div style="font-size:22px;font-weight:600;opacity:.92">Tap a chore. Keep it fair.<br>Celebrate together.</div>
-    <div style="font-size:17px;font-weight:600;opacity:.8;margin-top:12px">Vaadin Flow · Spring Boot · one tiny server</div>`;
-  document.body.appendChild(o);
-  requestAnimationFrame(() => { o.style.opacity = '1'; });
-});
-await captionOff();
-await narrate('FlashChores. Tap a chore, keep it fair, and celebrate together.');
-await speechDone();
-await page.waitForTimeout(1200);
-
+  if (sceneModule.setup) await sceneModule.setup(toolkit);
+  rolling = true;
+  openCut(cam);
+  await scenes(toolkit);
+  closeCut();
 } catch (e) {
-  console.error('FAILED:', String(e).split('\n')[0]);
-  try { await page.screenshot({ path: FAIL }); } catch {}
-  await ctx.close(); await browser.close();
+  console.error('FAILED:', String(e).split('\n').slice(0, 8).join('\n'));
+  try { await cam.page.screenshot({ path: FAIL }); } catch {}
+  for (const s of screens) await s.ctx.close();
+  await browser.close();
   process.exit(1);
 }
-await ctx.close();   // flushes the video
+const videos = new Map();
+for (const s of screens) {
+  videos.set(s, await s.page.video().path());
+  await s.ctx.close();   // flushes the recording
+}
 await browser.close();
 tts.stdin.end();
 writeFileSync(OUT + 'voice.json', JSON.stringify(lines, null, 1));
-console.log('recorded to', OUT);
+writeFileSync(OUT + 'cuts.json', JSON.stringify(cuts.map((c) =>
+  ({ screen: c.screen.name, file: videos.get(c.screen), from: c.from, to: c.to })), null, 1));
+console.log(`recorded ${NAME} to`, OUT);
 process.exit(0);
