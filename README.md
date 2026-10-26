@@ -462,12 +462,13 @@ tools/
 ├── release.sh                    # deploy or roll back a release
 ├── generate-icons.cjs            # regenerates the PWA icons + iOS splash screens
 ├── observability/                # Prometheus + Grafana setup for the Observability Kit
-└── demo-video/                   # the vertical demo video, captioned and narrated
-    ├── run.sh                    # production jar on a throwaway database, then record + mix
-    ├── record.mjs                # Playwright drives the app; each caption waits for its line
+└── demo-video/                   # the vertical demo videos, captioned and narrated
+    ├── run.sh <name>             # production jar on a throwaway database, then record + mix
+    ├── record.mjs                # Playwright plays scenes/<name>.mjs; the voice leads, the taps follow
+    ├── scenes/basics.mjs         # "FlashChores in a minute" (docs/DEMO-VIDEOS-PLAN-2026-10-26.md)
     ├── tts.py                    # speaks the lines with Kokoro, a local neural voice (.venv)
     ├── requirements.txt          # Kokoro for that venv (plus brew install espeak-ng)
-    └── mix.sh                    # ffmpeg lays the voice under it -> video/flashchores-demo.mp4
+    └── mix.sh <name>             # ffmpeg lays the voice under it -> video/flashchores-<name>.mp4
 ```
 
 ## Tests

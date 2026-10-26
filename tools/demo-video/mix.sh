@@ -1,22 +1,23 @@
 #!/bin/bash
-# Lays the narration clips (video/voice/*.aiff, timed by video/voice.json) under the recorded
-# video and writes video/flashchores-demo.mp4: H.264 + AAC, which phones and TikTok play as is.
-# Needs a full ffmpeg (brew install ffmpeg); Playwright's own is video-only.
+# Lays one video's narration clips (video/<name>/voice/*.wav, timed by video/<name>/voice.json)
+# under its recording and writes video/flashchores-<name>.mp4: H.264 + AAC, which phones and
+# TikTok play as is. Needs a full ffmpeg (brew install ffmpeg); Playwright's own is video-only.
 set -eu
 DIR=$(cd "$(dirname "$0")" && pwd)
+NAME=${1:-basics}
 FFMPEG=$(command -v ffmpeg) || { echo "ffmpeg not found — brew install ffmpeg"; exit 1; }
-VIDEO=$(ls -t "$DIR"/video/page@*.webm | head -1)
-OUT="$DIR/video/flashchores-demo.mp4"
+VIDEO=$(ls -t "$DIR/video/$NAME"/page@*.webm | head -1)
+OUT="$DIR/video/flashchores-$NAME.mp4"
 
 # One input and one adelay per clip, then a plain sum: the lines never overlap, so there is
 # nothing for amix's normalisation to balance — it would only make the voice quieter.
 ARGS=$(cd "$DIR" && node -e '
-  const lines = require("./video/voice.json");
+  const lines = require(`./video/${process.argv[1]}/voice.json`);
   const inputs = lines.flatMap((l) => ["-i", l.file]);
   const delays = lines.map((l, i) => `[${i + 1}:a]adelay=${l.at}|${l.at}[a${i}]`);
   const mix = lines.map((_, i) => `[a${i}]`).join("")
     + `amix=inputs=${lines.length}:normalize=0,loudnorm=I=-16:TP=-1.5[voice]`;
-  console.log(JSON.stringify({ inputs, filter: [...delays, mix].join(";") }));')
+  console.log(JSON.stringify({ inputs, filter: [...delays, mix].join(";") }));' "$NAME")
 INPUTS=$(node -e 'console.log(JSON.parse(process.argv[1]).inputs.map(a => JSON.stringify(a)).join(" "))' "$ARGS")
 FILTER=$(node -e 'console.log(JSON.parse(process.argv[1]).filter)' "$ARGS")
 
