@@ -1,9 +1,10 @@
 # Demo videos — plan (2026-10-26)
 
-Status: **video 2 recorded** (`tools/demo-video/run.sh basics` → `video/flashchores-basics.mp4`,
-50.6 s, 15 lines, 71 % voiced). Videos 1 and 3 are scripts only. The recorder now plays a named
-scene set (`scenes/<name>.mjs`); see "What the recorder needs" for what videos 1 and 3 still
-require.
+Status: **videos 1 and 2 recorded**. `tools/demo-video/run.sh basics` →
+`video/flashchores-basics.mp4` (50.6 s, 15 lines, 71 % voiced); `run.sh ways` →
+`video/flashchores-ways.mp4` (65.8 s, 17 lines, 66 % voiced, three screens). Video 3 is a
+script only. The recorder plays a named scene set (`scenes/<name>.mjs`) on one screen or several;
+see "What the recorder needs" for what video 3 still requires.
 
 ## What the current video tells us
 
@@ -80,36 +81,49 @@ See "What the recorder needs" at the end.
 
 ---
 
-## Video 1 — Three ways to run it (≈ 70 s)
+## Video 1 — Three ways to run it (≈ 70 s) — recorded
 
-Starts on an existing home ("The Nest", two chores done) so the first ten seconds show the
-family, not a form. Three contexts: Alex's phone (A), Sam's phone (S), the kitchen tablet (T).
+`scenes/ways.mjs`, 65.8 s, 17 lines, 126 words, 66 % voiced. Starts on an existing home
+("The Nest") so the first ten seconds show the family, not a form. Three screens: Alex's phone
+(A), Sam's phone (S), the kitchen tablet (T). The home is built off camera by the scene's
+`setup`: Alex creates it, a backup with last week's chores (Mia did most of them) and Alex's
+three "Vacuum" today is restored, and Alex signs back in with the PIN — so the chore master
+and the fairness lock are on the board at the first frame, which is why they live here and
+not in the basics video. Join approval is switched off in that backup, so Sam walks straight
+in. As recorded (the t column is where each line starts):
 
 | t | Screen | Voice | Caption |
 |---:|---|---|---|
-| 0 | A: the board, two chips on the leaderboard | FlashChores fits the way your family already works. | Three ways to run it |
-| 4 | A: header, home code chip tapped | Everyone on their own phone? Share one code. | 1 · Everyone's phone |
-| 8 | S: Join tab, code prefilled, nickname typed | A nickname is all a phone needs. | No accounts |
-| 13 | S: board; S taps "Empty dishwasher", confirms | Sam does the dishes… | 👇 |
-| 17 | A: the board updates, Sam's chip climbs | …and it's on Alex's phone before the sink is dry. | Live on every phone 📲 |
-| 22 | A: Admin → Division style, the two options | Prefer turns? Switch the board to rotating. | 2 · Who does what |
-| 27 | A: board shows "⭐ Your turn" on one card, "Sam today" on another | Each member gets one chore a day, rotating. | ⭐ Your turn |
-| 32 | A: the enforced toggle | Enforce it, or keep it as a nudge. | Enforced · or suggested |
-| 36 | T: Join → "Set up a shared family device", PIN typed | No phone for everyone? Pair the kitchen tablet. | 3 · The kitchen tablet |
-| 42 | T: the family board, no "me" chip | It shows the board for the whole family. | One board for all |
-| 46 | T: taps a chore, the face picker opens | Tap a chore, tap your face. | Tap your face |
-| 50 | T: picks Lu, confetti | It counts for *that* person, streaks and all. | Counts for them 🎉 |
-| 55 | A: Members card, "Add a member without a phone" | A child with no phone still gets a chip… | No phone yet |
-| 60 | A: Admin → Log a chore for someone, Lu, "Water plants" | …and a parent logs their chores. | Log a chore for someone |
-| 65 | Outro card | One home. However your family runs. | ⚡ FlashChores |
+| 0 | A: the board, Alex and Mia on the leaderboard, 🥇 in the header | FlashChores fits the way your family already works. | Three ways to run it |
+| 3 | A: the same board | Last week's top helper wears the medal. | 🥇 Last week's best |
+| 7 | A: taps the locked "Vacuum", confirms, the blocked toast | Three in a row? It's someone else's turn. | You ×3 🔒 |
+| 11 | A: invite menu opened, the code chip in it | Everyone on their own phone? Share one code. | 1 · Everyone's phone |
+| 15 | S: Join tab, code prefilled, "Sam" typed, Join | A nickname is all a phone needs. | No accounts |
+| 17 | S: board; taps "Empty dishwasher", confirms, confetti | Sam does the dishes… | 👇 |
+| 20 | A: "Done today" opened, Sam's line in it, Sam's chip | …and it's on Alex's phone before the sink is dry. | Live on every phone 📲 |
+| 25 | A: Admin → Chore rules, division style → Rotating | Prefer turns? Switch the board to rotating. | 2 · Who does what |
+| 29 | A: the enforced switch, off | Enforce it, or keep it as a nudge. | Enforced · or suggested |
+| 31 | A: board, "⭐ Your turn" on Alex's card, "Mia today", "Sam today" | Each member gets one chore a day, rotating. | ⭐ Your turn |
+| 36 | T: "Set up a shared family device", PIN as dots, Pair | No phone for everyone? Pair the kitchen tablet. | 3 · The kitchen tablet |
+| 39 | T: the family board with the 📺 badge, no Admin tab | It shows the board for the whole family. | One board for all |
+| 42 | T: taps "Take out trash", the face picker | Tap a chore, tap your face. | Tap your face |
+| 45 | T: picks Mia, her celebration | It counts for that person, streaks and all. | Counts for them 🎉 |
+| 50 | A: Members → "Add a member without a phone", "Lu" | A child with no phone still gets a chip… | No phone yet |
+| 54 | A: Log a chore for someone → Lu, "Water plants", Log it | …and a parent logs their chores. | Log a chore for someone |
+| 60 | Outro card | One home. However your family runs. | ⚡ FlashChores |
 
-16 lines, ≈ 105 words.
+Changes from the first draft: the chore-master and fairness lines came in (the setup makes
+them possible); the enforced switch is toggled in the same Chore rules visit as the division
+style, and the board with "⭐ Your turn" is shown after both; the tablet picks Mia, since Lu is
+only added in the scene after it; the one typed field is Sam's nickname.
 
 Notes
 - The division-style scene is the only one that needs a settings screen. Keep it to the
   select and the toggle; do not open anything else.
 - The shared device needs the admin PIN typed; type it as dots and never show the real value
-  in a caption (the demo database is throwaway, but the habit matters).
+  in a caption (the demo database is throwaway, but the habit matters). The pairing dialog's
+  PIN field is a plain text field in the app, so the scene switches the input to `password`
+  before typing — a recording trick, not a product change.
 - The face picker on the tablet is the one gesture-free "moment" of this video and should hold
   a beat longer than its line.
 
@@ -179,26 +193,35 @@ Notes
 
 ## What the recorder needs
 
-`record.mjs` records one page in one context, and `mix.sh` mixes the newest `.webm`. For
-three videos, and for video 1's three screens:
+`record.mjs` used to record one page in one context, and `mix.sh` mixed the newest `.webm`.
+For three videos, and for video 1's three screens:
 
 1. ~~**Scenes by name.**~~ Done: `run.sh <name>` plays `scenes/<name>.mjs`, records to
    `video/<name>/` and `mix.sh <name>` writes `video/flashchores-<name>.mp4`. The voice cache
    is keyed by text, so re-recording one video does not re-synthesise the others.
-2. **A second phone and a tablet.** Two more `browser.newContext()` calls, each with its own
-   `recordVideo` — Playwright records per context. The tablet is recorded in **portrait at
-   the same 540 × 1170 canvas** (an iPad on a counter stands either way), so all three streams
-   share one frame size and `ffmpeg concat` splices them in script order without scaling. The
-   script writes a cut list (which context, from when to when) beside `voice.json`.
-3. **Unrecorded setup.** A `setup()` step before `t0`: create the home, join Sam, pre-do the
-   chores a scene needs (three for the trophy, three in a row for the fairness lock), switch
-   confirmation off for video 3. The existing `run.sh` fresh-database start stays.
+2. ~~**A second phone and a tablet.**~~ Done: a scene asks for more screens with
+   `screen(name)` — each a `browser.newContext()` with its own `recordVideo`, Playwright
+   records per context — and says which is on camera with `onCamera(screen)`; the helpers
+   (`say`, `tap`, `card`…) act on that screen. The tablet is recorded in **portrait at the
+   same 540 × 1170 canvas** (an iPad on a counter stands either way), so every stream shares
+   one frame size. The recorder writes the cut list (which recording, from when to when, in
+   script order) to `video/<name>/cuts.json` beside `voice.json`, with each line's start time
+   measured in the finished video; `mix.sh` trims and concatenates the cuts with ffmpeg
+   before laying the voice under them. A one-screen video is a single cut, so `basics` mixes
+   as before. `DEMO_PORT` moves the app and the recorder off 8120, so two videos can record
+   side by side.
+3. ~~**Unrecorded setup.**~~ Done: a scene set's optional `setup` export runs before the camera
+   rolls, on the same screens. `ways` creates the home, restores a backup that carries last
+   week's chores and today's three in a row, and signs Alex back in; video 3's setup can pre-do
+   three chores and switch confirmation off the same way. The existing `run.sh` fresh-database
+   start stays.
 4. ~~**`caption()` without `speech`.**~~ Done: a scene's unit is `say(speech, caption)`, which
    starts the voice and returns so the taps run under it; the next `say()` waits for the line
    to end. The serial `caption(text, hold, speech)` form is gone, and with it the original
    2:07 scene list (in git history at `07e5652`, should it ever be wanted again).
-5. **PIN on camera.** The shared-device pairing types the admin PIN; the field is a password
-   field, but the caption and the voice never say the digits.
+5. ~~**PIN on camera.**~~ Done: the shared-device pairing types the admin PIN into the field
+   switched to `password` for the recording, and neither the caption nor the voice says the
+   digits.
 
 Cost estimate: the recorder changes are a day; each script is an afternoon of tuning holds
 against the real voice, since Kokoro's timing only shows up when it speaks.
@@ -206,6 +229,7 @@ against the real voice, since Kokoro's timing only shows up when it speaks.
 ## Decisions to take
 
 1. Three videos, with rewards separate from the basics — **recommended above**.
-2. Video 1's tablet in portrait at the phone canvas, or a landscape tablet letterboxed into the
-   vertical frame (truer to a counter, but a quarter of the height).
+2. ~~Video 1's tablet in portrait at the phone canvas, or a landscape tablet letterboxed into the
+   vertical frame (truer to a counter, but a quarter of the height).~~ Recorded in portrait at
+   the phone canvas.
 3. Whether the basics video gets the 3 s pointer to the rewards video.

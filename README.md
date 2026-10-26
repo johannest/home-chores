@@ -464,11 +464,12 @@ tools/
 ├── observability/                # Prometheus + Grafana setup for the Observability Kit
 └── demo-video/                   # the vertical demo videos, captioned and narrated
     ├── run.sh <name>             # production jar on a throwaway database, then record + mix
-    ├── record.mjs                # Playwright plays scenes/<name>.mjs; the voice leads, the taps follow
+    ├── record.mjs                # Playwright plays scenes/<name>.mjs on one screen or several; the voice leads, the taps follow
     ├── scenes/basics.mjs         # "FlashChores in a minute" (docs/DEMO-VIDEOS-PLAN-2026-10-26.md)
+    ├── scenes/ways.mjs           # "Three ways to run it": two phones and the kitchen tablet, on a home with history
     ├── tts.py                    # speaks the lines with Kokoro, a local neural voice (.venv)
     ├── requirements.txt          # Kokoro for that venv (plus brew install espeak-ng)
-    └── mix.sh <name>             # ffmpeg lays the voice under it -> video/flashchores-<name>.mp4
+    └── mix.sh <name>             # ffmpeg splices the cut list and lays the voice under it -> video/flashchores-<name>.mp4
 ```
 
 ## Tests
