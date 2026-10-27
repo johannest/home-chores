@@ -54,33 +54,60 @@ html, html[theme] {
        sits badly on a tinted page, so it follows the palette too — a few degrees round the wheel,
        as the page does, to keep both off the brand colour itself. */
     --app-page: light-dark(
-        hsl(var(--brand-h), calc(32% * var(--brand-sat)), 96.5%),
+        hsl(var(--brand-h), calc(32% * var(--brand-sat)), 97.5%),
         hsl(calc(var(--brand-h) + 10), calc(30% * var(--brand-sat)), 11%));
     --lumo-base-color: light-dark(#fff,
         hsl(calc(var(--brand-h) + 15), calc(20% * var(--brand-sat)), 19%));
-    /* The ink of the doodle tile (body::before): 1.2:1 on the page, a texture rather than a picture. */
+    /* The ink of the doodle tile (body::before): 1.15:1 on the page, a texture rather than a picture. */
     --app-doodle: light-dark(
-        hsl(var(--brand-h), calc(24% * var(--brand-sat)), 88%),
+        hsl(var(--brand-h), calc(24% * var(--brand-sat)), 90%),
         hsla(var(--brand-h), calc(60% * var(--brand-sat)), 88%, 0.1));
 
     /* Tiles — chore cards, chips, member pills — are what a finger presses, so they are raised:
        a 2px hard edge under a soft drop. light-dark() takes colours only, hence one variable per
        layer. In dark a shadow barely reads, so the border carries the edge there (30%, where
-       Lumo's 10pct contrast was all but invisible) with a 1px highlight along the top. */
+       Lumo's 10pct contrast was all but invisible).
+       Each tile is also a soft dome: its face is lit at the top centre and turns faintly toward
+       the palette at the rim (--app-dome), with a catch-light along its top edge inside and a
+       shade along its foot. In dark the lit top is a step above the base colour, the rim a step
+       below. Small pills on and beside tiles — badges, counts, the selected chip — are the same
+       dome in a deeper tint (--app-pill). */
     --app-tile-border: light-dark(
         hsla(var(--brand-h), calc(25% * var(--brand-sat)), 25%, 0.2),
         hsla(calc(var(--brand-h) - 5), calc(60% * var(--brand-sat)), 85%, 0.3));
-    --app-tile-highlight: light-dark(transparent,
+    --app-tile-highlight: light-dark(rgba(255, 255, 255, 0.95),
         hsla(calc(var(--brand-h) - 5), calc(80% * var(--brand-sat)), 90%, 0.1));
+    --app-tile-foot: light-dark(
+        hsla(var(--brand-h), calc(55% * var(--brand-sat)), 40%, 0.08), rgba(0, 0, 0, 0.18));
+    --app-dome-top: light-dark(#fff,
+        hsl(calc(var(--brand-h) + 15), calc(20% * var(--brand-sat)), 22%));
+    --app-dome-rim: light-dark(
+        hsl(calc(var(--brand-h) - 3), calc(45% * var(--brand-sat)), 94.5%),
+        hsl(calc(var(--brand-h) + 15), calc(20% * var(--brand-sat)), 17%));
+    --app-dome: radial-gradient(120% 95% at 50% 0%, var(--app-dome-top) 45%, var(--app-dome-rim) 100%);
+    --app-dome-inset: inset 0 1px 0 var(--app-tile-highlight), inset 0 -2px 4px var(--app-tile-foot);
+    --app-pill-top: light-dark(
+        hsl(var(--brand-h), calc(45% * var(--brand-sat)), 95%),
+        hsla(var(--brand-h), calc(55% * var(--brand-sat)), 60%, 0.16));
+    --app-pill-rim: light-dark(
+        hsl(var(--brand-h), calc(45% * var(--brand-sat)), 88%),
+        hsla(var(--brand-h), calc(55% * var(--brand-sat)), 60%, 0.28));
+    --app-pill: radial-gradient(120% 100% at 50% 0%, var(--app-pill-top) 30%, var(--app-pill-rim) 100%);
+    --app-pill-inset: inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.9), transparent),
+        inset 0 -1px 2px var(--app-tile-foot);
+    /* 26% lightness: the pill's rim is darker than a tile, and 30% (the brand text) measured 4.2. */
+    --app-pill-ink: light-dark(
+        hsl(var(--brand-h), calc(62% * var(--brand-sat)), 26%),
+        hsl(var(--brand-h), calc(55% * var(--brand-sat)), 82%));
     --app-shadow-edge: light-dark(
         hsla(var(--brand-h), calc(50% * var(--brand-sat)), 16%, 0.1), rgba(0, 0, 0, 0.35));
     --app-shadow-near: light-dark(
         hsla(var(--brand-h), calc(50% * var(--brand-sat)), 16%, 0.12), rgba(0, 0, 0, 0.4));
     --app-shadow-far: light-dark(
         hsla(var(--brand-h), calc(50% * var(--brand-sat)), 16%, 0.06), transparent);
-    --app-tile-shadow: inset 0 1px 0 var(--app-tile-highlight), 0 2px 0 var(--app-shadow-edge),
+    --app-tile-shadow: var(--app-dome-inset), 0 2px 0 var(--app-shadow-edge),
         0 6px 16px var(--app-shadow-near), 0 14px 28px var(--app-shadow-far);
-    --app-chip-shadow: 0 1px 2px var(--app-shadow-edge);
+    --app-chip-shadow: var(--app-dome-inset), 0 1px 2px var(--app-shadow-edge);
 
     --lumo-border-radius-m: 12px;
     --lumo-border-radius-l: 18px;
@@ -414,7 +441,7 @@ vaadin-connection-indicator .v-loading-indicator {
     align-items: center;
     padding: 6px 12px;
     border-radius: 999px;
-    background: var(--lumo-base-color);
+    background: var(--app-dome);
     border: 1px solid var(--app-tile-border);
     box-shadow: var(--app-chip-shadow);
     font-size: 0.85rem;
@@ -426,9 +453,10 @@ vaadin-connection-indicator .v-loading-indicator {
     border-color: var(--lumo-contrast-30pct);
 }
 .filter-chip.selected {
+    background: var(--app-pill);
     border-color: var(--lumo-primary-color);
-    box-shadow: 0 0 0 2px var(--lumo-primary-color-10pct);
-    color: var(--lumo-primary-text-color);
+    box-shadow: var(--app-pill-inset), 0 0 0 2px var(--lumo-primary-color-10pct);
+    color: var(--app-pill-ink);
 }
 
 /* The board's lens row: one line that pans sideways instead of wrapping. Nine lenses wrapped
@@ -455,8 +483,8 @@ vaadin-connection-indicator .v-loading-indicator {
    than as labels floating on them, and the selected label (brand text) keeps the plain base
    colour behind it. The strip's border and chip shadow replace Lumo's 1px bottom line. */
 .main-tabs {
-    background: var(--lumo-base-color);
-    border: 1px solid var(--lumo-contrast-10pct);
+    background: var(--app-dome);
+    border: 1px solid var(--app-tile-border);
     border-radius: var(--lumo-border-radius-l);
     box-shadow: var(--app-chip-shadow);
     overflow: hidden;
@@ -510,7 +538,7 @@ vaadin-checkbox-group::part(group-field) {
     padding: var(--lumo-space-l) var(--lumo-space-m);
     min-height: 130px;
     border-radius: var(--lumo-border-radius-l);
-    background: var(--lumo-base-color);
+    background: var(--app-dome);
     border: 1px solid var(--app-tile-border);
     box-shadow: var(--app-tile-shadow);
     cursor: pointer;
@@ -561,13 +589,15 @@ vaadin-checkbox-group::part(group-field) {
     font-weight: 700;
     padding: 2px 8px;
     border-radius: 999px;
-    background: var(--lumo-contrast-10pct);
-    color: var(--lumo-secondary-text-color);
+    background: var(--app-pill);
+    box-shadow: var(--app-pill-inset);
+    color: var(--app-pill-ink);
 }
 
 /* 34% in light: 42% measured 3.9:1 on the tinted pill. */
 .task-card.streak-hot .streak {
     background: hsla(25, 95%, 55%, 0.18);
+    box-shadow: none;
     color: light-dark(hsl(20, 90%, 34%), hsl(25, 95%, 68%));
 }
 
@@ -663,7 +693,7 @@ vaadin-notification-container {
     border-radius: var(--lumo-border-radius-m);
 }
 .list-item.lifting .swipe-face {
-    background: var(--lumo-base-color);
+    background: var(--app-dome);
 }
 /* Where the card or line will land: it stays in place at reduced presence so the others reflow
    around the slot, exactly as a phone's home screen does. */
@@ -713,7 +743,7 @@ vaadin-notification-container {
     overflow: hidden;
 }
 .drag-ghost.list-item .swipe-face {
-    background: var(--lumo-base-color);
+    background: var(--app-dome);
 }
 body.hold-dragging {
     user-select: none;
@@ -753,7 +783,7 @@ body.hold-dragging {
     gap: 8px;
     padding: 6px 12px 6px 6px;
     border-radius: 999px;
-    background: var(--lumo-base-color);
+    background: var(--app-dome);
     border: 1px solid var(--app-tile-border);
     box-shadow: var(--app-chip-shadow);
     font-weight: 600;
@@ -861,7 +891,9 @@ body.hold-dragging {
 }
 
 .member-chip .count {
-    background: var(--lumo-contrast-10pct);
+    background: var(--app-pill);
+    box-shadow: var(--app-pill-inset);
+    color: var(--app-pill-ink);
     border-radius: 999px;
     padding: 1px 9px;
     font-size: 0.85rem;
@@ -963,8 +995,9 @@ body.hold-dragging {
     gap: 12px;
     padding: 10px 14px;
     border-radius: var(--lumo-border-radius-l);
-    background: var(--lumo-base-color);
-    border: 1px solid var(--lumo-contrast-10pct);
+    background: var(--app-dome);
+    border: 1px solid var(--app-tile-border);
+    box-shadow: var(--app-chip-shadow);
 }
 
 .daily-ring {
@@ -1088,7 +1121,7 @@ body.hold-dragging {
     border-radius: 999px;
     border: 1px solid var(--app-tile-border);
     box-shadow: var(--app-chip-shadow);
-    background: var(--lumo-base-color);
+    background: var(--app-dome);
     font-weight: 600;
     cursor: pointer;
 }
@@ -1587,20 +1620,21 @@ body.hold-dragging {
 }
 /* Each line is a card of its own, as a chore is a tile: text on the doodled page needs a plain
    surface under it. A lighter shadow than a tile's — a line is read, and only its parts are
-   pressed. Done lines lie flat. The fields that add and set lines get the same plain ground. */
+   pressed. Done lines keep the dome but lose the drop. The fields that add and set lines get the
+   plain base colour. */
 .shared-list {
     display: flex;
     flex-direction: column;
     gap: 6px;
 }
 .shared-list > .list-row {
-    background: var(--lumo-base-color);
+    background: var(--app-dome);
     border: 1px solid var(--app-tile-border);
     border-radius: var(--lumo-border-radius-m);
     box-shadow: var(--app-chip-shadow), 0 4px 10px var(--app-shadow-far);
 }
 .shared-list.done > .list-row {
-    box-shadow: none;
+    box-shadow: var(--app-dome-inset);
 }
 .list-add-row vaadin-text-field::part(input-field),
 .dinner-field vaadin-text-field::part(input-field) {
@@ -1660,7 +1694,7 @@ body.hold-dragging {
 .list-item.swiping .swipe-face { transition: none; }
 .list-item.swiping .swipe-face,
 .list-item.swipe-open .swipe-face {
-    background: var(--lumo-base-color);
+    background: var(--app-dome);
 }
 .list-item .swipe-actions {
     position: absolute;
