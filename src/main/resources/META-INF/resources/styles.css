@@ -58,10 +58,10 @@ html, html[theme] {
         hsl(calc(var(--brand-h) + 10), calc(30% * var(--brand-sat)), 11%));
     --lumo-base-color: light-dark(#fff,
         hsl(calc(var(--brand-h) + 15), calc(20% * var(--brand-sat)), 19%));
-    /* The ink of the doodle tile (body::before): 1.15:1 on the page, a texture rather than a picture. */
+    /* The ink of the doodle tile (body::before): 1.1:1 on the page, a texture rather than a picture. */
     --app-doodle: light-dark(
-        hsl(var(--brand-h), calc(24% * var(--brand-sat)), 90%),
-        hsla(var(--brand-h), calc(60% * var(--brand-sat)), 88%, 0.1));
+        hsl(var(--brand-h), calc(24% * var(--brand-sat)), 92%),
+        hsla(var(--brand-h), calc(60% * var(--brand-sat)), 88%, 0.08));
 
     /* Tiles — chore cards, chips, member pills — are what a finger presses, so they are raised:
        a 2px hard edge under a soft drop. light-dark() takes colours only, hence one variable per
@@ -140,7 +140,7 @@ html, html[theme] {
     background-color: var(--app-page);
 }
 
-/* The doodle wallpaper: one tile (icons/doodles.svg, tools/generate-doodles.cjs) used as a mask
+/* The doodle wallpaper: one tile (icons/doodles-2.svg, tools/generate-doodles.cjs) used as a mask
    and filled with --app-doodle, so a single file follows every palette and both schemes. Fixed,
    so it stays put while the board scrolls, and never a target for a tap. */
 body::before {
@@ -150,8 +150,8 @@ body::before {
     z-index: -1;
     pointer-events: none;
     background-color: var(--app-doodle);
-    -webkit-mask: url('icons/doodles.svg') 0 0 / 240px 240px repeat;
-    mask: url('icons/doodles.svg') 0 0 / 240px 240px repeat;
+    -webkit-mask: url('icons/doodles-2.svg') 0 0 / 240px 240px repeat;
+    mask: url('icons/doodles-2.svg') 0 0 / 240px 240px repeat;
 }
 @media (forced-colors: active) {
     body::before { display: none; }
