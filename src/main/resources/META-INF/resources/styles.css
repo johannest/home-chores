@@ -54,13 +54,13 @@ html, html[theme] {
        sits badly on a tinted page, so it follows the palette too — a few degrees round the wheel,
        as the page does, to keep both off the brand colour itself. */
     --app-page: light-dark(
-        hsl(var(--brand-h), calc(32% * var(--brand-sat)), 95%),
+        hsl(var(--brand-h), calc(32% * var(--brand-sat)), 96.5%),
         hsl(calc(var(--brand-h) + 10), calc(30% * var(--brand-sat)), 11%));
     --lumo-base-color: light-dark(#fff,
         hsl(calc(var(--brand-h) + 15), calc(20% * var(--brand-sat)), 19%));
-    /* The ink of the doodle tile (body::before): 1.3:1 on the page, a texture rather than a picture. */
+    /* The ink of the doodle tile (body::before): 1.2:1 on the page, a texture rather than a picture. */
     --app-doodle: light-dark(
-        hsl(var(--brand-h), calc(24% * var(--brand-sat)), 85%),
+        hsl(var(--brand-h), calc(24% * var(--brand-sat)), 88%),
         hsla(var(--brand-h), calc(60% * var(--brand-sat)), 88%, 0.1));
 
     /* Tiles — chore cards, chips, member pills — are what a finger presses, so they are raised:
@@ -687,7 +687,7 @@ vaadin-notification-container {
 .list-item.drag-placeholder::after {
     content: '';
     position: absolute;
-    inset: 3px 0;
+    inset: 3px;
     z-index: 2; /* above the face, which is z-index 1 */
     border: 2px dashed var(--lumo-contrast-50pct);
     border-radius: var(--lumo-border-radius-m);
@@ -1585,6 +1585,28 @@ body.hold-dragging {
     flex: 1;
     min-width: 0;
 }
+/* Each line is a card of its own, as a chore is a tile: text on the doodled page needs a plain
+   surface under it. A lighter shadow than a tile's — a line is read, and only its parts are
+   pressed. Done lines lie flat. The fields that add and set lines get the same plain ground. */
+.shared-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.shared-list > .list-row {
+    background: var(--lumo-base-color);
+    border: 1px solid var(--app-tile-border);
+    border-radius: var(--lumo-border-radius-m);
+    box-shadow: var(--app-chip-shadow), 0 4px 10px var(--app-shadow-far);
+}
+.shared-list.done > .list-row {
+    box-shadow: none;
+}
+.list-add-row vaadin-text-field::part(input-field),
+.dinner-field vaadin-text-field::part(input-field) {
+    background: var(--lumo-base-color);
+    box-shadow: inset 0 0 0 1px var(--app-tile-border);
+}
 .list-row.list-item {
     align-items: center;
     gap: var(--lumo-space-s);
@@ -1617,7 +1639,7 @@ body.hold-dragging {
 
 /* Swipe-to-reveal (list-swipe.js). A line is two layers: .swipe-face carries what the row always
    showed, and .swipe-actions sits behind it on the right. The face is transparent at rest so the
-   page shows through as before; it only turns opaque, and the tray only appears, while
+   card shows through; it only turns opaque, and the tray only appears, while
    a finger is moving it or it is held open — nothing changes for someone who never swipes. */
 .list-row.list-item {
     display: block;
@@ -1631,7 +1653,7 @@ body.hold-dragging {
     display: flex;
     align-items: center;
     gap: var(--lumo-space-s);
-    padding: 8px 0;
+    padding: 8px 12px;
     touch-action: pan-y; /* vertical scrolling stays the browser's; sideways is ours */
     transition: transform 180ms ease-out;
 }
@@ -1711,6 +1733,7 @@ body.hold-dragging {
     flex-direction: column;
     align-items: stretch;
     gap: 4px;
+    padding: 8px 12px;
 }
 .dinner-row .dinner-day {
     font-size: 0.85rem;
@@ -1719,10 +1742,8 @@ body.hold-dragging {
     overflow-wrap: anywhere;
 }
 .dinner-row.today {
-    background: var(--lumo-primary-color-10pct);
-    border-radius: var(--lumo-border-radius-m);
-    padding: 8px;
-    margin: 0 -8px;
+    /* The tint is translucent: laid over the card, not in place of it. */
+    background-image: linear-gradient(var(--lumo-primary-color-10pct), var(--lumo-primary-color-10pct));
 }
 .dinner-row.today .dinner-day {
     color: var(--lumo-primary-text-color);

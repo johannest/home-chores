@@ -300,7 +300,8 @@ hold whatever screen the call came from.
   sits on the kitchen counter all day should be one somebody wants to look at. Per device:
   nothing about it reaches the home or the other members. The colour reaches past the header:
   the board sits on a faint tint of it, under a wallpaper of little chore doodles, and the chore
-  tiles stand up off it like buttons — in dark mode too.
+  tiles stand up off it like buttons — in dark mode too. A shared list's lines are cards of their
+  own, so their words never sit on the doodles.
 
 - **US-51 Group the chores.** As an admin, I can create chore groups — 🍳 Kitchen, 🧺 Laundry —
   and put chores in them, so a long board reads as sections instead of one wall of cards.
@@ -1084,7 +1085,7 @@ message and shows a matching badge on the card (`LockReason`):
   `[theme~="dark"] { --lumo-primary-color: … }`, whose specificity beats a plain `html` — so in
   *forced* dark mode every brand token silently lost to Lumo's blue and the app stopped being
   green. Auto mode was unaffected, which is why it went unnoticed.
-- **The page is tinted with the palette** (`--app-page`): its hue at 95% lightness in light,
+- **The page is tinted with the palette** (`--app-page`): its hue at 96.5% lightness in light,
   hue + 10° at 11% in dark. Lumo's dark base colour — the cards, dialogs and fields — follows it at
   hue + 15°, 19%, so cards are the lighter of the two in both schemes. Grey's low saturation makes
   both nearly neutral.
@@ -1092,14 +1093,20 @@ message and shows a matching badge on the card (`LockReason`):
   (`icons/doodles.svg`, made by `tools/generate-doodles.cjs` from a seed: Poisson-disc spacing on a
   wrapping tile, random rotation ±40° and scale, so it repeats without seams). The tile is a
   **mask** filled with `--app-doodle`, so one file serves every palette and both schemes; it is a
-  fixed `body::before` layer with no pointer events, and hidden under `forced-colors`. It measures
-  about 1.3:1 on the page: a texture, never competing with text.
+  fixed `body::before` layer with no pointer events, and hidden under `forced-colors`. Its ink is
+  88% lightness in light, about 1.2:1 on the page: a texture, never competing with text.
 - **Tiles are raised.** Chore cards carry `--app-tile-shadow` (a 2 px hard edge under a soft drop,
   tinted with the palette in light, black in dark); filter chips, member pills and the Who did it?
   chips a 1 px edge. Their border is `--app-tile-border`, 30% white-ish in dark where Lumo's 10%
   contrast was all but invisible, with a 1 px highlight along a card's top. The card grid's gap on a
   phone is 10 px so the shadows read as separate tiles. The main tabs sit on a base-colour strip of
   their own.
+- **Shared-list lines are cards** (§4.4e): every line, and every day of the dinner week, is a
+  base-colour card with the tile border, 6 px apart, with a lighter shadow than a chore tile (a
+  1 px edge and a faint drop) — a line is read, only its parts are pressed. Done lines lie flat,
+  without the shadow. Today's dinner slot keeps its primary tint, laid over the card. The add-line
+  and dinner fields are base-colour with the tile border. The swipe tray is clipped to the card's
+  rounded corners.
 - **Semantic colours deliberately do not follow the palette**: the hate/ok/love segments, the
   error red, the streak flame, the credit gold, member colours. Those encode meaning, and the same
   bar must not read differently on two phones in one kitchen.
@@ -1600,7 +1607,8 @@ scales up, not the other way round.
   configured by the init listener. The card itself — covering the page at 1.5 s, yielding to the
   connection-lost message — is browser behaviour, verified by hand in the browser pane.
 - **Appearance** (§4.12b) is CSS, verified by hand in the browser pane at 375 px: the tinted page
-  and doodles in light and dark, forced dark from the switcher (`html[theme]`) with the pink
+  and doodles in light and dark, the list-line and dinner-day cards with an open swipe tray in
+  both, forced dark from the switcher (`html[theme]`) with the pink
   palette, no sideways scroll, and the tile, border and text colours computed for all four palettes
   in both schemes (brand text ≥ 4.7:1 on white and on the page in light; secondary text ≥ 5:1 on the
   page). `tools/generate-doodles.cjs` is deterministic for a seed.
