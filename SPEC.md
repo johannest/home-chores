@@ -1090,11 +1090,13 @@ message and shows a matching badge on the card (`LockReason`):
   hue + 15°, 19%, so cards are the lighter of the two in both schemes. Grey's low saturation makes
   both nearly neutral.
 - **Doodle wallpaper.** Behind every page, a repeating 240 px tile of chore line drawings
-  (`icons/doodles.svg`, made by `tools/generate-doodles.cjs` from a seed: Poisson-disc spacing on a
-  wrapping tile, random rotation ±40° and scale, so it repeats without seams). The tile is a
+  (`icons/doodles-2.svg`, made by `tools/generate-doodles.cjs` from a seed: Poisson-disc spacing on a
+  wrapping tile, drawings about 38 px apart in 1.2 px lines, random rotation ±40° and scale, so it
+  repeats without seams and reads as an even texture). The tile is a
   **mask** filled with `--app-doodle`, so one file serves every palette and both schemes; it is a
   fixed `body::before` layer with no pointer events, and hidden under `forced-colors`. Its ink is
-  90% lightness in light, about 1.15:1 on the page: a texture, never competing with text.
+  92% lightness in light, about 1.1:1 on the page, and 8% white in dark: a texture, never competing
+  with text.
 - **Tiles are raised.** Chore cards carry `--app-tile-shadow` (a 2 px hard edge under a soft drop,
   tinted with the palette in light, black in dark); filter chips, member pills and the Who did it?
   chips a 1 px edge. Their border is `--app-tile-border`, 30% white-ish in dark where Lumo's 10%
@@ -1619,7 +1621,7 @@ scales up, not the other way round.
   dinner-day cards with an open swipe tray in both, forced dark from the switcher (`html[theme]`) with the pink
   palette, no sideways scroll, and the tile, border and text colours computed for all four palettes
   in both schemes (brand text ≥ 4.7:1 on white, on the page and on a dome's rim in light;
-  secondary text ≥ 4.9:1 on a dome's rim; pill text ≥ 5.2:1 light, ≥ 4.5:1 dark). `tools/generate-doodles.cjs` is deterministic for a seed.
+  secondary text ≥ 4.9:1 on a dome's rim; pill text ≥ 5.2:1 light, ≥ 4.5:1 dark). `tools/generate-doodles.cjs` is deterministic for a seed; the doodle ink is ≤ 1.15:1 on the page in every palette.
 - **Statistics** (`StatsServiceTest`): my/home aggregates; 💎 earned follows an undo and ignores
   redemptions, bucketed by the day the credit landed; 💎 redeemed lists the member's redemptions
   newest first with the note as the reward and a blank note as none, and earned − redeemed is the

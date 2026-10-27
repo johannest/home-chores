@@ -449,7 +449,7 @@ src/main/resources/
 ├── messages[_fi|_sv].properties  # UI texts (all three languages)
 ├── META-INF/resources/styles.css # app styling (Lumo tweaks + components)
 └── META-INF/resources/icons/     # PWA icons + iOS splash screens (generated set),
-                                  #   and doodles.svg, the page's wallpaper tile (a mask)
+                                  #   and doodles-2.svg, the page's wallpaper tile (a mask)
 src/main/frontend/confetti.js     # self-contained confetti (no CDN; off under reduced motion)
 src/main/frontend/loading-overlay.js # the loading card, built from the landing restore card's classes
 src/main/frontend/keyboard-inset.js  # how much of the page the on-screen keyboard covers (toasts)
@@ -462,7 +462,7 @@ tools/
 ├── flashchores-admin.py          # operator maintenance: list / show / export / delete / restore / purge
 ├── release.sh                    # deploy or roll back a release
 ├── generate-icons.cjs            # regenerates the PWA icons + iOS splash screens
-├── generate-doodles.cjs [seed]   # regenerates icons/doodles.svg, the seamless doodle tile
+├── generate-doodles.cjs [seed]   # regenerates icons/doodles-2.svg, the seamless doodle tile
 ├── observability/                # Prometheus + Grafana setup for the Observability Kit
 └── demo-video/                   # the vertical demo videos, captioned and narrated
     ├── run.sh <name>             # production jar on a throwaway database, then record + mix
