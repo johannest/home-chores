@@ -324,7 +324,8 @@ hold whatever screen the call came from.
   own face, and that is the confirmation: it counts for that person, with their locks checked
   and their celebration shown. An admin pairs the device once with the home code and the admin
   PIN (signing in as themselves would sign their own phone out), and can unpair it from the
-  Admin tab. The device is never an admin and has no reminders of its own.
+  Admin tab — or from the device itself, with *Leave* in its ⋯ menu. The device is never an
+  admin and has no reminders of its own.
 
 ### Phase 5
 
@@ -547,12 +548,18 @@ member's but no member of its own.
   board on that device out to the landing page, identity dropped. A device is not part of a
   backup (it is a fact about a browser, not about the family) and survives a restore; deleting
   the home deletes its devices.
+- **Leaving**, from the device's own ⋯ menu: "Unpair this device?" (`home.leave.device.*`) asks
+  first — unlike a member's Leave — because pairing it again needs the admin PIN typed on it.
+  The yes runs `SharedDeviceService.leave(deviceId)`, which deletes the device's row exactly as
+  an unpair does (secret dead, slot freed, home bumped), then forgets the stored identity and
+  shows the landing page. No admin check: the id is the session's own, never the client's, and
+  it can only remove the caller.
 - **The board belongs to nobody.** `taskViews(homeCode, null)` evaluates only the locks about
   *time* — season, interval, availability hours (in the device's own time zone) — and leaves
   the locks about *who* (rotation, booking, streak) to the tap. The cards still carry the
   badges those would have produced for someone: "Sam today", "🔖 Sam", "Sam ×3 🔒", so the
   counter-top screen shows the family's state rather than one member's. No daily-target
-  ring (it is one person's), no ⏰ chips, no reminders, no "Admin?", no Leave; the header
+  ring (it is one person's), no ⏰ chips, no reminders, no "Admin?"; the header
   says "📺 Kitchen tablet · shared device" as dark text on a near-white pill (`.device-badge`),
   since white on the header gradient measures 2.6–2.9:1 (UX review row B) and this is the one
   line saying whose board it is.
@@ -1658,7 +1665,8 @@ scales up, not the other way round.
 - **The shared device** (`SharedDeviceTest`): pairs with the code and PIN and the secret proves
   it (a wrong or blank one does not); a wrong PIN, an unknown home and a sixth device are
   refused, and a blank name takes the default; wrong pairing guesses lock the PIN for claiming
-  too; only an admin of that home unpairs, after which the secret is dead; a completion from the
+  too; only an admin of that home unpairs, after which the secret is dead; a device leaving
+  unpairs only itself, a second leave is a no-op, and its slot is free again; a completion from the
   device counts for the member picked with their streak lock enforced; a member, chore or device
   from another home is refused for completing, booking, clearing a booking and other help; it
   books for the member picked and clears anyone's booking; other help from it waits for an
@@ -1667,7 +1675,8 @@ scales up, not the other way round.
   home's tablet can neither tick, rename nor delete this home's lines, nor this home's tablet add
   to theirs, and an unpaired device writes nothing even while its home keeps another; and devices are absent from a backup, survive a
   restore and go with the home. `SharedDeviceUiTest`: three tabs, the header badge, no Admin?,
-  no Leave, no daily ring; tapping a card asks who, cancelling records nothing, a chip counts for
+  a Leave that asks first (Cancel keeps the device paired, the yes unpairs it and shows the
+  landing page), no daily ring; tapping a card asks who, cancelling records nothing, a chip counts for
   that member and the undo strip names them; under enforced rotation the card is not locked and
   a wrong pick is refused in their name (the toast names Milla, not "you") and the right one
   puts Alex on the undo strip; "I'll do it" asks for whom, and a booking — the picked member's or

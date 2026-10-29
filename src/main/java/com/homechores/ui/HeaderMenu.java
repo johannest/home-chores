@@ -31,8 +31,8 @@ class HeaderMenu extends MenuBar {
     /**
      * @param device the family's shared device (§4.1.3): appearance and language only. It is
      *               never an admin — a counter-top screen is reachable by anyone in the house,
-     *               so "Admin?" is not offered — and it has no Leave: an admin unpairs it from
-     *               the Admin tab on their phone.
+     *               so "Admin?" is not offered. It keeps Leave, which unpairs it: a tablet being
+     *               handed on or reset should not need an admin's phone to sign it out.
      */
     HeaderMenu(boolean admin, boolean pushEnabled, boolean device, Runnable onReminders,
                Runnable onClaimAdmin, Runnable onLeave) {
@@ -63,11 +63,8 @@ class HeaderMenu extends MenuBar {
             item.setChecked(code.equals(current));
         }
 
-        if (device) {
-            return;
-        }
         sub.addComponent(new Hr());
-        if (!admin) {
+        if (!admin && !device) {
             sub.addItem(row(VaadinIcon.KEY, T.tr("home.claimAdmin")), e -> onClaimAdmin.run());
         }
         sub.addItem(row(VaadinIcon.SIGN_OUT, T.tr("home.leave")), e -> onLeave.run());

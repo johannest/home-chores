@@ -117,9 +117,29 @@ public class SharedDeviceService {
         if (members.findAdmin(device.getHomeCode(), adminId).isEmpty()) {
             throw new IllegalArgumentException("Not an admin of this home");
         }
+        remove(device);
+        return true;
+    }
+
+    /**
+     * The device signing itself out (§4.1.3): the same row deletion as an admin's unpair, so the
+     * secret left in the browser stops working and the home's five device slots get one back.
+     * No admin check, because it only ever removes the caller — the id comes from the device's
+     * own session, never from the client — and pairing again still needs the admin PIN.
+     */
+    @Transactional
+    public boolean leave(Long deviceId) {
+        SharedDevice device = devices.findById(deviceId).orElse(null);
+        if (device == null) {
+            return false;
+        }
+        remove(device);
+        return true;
+    }
+
+    private void remove(SharedDevice device) {
         devices.delete(device);
         homeState.bump(device.getHomeCode());
-        return true;
     }
 
     /** A chore tapped on the device and attributed to {@code memberId}: every lock in §4.3
