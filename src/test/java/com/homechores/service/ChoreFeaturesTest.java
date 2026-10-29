@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.homechores.domain.ChoreCatalog.Pick;
+import com.homechores.domain.ChoreGroup;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.ChoreTaskRepository;
 import com.homechores.domain.Completion;
@@ -28,6 +30,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -342,7 +345,7 @@ class ChoreFeaturesTest {
 
     @Test
     void seededDefaults_areLocalized_withIntervalAndWindows() {
-        Member alex = service.createHome("Pesä", "Aleksi", Locale.of("fi"));
+        Member alex = service.createHome("Pesä", "Aleksi", Locale.of("fi"), Pick.starters());
         List<ChoreTask> seeded = tasks(alex.getHomeCode());
 
         assertEquals(11, seeded.size());
@@ -352,5 +355,39 @@ class ChoreFeaturesTest {
         assertTrue(seeded.stream().anyMatch(t -> t.getName().equals("Ulkoiluta koira")
                         && "08:00-10:00,18:00-22:00".equals(t.getAvailableWindows())),
                 "dog walk seeded in Finnish with morning + evening windows");
+    }
+
+    @Test
+    void pickedCatalogueChores_areFiledUnderASectionEach_inCatalogueOrder() {
+        Member alex = service.createHome("Pesä", "Aleksi", Locale.of("fi"),
+                new Pick(Set.of("mowLawn", "cleanFridge", "toilet", "bake", "no-such-chore"), true));
+        String code = alex.getHomeCode();
+
+        assertEquals(List.of("Keittiö", "Siivous", "Piha ja puutarha"),
+                service.groupsOf(code).stream().map(ChoreGroup::getName).toList(),
+                "only the sections something was picked from, in catalogue order");
+        assertEquals(List.of("Puhdista jääkaappi", "Leipominen", "WC:n siivous", "Nurmikon leikkaus"),
+                service.tasksOf(code).stream().map(ChoreTask::getName).toList(),
+                "the unknown key is ignored, and the board reads in catalogue order");
+        ChoreTask lawn = service.tasksOf(code).get(3);
+        assertEquals("SPRING,SUMMER,AUTUMN", lawn.getSeasons(), "mowing the lawn is never a winter chore");
+        assertEquals(7, lawn.getIntervalDays());
+        assertEquals(service.groupsOf(code).get(2).getId(), lawn.getGroupId());
+    }
+
+    @Test
+    void aFlatPick_makesNoSections_andKeepsCatalogueOrder() {
+        Member alex = service.createHome("Flat", "Alex", Locale.ENGLISH,
+                new Pick(Set.of("dogOut", "groceries", "washDishes"), false));
+        assertTrue(service.groupsOf(alex.getHomeCode()).isEmpty());
+        assertEquals(List.of("Wash the dishes", "Go grocery shopping", "Take the dog out"),
+                tasks(alex.getHomeCode()).stream().map(ChoreTask::getName).toList());
+    }
+
+    @Test
+    void pickingNothing_makesAHomeWithNoChoresAndNoSections() {
+        Member alex = service.createHome("Empty", "Alex", Locale.ENGLISH, new Pick(Set.of(), true));
+        assertTrue(tasks(alex.getHomeCode()).isEmpty());
+        assertTrue(service.groupsOf(alex.getHomeCode()).isEmpty());
     }
 }

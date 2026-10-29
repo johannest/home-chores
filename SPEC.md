@@ -185,7 +185,7 @@ hold whatever screen the call came from.
   note, e.g. "movie night"); redeeming reduces the balance and cannot exceed it.
 - **US-29 Localization.** As a user, I get the UI in English, Finnish or Swedish —
   initially from my browser language, switchable at any time (persisted in a
-  cookie). A new home's default chores are created in the creator's language.
+  cookie). A new home's starter chores are created in the creator's language.
 - **US-30 Join links & sharing.** As a member, I can copy a ready-to-open join link
   or share it via the native share sheet; the shared text includes the home name,
   code and link. Opening the link preselects the Join tab with the code filled in.
@@ -195,9 +195,12 @@ hold whatever screen the call came from.
 - **US-32 Privacy notice.** As a visitor, I can read a plain-language privacy page
   at `/privacy` (linked from the landing page) describing what little data the app
   stores and my rights.
-- **US-33 Default chores.** As a new home, I start with 11 sensible starter chores
-  (localized), including examples of an interval chore (water plants, every 7 days)
-  and a time-windowed chore (take the dog out, 08–10 & 18–22).
+- **US-33 Starter chores.** As the creator of a new home, I pick the chores my family
+  actually does from a catalogue of about sixty (kitchen, cleaning, laundry, errands, garden &
+  yard, pets, repairs & upkeep, kids & family) instead of typing them in one by one, and can
+  have them filed into board sections. If I don't open the picker, I start with 11 sensible
+  starter chores (localized), including an interval chore (water plants, every 7 days) and a
+  time-windowed chore (take the dog out, 08–10 & 18–22).
 
 ### Phase 4
 
@@ -603,8 +606,31 @@ member's but no member of its own.
 - Update: all of the above.
 - Delete: removes the chore and cascades to its completions. Confirmation required.
 - The "＋ Add chore" affordance and edit/delete controls are visible only to admins.
-- New homes are seeded with 11 default chores, localized to the creator's language
-  (see US-33).
+- New homes are seeded with the chores picked from the starter catalogue (§4.2.1), localized
+  to the creator's language (see US-33).
+
+#### 4.2.1 Starter chores
+- **`ChoreCatalog`** is a fixed list of 60 chores in 8 **sections** (🍳 Kitchen, 🧽 Cleaning,
+  🧺 Laundry, 🛒 Errands, 🌱 Garden & yard, 🐾 Pets, 🔧 Repairs & upkeep, 🧒 Kids & family).
+  Each entry is a message key (`chore.catalog.*`, section names `catalog.section.*`), an emoji
+  and the cadence a family would most likely give it: an interval (clean the fridge every 30
+  days, the oven every 90), seasons (mow the lawn spring to autumn, rake leaves in autumn,
+  shovel snow in winter, change the tyres spring and autumn and at most once in 150 days) or
+  availability hours (the dog, 08–10 and 18–22). They are starting points: once created, a
+  chore is the home's own and is edited like any other.
+- The create-home form shows **Starter chores · 11 chosen · Choose**. *Choose* opens a dialog
+  with one checkbox group per section, *All* / *None*, and **Sort them into sections on the
+  board** (off by default). *Done* replaces the pick; *Cancel*, Esc or a tap outside keeps the
+  earlier one. Untouched, the pick is the eleven entries marked *starter* — the chores every
+  home got before the catalogue existed — on a flat board, so a family that never opens it gets
+  the board it always had. Sections are opt-in because eleven chores in five headings, two of
+  them over a single card, is clutter; sixty under eight is a map.
+- `ChoreService.createHome(homeName, memberName, locale, ChoreCatalog.Pick)` creates the picked
+  chores in catalogue order, named in the creator's locale. With sections, each section that has
+  at least one pick becomes a `ChoreGroup` (its emoji and translated name, in catalogue order)
+  and its chores are placed in it in order; without, they are ungrouped and creation time is the
+  order. A key not in the catalogue is ignored; picking nothing makes a home with no chores and
+  no sections.
 
 ### 4.2b Chore groups and board order
 - **Groups** (`ChoreGroup`: name, emoji, position) are the board's section headings — 🍳 Kitchen,
@@ -1073,7 +1099,7 @@ message and shows a matching badge on the card (`LockReason`):
 - Initial locale = best match for the browser language; the **language switcher**
   (landing page and home header) persists the choice in a `lang` cookie applied on
   session init.
-- Default chores are seeded using the home creator's locale (chore names are data;
+- Starter chores (§4.2.1) are seeded using the home creator's locale (chore names are data;
   they don't change retroactively when the UI language changes).
 
 ### 4.12b Appearance: colour scheme and palette
@@ -1537,7 +1563,13 @@ scales up, not the other way round.
   enforcement, day advance), interval due-dates, availability windows (parsing,
   normalization, in/out-of-window completion via fixed-offset zones), credits &
   spree bonuses, stats aggregation, backup→restore round-trip (incl. windows and the
-  rejoin gate), localized default seeding, and rejoin requests (gate on/off, PIN bypass
+  rejoin gate), localized starter seeding (`ChoreFeaturesTest`: a sectioned pick files each
+  chore under its section in catalogue order with its seasons and interval and ignores an
+  unknown key, a flat pick makes no sections, an empty pick makes neither chores nor sections),
+  the catalogue itself (`ChoreCatalogTest`: every chore and section is named in all three
+  languages within the length limits and no two chores share a name, keys are unique, cadences
+  are canonical and within limits, the starters are the old eleven, entries are in section
+  order), and rejoin requests (gate on/off, PIN bypass
   without promotion, wrong PIN, member from another home, approve/reject, token
   consumption, newest-device-wins, cancel, cleanup when a member is removed), and home
   deletion (every table wiped, other homes untouched, idempotent, code normalization,
@@ -1587,7 +1619,9 @@ scales up, not the other way round.
 - **Vaadin UI Unit tests** (`vaadin-testbench-unit-junit5`, `SpringUIUnitTest` through
   `HomeChoresUiTest`, which installs TestBench's signals test environment so that another
   phone's bump of the home reaches the view deterministically through `runPendingSignalsTasks`
-  rather than through `VaadinService`'s thread pool; browserless): create-home flow navigates to the board with four tabs; join flow
+  rather than through `VaadinService`'s thread pool; browserless): create-home flow navigates to the board with four tabs; the starter-chore picker
+  shows 11 chosen, Cancel keeps the pick, Done replaces it, and Create makes exactly the picked
+  chores in their section; join flow
   (three tabs, no Admin); PIN claim reveals the Admin tab, and a wrong PIN marks the field
   and reveals nothing — no tab, no role, the member lifetime; a demoted admin's own device
   loses the Admin tab and the panel on the next redraw and drops back to the member

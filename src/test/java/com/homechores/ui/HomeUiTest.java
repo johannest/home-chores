@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.homechores.domain.ChoreCatalog;
+import com.homechores.domain.ChoreGroup;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.Completion;
 import com.homechores.domain.CompletionRepository;
@@ -26,13 +28,14 @@ import com.vaadin.flow.component.ComponentUtil;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.checkbox.Checkbox;
+import com.vaadin.flow.component.checkbox.CheckboxGroup;
+import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Image;
 import com.vaadin.flow.component.html.ListItem;
 import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
-import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.menubar.MenuBar;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.select.Select;
@@ -46,11 +49,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
-import java.util.Locale;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -377,6 +381,48 @@ class HomeUiTest extends HomeChoresUiTest {
         assertInstanceOf(HomeView.class, getCurrentView());
         assertEquals(4, tabCount(), "admin sees Chores + List + Stats + Admin");
         assertTrue(hasSpanWithText("Alex"), "creator appears on the leaderboard");
+    }
+
+    /** The starter-chore picker: Cancel keeps the pick, Done replaces it, and Create uses it. */
+    @Test
+    void createHome_withPickedStarterChores_inSections() {
+        navigate(LandingView.class);
+        assertTrue(hasSpanWithText("11 chosen"), "the eleven starters are pre-ticked");
+
+        clickButton("Choose");
+        clickButton("None");
+        clickButton("Cancel");
+        assertTrue(hasSpanWithText("11 chosen"), "Cancel keeps the earlier pick");
+
+        clickButton("Choose");
+        clickButton("None");
+        CheckboxGroup<ChoreCatalog.Entry> kitchen = starterSection("🍳 Kitchen");
+        kitchen.setValue(Set.copyOf(ChoreCatalog.inSection(ChoreCatalog.Section.KITCHEN).stream()
+                .filter(e -> e.key().equals("bake") || e.key().equals("cleanFridge")).toList()));
+        $(Checkbox.class).all().stream()
+                .filter(c -> c.getLabel() != null && c.getLabel().startsWith("Sort them into sections"))
+                .findFirst().orElseThrow().setValue(true);
+        clickButton("Done");
+        assertTrue(hasSpanWithText("2 chosen"));
+
+        setField("Home name", "Test Home");
+        setField("Your name", "Alex");
+        acceptTerms();
+        clickButton("Create home 🚀");
+        clickButton("Let's go 🚀");
+
+        String code = SessionContext.homeCode();
+        assertEquals(List.of("Clean the fridge", "Baking"),
+                service.tasksOf(code).stream().map(ChoreTask::getName).toList());
+        assertEquals(List.of("Kitchen"),
+                service.groupsOf(code).stream().map(ChoreGroup::getName).toList());
+    }
+
+    @SuppressWarnings("unchecked")
+    private CheckboxGroup<ChoreCatalog.Entry> starterSection(String label) {
+        return $(CheckboxGroup.class).all().stream()
+                .filter(g -> label.equals(g.getLabel()) && usable(g))
+                .findFirst().orElseThrow(() -> new AssertionError("No section " + label));
     }
 
     @Test
