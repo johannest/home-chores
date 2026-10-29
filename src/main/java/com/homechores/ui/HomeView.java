@@ -366,7 +366,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
                 () -> new ReminderDialog(reminderService, snoozeService, pushSender, memberId, homeCode)
                         .open(),
                 this::claimAdminDialog,
-                this::leave));
+                viewer.isDevice() ? this::leaveDeviceDialog : this::leave));
 
         HorizontalLayout header = new HorizontalLayout(left, right);
         header.addClassName("home-header");
@@ -386,6 +386,24 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         DeviceIdentity.forget();
         SessionContext.signOut();
         getUI().ifPresent(ui -> ui.navigate(LandingView.class));
+    }
+
+    /** A device asks first, unlike a member: a member signs back in with their name and an
+     *  admin's nod, but pairing the tablet again needs the admin PIN typed on it. */
+    private void leaveDeviceDialog() {
+        Dialog d = new Dialog();
+        d.setHeaderTitle(T.tr("home.leave.device.title"));
+        d.add(new Span(T.tr("home.leave.device.text")));
+        Button yes = new Button(T.tr("home.leave"), e -> {
+            d.close();
+            sharedDevices.leave(viewer.deviceId());
+            DeviceIdentity.forget();
+            SessionContext.signOut();
+            getUI().ifPresent(ui -> ui.navigate(LandingView.class));
+        });
+        yes.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_ERROR);
+        d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), yes);
+        d.open();
     }
 
     private Tabs buildTabs(boolean admin) {

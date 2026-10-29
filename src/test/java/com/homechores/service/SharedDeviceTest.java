@@ -123,6 +123,25 @@ class SharedDeviceTest {
     }
 
     @Test
+    void leaving_unpairsOnlyTheDeviceItself_andFreesItsSlot() {
+        Member alex = service.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+        Paired kitchen = pair(code);
+        Paired hall = pair(code);
+
+        assertTrue(devices.leave(kitchen.device().getId()));
+        assertFalse(devices.verify(kitchen.device().getId(), kitchen.secret()));
+        assertTrue(devices.verify(hall.device().getId(), hall.secret()), "the other device stays");
+        assertFalse(devices.leave(kitchen.device().getId()), "already gone");
+
+        for (int i = 1; i < SharedDevice.MAX_PER_HOME; i++) {
+            pair(code);
+        }
+        assertEquals(SharedDevice.MAX_PER_HOME, devices.devicesOf(code).size(),
+                "the slot it held is free again");
+    }
+
+    @Test
     void completesForTheMemberPicked_withEveryLockRunForThem() {
         Member alex = service.createHome("Nest", "Alex");
         String code = alex.getHomeCode();
