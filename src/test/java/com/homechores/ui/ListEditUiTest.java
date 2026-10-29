@@ -148,9 +148,9 @@ class ListEditUiTest extends HomeChoresUiTest {
         String code = alex.getHomeCode();
         openLists(0);
         Tabs tabs = kindTabs();
-        assertEquals(4, tabs.getComponentCount(), "three built-ins and the +");
+        assertEquals(5, tabs.getComponentCount(), "four built-ins and the +");
 
-        tabs.setSelectedIndex(3);
+        tabs.setSelectedIndex(4);
         TextPromptDialog d = open(TextPromptDialog.class).get(0);
         assertEquals(0, kindTabs().getSelectedIndex(), "+ is an action, not a place to stay");
         test(d.field).setValue("Hardware store");
@@ -158,8 +158,8 @@ class ListEditUiTest extends HomeChoresUiTest {
 
         assertEquals(1, lists.customLists(code).size());
         Tabs after = kindTabs();
-        assertEquals(5, after.getComponentCount());
-        assertEquals(3, after.getSelectedIndex(), "the new list is showing");
+        assertEquals(6, after.getComponentCount());
+        assertEquals(4, after.getSelectedIndex(), "the new list is showing");
         assertTrue(after.getElement().getTextRecursively().contains("Hardware store"));
 
         $(com.vaadin.flow.component.textfield.TextField.class).all().stream()
@@ -179,7 +179,7 @@ class ListEditUiTest extends HomeChoresUiTest {
     void aBlankName_keepsTheDialogOpen() {
         signedIn("Alex");
         openLists(0);
-        kindTabs().setSelectedIndex(3);
+        kindTabs().setSelectedIndex(4);
         TextPromptDialog d = open(TextPromptDialog.class).get(0);
         test(footerButton(d, "Create")).click();
         assertTrue(d.isOpened());
@@ -192,7 +192,7 @@ class ListEditUiTest extends HomeChoresUiTest {
         String code = alex.getHomeCode();
         CustomList gifts = lists.createList(code, Author.member(alex.getId()), "Gifts").orElseThrow();
         lists.add(code, ListKind.TODO, gifts.getId(), Author.member(alex.getId()), "Book");
-        openLists(3);
+        openLists(4);
         assertEquals(1, rows().size());
 
         clickMenuItem("Delete list");
@@ -204,7 +204,7 @@ class ListEditUiTest extends HomeChoresUiTest {
 
         assertTrue(lists.customLists(code).isEmpty());
         assertEquals(1, kindTabs().getSelectedIndex(), "back on To-do");
-        assertEquals(4, kindTabs().getComponentCount());
+        assertEquals(5, kindTabs().getComponentCount());
     }
 
     @Test
@@ -212,7 +212,7 @@ class ListEditUiTest extends HomeChoresUiTest {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
         lists.createList(code, Author.member(alex.getId()), "Gifts");
-        openLists(3);
+        openLists(4);
 
         clickMenuItem("Rename list");
         TextPromptDialog d = open(TextPromptDialog.class).get(0);
@@ -222,7 +222,7 @@ class ListEditUiTest extends HomeChoresUiTest {
 
         assertEquals("Birthday gifts", lists.customLists(code).get(0).getName());
         assertTrue(kindTabs().getElement().getTextRecursively().contains("Birthday gifts"));
-        assertEquals(3, kindTabs().getSelectedIndex(), "still on it");
+        assertEquals(4, kindTabs().getSelectedIndex(), "still on it");
     }
 
     @Test
@@ -230,7 +230,7 @@ class ListEditUiTest extends HomeChoresUiTest {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
         CustomList gifts = lists.createList(code, Author.member(alex.getId()), "Gifts").orElseThrow();
-        openLists(3);
+        openLists(4);
         Member sam = service.joinHome(code, "Sam").orElseThrow();
 
         lists.deleteList(code, gifts.getId(), Author.member(sam.getId())); // bumps the home: the board redraws

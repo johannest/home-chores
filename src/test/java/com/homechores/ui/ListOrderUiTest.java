@@ -114,8 +114,8 @@ class ListOrderUiTest extends HomeChoresUiTest {
         lists.createList(alex.getHomeCode(), Author.member(alex.getId()), "Gifts");
         mainTab("Admin");
 
-        assertEquals(4, adminRows().size());
-        assertEquals(3, adminRows().stream().filter(r -> !$(Switch.class, r).all().isEmpty()).count(),
+        assertEquals(5, adminRows().size());
+        assertEquals(4, adminRows().stream().filter(r -> !$(Switch.class, r).all().isEmpty()).count(),
                 "own lists are deleted by members, not switched off");
         assertTrue($(Switch.class, adminRow("Groceries")).first().getValue(), "on by default");
     }
@@ -123,12 +123,12 @@ class ListOrderUiTest extends HomeChoresUiTest {
     @Test
     void movingAListInSettings_reordersTheListsTab() {
         Member alex = signedIn("Alex");
-        assertEquals(List.of("Groceries", "To-do", "Dinner"), listTabs()); // Groceries is showing
+        assertEquals(List.of("Groceries", "To-do", "Dinner", "Routines"), listTabs()); // Groceries is showing
         mainTab("Admin");
         rowMenu(adminRow("Dinner"), "Move up");
         rowMenu(adminRow("Dinner"), "Move up");
 
-        assertEquals(List.of("Dinner", "Groceries", "To-do"), listTabs());
+        assertEquals(List.of("Dinner", "Groceries", "To-do", "Routines"), listTabs());
         assertEquals("Groceries", kindTabs().getSelectedTab().getElement().getTextRecursively().trim(),
                 "the list on screen follows its tab, not the position");
     }
@@ -140,7 +140,7 @@ class ListOrderUiTest extends HomeChoresUiTest {
         SessionContext.signIn(alex.getId(), alex.getHomeCode());
         navigate(HomeView.class);
 
-        assertEquals(List.of("To-do", "Groceries", "Dinner"), listTabs());
+        assertEquals(List.of("To-do", "Groceries", "Dinner", "Routines"), listTabs());
         assertEquals(0, kindTabs().getSelectedIndex(), "To-do is first, so it is what opens");
     }
 
@@ -152,11 +152,11 @@ class ListOrderUiTest extends HomeChoresUiTest {
         $(Switch.class, adminRow("Groceries")).first().setValue(false);
 
         assertTrue(adminRow("Groceries").getClassNames().contains("list-off"));
-        assertEquals(List.of("To-do", "Dinner"), listTabs());
+        assertEquals(List.of("To-do", "Dinner", "Routines"), listTabs());
 
         mainTab("Admin");
         $(Switch.class, adminRow("Groceries")).first().setValue(true);
-        assertEquals(List.of("Groceries", "To-do", "Dinner"), listTabs());
+        assertEquals(List.of("Groceries", "To-do", "Dinner", "Routines"), listTabs());
         assertEquals(1, lists.openItems(alex.getHomeCode(), ListKind.GROCERY).size(), "the milk came back with it");
     }
 
@@ -179,7 +179,7 @@ class ListOrderUiTest extends HomeChoresUiTest {
         CustomList gifts = lists.createList(code, Author.member(alex.getId()), "Gifts").orElseThrow();
         lists.setListEnabled(code, alex.getId(), ListKind.TODO, false);
         mainTab("Lists");
-        kindTabs().setSelectedIndex(2); // Groceries, Dinner, Gifts
+        kindTabs().setSelectedIndex(3); // Groceries, Dinner, Routines, Gifts
         lists.deleteList(code, gifts.getId(), Author.member(alex.getId()));
         awaitRedraw(() -> kindTabs().getSelectedIndex() == 0);
 

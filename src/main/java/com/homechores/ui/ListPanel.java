@@ -12,6 +12,7 @@ import com.homechores.service.ListItemService;
 import com.homechores.service.ListItemService.ListSlot;
 import com.homechores.service.ListReminderService;
 import com.homechores.service.PushReminderService;
+import com.homechores.service.RoutineService;
 import com.homechores.service.WebPushSender;
 import com.vaadin.flow.component.Key;
 import com.vaadin.flow.component.UI;
@@ -58,6 +59,7 @@ class ListPanel extends VerticalLayout {
     private final ListReminderService reminders;
     private final PushReminderService push;
     private final WebPushSender pushSender;
+    private final RoutineService routines;
     private final String homeCode;
     /** Null on the shared device: its lines carry no author (§4.1.3). */
     private final Long memberId;
@@ -92,12 +94,14 @@ class ListPanel extends VerticalLayout {
     private boolean focusOnRender = true;
 
     ListPanel(ListItemService lists, ChoreService service, ListReminderService reminders,
-              PushReminderService push, WebPushSender pushSender, Viewer viewer) {
+              PushReminderService push, WebPushSender pushSender, RoutineService routines,
+              Viewer viewer) {
         this.lists = lists;
         this.service = service;
         this.reminders = reminders;
         this.push = push;
         this.pushSender = pushSender;
+        this.routines = routines;
         this.viewer = viewer;
         this.homeCode = viewer.homeCode();
         this.memberId = viewer.memberId();
@@ -194,6 +198,7 @@ class ListPanel extends VerticalLayout {
             case GROCERY -> "list.tab.groceries";
             case TODO -> "list.tab.todo";
             case DINNER -> "list.tab.dinner";
+            case ROUTINES -> "list.tab.routines";
         });
     }
 
@@ -301,6 +306,11 @@ class ListPanel extends VerticalLayout {
         body.removeAll();
         if (kind == ListKind.DINNER) {
             renderDinnerWeek();
+            return;
+        }
+        if (kind == ListKind.ROUTINES) {
+            body.add(new RoutinesPanel(RoutinesPanel.Mode.ALL, routines, service, pushSender, viewer,
+                    this::refresh));
             return;
         }
         if (listId != null) {

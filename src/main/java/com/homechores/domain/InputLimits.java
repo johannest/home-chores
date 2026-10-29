@@ -73,6 +73,10 @@ public final class InputLimits {
     /** Ceiling for day counts (chore interval, spree tier length). */
     public static final int MAX_DAYS = 365;
 
+    /** Routines one home may hold (§4.4f) — far more than a family keeps, few enough that the
+     *  Routines tab and the reminder sweep stay cheap whatever one phone does. */
+    public static final int MAX_ROUTINES_PER_HOME = 100;
+
     private InputLimits() {
     }
 

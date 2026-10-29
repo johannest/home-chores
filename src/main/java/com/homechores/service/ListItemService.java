@@ -252,6 +252,9 @@ public class ListItemService {
     @Transactional
     public Optional<ListItem> add(String homeCode, ListKind kind, Long listId, Author author, String text) {
         memberOf(homeCode, author);
+        if (listId == null && !kind.holdsLines()) {
+            throw new IllegalArgumentException(kind + " holds no lines");
+        }
         String clean = InputLimits.clip(text == null ? null : text.trim(), InputLimits.LIST_ITEM);
         if (clean == null || clean.isBlank()) {
             return Optional.empty();
@@ -534,7 +537,8 @@ public class ListItemService {
     // ---- Order and visibility of the Lists tab -------------------------------
 
     /** The built-in lists in their default order, which is also where a missing one goes back to. */
-    public static final List<ListKind> BUILT_INS = List.of(ListKind.GROCERY, ListKind.TODO, ListKind.DINNER);
+    public static final List<ListKind> BUILT_INS =
+            List.of(ListKind.GROCERY, ListKind.TODO, ListKind.DINNER, ListKind.ROUTINES);
 
     /**
      * One tab on the Lists panel: a built-in list ({@code custom == null}) or one of the home's
@@ -664,7 +668,7 @@ public class ListItemService {
         if (enabled ? !hidden.remove(kind) : !hidden.add(kind)) {
             return; // already so
         }
-        if (!enabled) {
+        if (!enabled && kind.holdsLines()) {
             for (ListItem line : openItems(homeCode, kind)) {
                 reminders.deleteByItemId(line.getId());
             }

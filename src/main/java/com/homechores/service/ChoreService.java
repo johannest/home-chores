@@ -23,6 +23,9 @@ import com.homechores.domain.PushSubscriptionRepository;
 import com.homechores.domain.RejoinRequest;
 import com.homechores.domain.RejoinRequestRepository;
 import com.homechores.domain.RejoinStatus;
+import com.homechores.domain.Routine;
+import com.homechores.domain.RoutineDoneRepository;
+import com.homechores.domain.RoutineRepository;
 import com.homechores.domain.Seasons;
 import com.homechores.domain.SharedDeviceRepository;
 import com.homechores.domain.TimeWindows;
@@ -86,6 +89,8 @@ public class ChoreService {
     private final ChoreReminderRepository choreReminders;
     private final ListItemRepository listItems;
     private final CustomListRepository customLists;
+    private final RoutineRepository routines;
+    private final RoutineDoneRepository routineTicks;
     private final ListReminderRepository listReminders;
     private final SharedDeviceRepository sharedDevices;
     private final HomeState homeState;
@@ -100,7 +105,8 @@ public class ChoreService {
                         ChoreReminderRepository choreReminders, ListItemRepository listItems,
                         CustomListRepository customLists,
                         ListReminderRepository listReminders,
-                        SharedDeviceRepository sharedDevices, HomeState homeState,
+                        SharedDeviceRepository sharedDevices, RoutineRepository routines,
+                        RoutineDoneRepository routineTicks, HomeState homeState,
                         CreditService creditService, Translations translations) {
         this.homes = homes;
         this.members = members;
@@ -114,6 +120,8 @@ public class ChoreService {
         this.customLists = customLists;
         this.listReminders = listReminders;
         this.sharedDevices = sharedDevices;
+        this.routines = routines;
+        this.routineTicks = routineTicks;
         this.homeState = homeState;
         this.creditService = creditService;
         this.translations = translations;
@@ -354,6 +362,8 @@ public class ChoreService {
         listReminders.deleteByHomeCode(norm);
         listItems.deleteByHomeCode(norm);
         customLists.deleteByHomeCode(norm);
+        routineTicks.deleteByHomeCode(norm);
+        routines.deleteByHomeCode(norm);
         sharedDevices.deleteByHomeCode(norm);
         members.deleteByHomeCode(norm);
         homes.deleteById(norm);
@@ -666,6 +676,11 @@ public class ChoreService {
         rejoins.deleteByMemberId(memberId);
         pushSubscriptions.deleteByMemberId(memberId);
         choreReminders.deleteByMemberId(memberId);
+        // Their own routines go with them; the home's stay, whoever made them.
+        for (Routine r : routines.findByForMemberId(memberId)) {
+            routineTicks.deleteByRoutineId(r.getId());
+            routines.delete(r);
+        }
         members.delete(member);
         homeState.bump(homeCode);
         return true;

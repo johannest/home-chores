@@ -385,6 +385,12 @@ hold whatever screen the call came from.
 - **US-65 Almost there.** As a member, when my next trophy is three chores or fewer away, the
   celebration after a chore says so — "Just 2 more to 🥈 Silver (+20 💎)!" — instead of the
   board growing another progress element.
+- **US-66 Routines on fixed weekdays.** As a member, I set "🏋️ Workout, Tuesdays and Thursdays
+  18:00" for myself — every week or every other week — get a push at 18:00 on those days, and
+  tick it off when done. As an admin, I set routines for the whole home ("Bins out, Sunday
+  19:00") or for a child ("Piano, every other Thursday 16:30"). Today's routines sit at the top
+  of the Chores tab, the Routines tab on Lists holds them all, and "Tuesday 18:00" means the
+  family's clock — one time zone for the home — whoever's phone is asking.
 
 ## 4. Functional specification
 
@@ -805,6 +811,64 @@ message and shows a matching badge on the card (`LockReason`):
   week's meals and no visible slot can be purged whatever the member's zone.
 - Backed up and restored with the home (`listItems` in the JSON, member ids remapped; a file
   from before the lists restores with empty lists) and wiped by `deleteHome`.
+- A fourth built-in tab, **Routines**, holds no lines; see §4.4f.
+
+### 4.4f Routines
+Things a home does on **fixed weekdays** (US-66), as opposed to a chore's floating "due again N
+days after it was last done". Not chores either: a tick creates no `Completion`, earns nothing,
+starts no streak and needs no approval — organisation, like a list line.
+
+- **Model.** `Routine`: `homeCode`, `name` (≤ `TASK_NAME`), `emoji` (default 🔁), `weekdays`
+  (bit mask, Monday = bit 0), `everyWeeks` (1, or 2 = every other week), `anchorMonday`,
+  optional `time` (wall clock, no reminder without one), `forMemberId` (null = the whole home),
+  `createdByMemberId`, `nextFireAt`. `RoutineDone`: one row per routine per day ticked
+  (`done_day` — `DAY` is reserved in H2), `doneByMemberId` null for the shared device.
+  Occurrences are **computed**: a routine falls on a date when its weekday is in the mask and,
+  every other week, when the date's week is an even number of weeks from `anchorMonday`
+  (`Routine.occursOn`). Nothing is pre-generated, so a routine nobody ticks leaves no rows.
+- **The family's clock.** `Home.timeZone` (nullable; `Home.zone()` falls back to the server's).
+  The first board opened while it is unset adopts that browser's zone
+  (`RoutineService.adoptZone`) and nothing else ever overrides it — a member abroad does not move
+  the family's Tuesday. An admin changes it under **Home settings → Time zone** (a searchable
+  list of region zone ids), which recomputes every routine's next reminder. "Today", the days a
+  routine falls on and its reminder times are all in this zone.
+- **Who may do what** (checked in `RoutineService`, never trusted from the UI): any member makes,
+  edits and deletes their **own** routines; a routine for the whole home or for another member is
+  an admin's to make or change; **anyone in the home ticks any routine**, the shared device too.
+  A routine id or a member of another home is refused or reads as absent. At most
+  `InputLimits.MAX_ROUTINES_PER_HOME` = 100 per home. A blank name or no weekday makes nothing.
+- **Every other week** asks "Starting: this week / next week", which sets `anchorMonday`; the
+  anchor only moves when the rhythm or the start is chosen again, so renaming an every-other-week
+  routine does not flip its weeks.
+- **Where it shows.** A **Routines** tab on the Lists panel — a built-in list slot
+  (`ListKind.ROUTINES`, a tab only: no `ListItem` is ever stored with it, guarded by
+  `ListKind.holdsLines()` in `ListItemService.add`, `setListEnabled` and backup restore, because
+  `list_item.kind` may be a native H2 enum created before the constant existed). It sits after
+  Dinner by default and can be moved or switched off like the other built-ins. It lists every
+  routine of the home ("Tue, Thu · 18:00 · every other week · Sam"), with a tick on those that
+  fall on today and a ✏️ on those the viewer may edit. **Today's routines** at the top of the
+  Chores tab, under the daily strip, shows those falling on today that are the home's or the
+  viewer's own — on the shared device, everyone's, with whose it is after the time — each
+  tickable, "done by Sam" once ticked. A home with none, or with the Routines tab switched off,
+  shows no strip. Three queries per render whatever the number of routines.
+- **Reminders.** `Routine.nextFireAt` is the next occurrence's time as an instant in the home's
+  zone, recomputed on every save, after every sweep and on a zone change. The sweep
+  (`homechores.routine.sweep-ms`, 60 s, the shared scheduler thread, `MAX_SENDS_PER_SWEEP` = 10)
+  reads the routines whose `nextFireAt` has passed — normally none — and pushes "🏋️ Workout /
+  It's time…" to the routine's member, or to every device in the home for a home routine, each in
+  its member's language. No push when it was already ticked that day, when the Routines tab is
+  switched off, or when the occurrence is more than `STALE_AFTER` (30 min) old (server downtime);
+  either way the routine moves on to its next occurrence from *now*, so no row is reconsidered.
+  A time inside a spring-forward gap lands just after the gap. The notification only opens the
+  board; ticking is done there.
+- **Lifetime.** Ticks older than a week are purged on the list purge cadence (only today's ever
+  matter). A removed member's own routines go with them; the home's stay. Deleting the home or
+  restoring a backup deletes all of them.
+- **Backup.** `routines` in the JSON (name, emoji, weekdays, rhythm, anchor, time, whose — member
+  ids remapped — created by and when) and `home.timeZone`; ticks are not exported. Restore
+  re-validates like everything else: a blank name or empty mask is skipped, a personal routine
+  whose member did not come back is dropped, the mask is cut to seven bits, an unknown zone keeps
+  the home's, and a line of kind `ROUTINES` is ignored.
 
 ### 4.4d Done today
 - A collapsible home-wide list ("Done today (n)") directly under the daily strip: who did
@@ -1022,7 +1086,7 @@ message and shows a matching badge on the card (`LockReason`):
 
 ### 4.11 Backup / restore (admin)
 - **Backup**: a JSON document `{ version, home, members[], groups[], tasks[], completions[],
-  spreeTiers[], trophyRewards[], credits[] }` for this home only (the "family DB"), offered as a
+  spreeTiers[], trophyRewards[], credits[], listItems[], customLists[], routines[] }` for this home only (the "family DB"), offered as a
   file download `home-chores-<code>-backup.json`. Tasks include interval, credit
   value and availability windows; completions include the other-help `note`; members their
   `trophiesSeen`; credit rows their `trophyRung`. On restore, trophy rewards and paid rungs
@@ -1050,7 +1114,8 @@ message and shows a matching badge on the card (`LockReason`):
   completion, credit and setting), suggests downloading a backup first, and requires the
   **home code to be typed** before the delete button does anything.
 - `ChoreService.deleteHome` removes, in order: rejoin requests, completions, credits and
-  spree tiers, chores, members, and finally the home row. Other homes are untouched.
+  spree tiers, chores, lists, routines and their ticks, shared devices, members, and finally
+  the home row. Other homes are untouched.
 - The acting admin's device signs itself out and returns to the landing page *before* the
   delete runs, so it gets its own confirmation; every other device is shown out by the
   revision bump with "This home was deleted by an admin", and drops its stored identity.
@@ -1741,6 +1806,33 @@ scales up, not the other way round.
   open to-do and grocery line and none on ticked lines or dinner slots, none without VAPID keys,
   the dialog offers every quick option plus the picker, an armed reminder badges its line only,
   and a fired reminder opens the dialog on arrival with **Dismiss** clearing it for the home.
+- **Routines** (`RoutineTest`, plain unit): the weekday mask round-trips; weekly falls on its
+  weekdays only; every other week falls on the anchor's weeks and skips the others, before the
+  anchor too; the next reminder is later today if still ahead and strictly after "now"; every
+  other week skips the off week; the time is wall clock in the home's zone across a DST change,
+  and a time the clock skips lands just after the gap; no time, no reminder.
+  `RoutineServiceTest` (sender mocked): a member makes their own and only an admin makes one for
+  the home or someone else; only the owner or an admin changes or deletes one; another home's
+  routine is neither changed, deleted nor ticked (nor by its own member through this home), and a
+  member of another home cannot be assigned; a blank name, no days and a full home make nothing;
+  today is the home's and the viewer's own and the device sees everyone's; anyone ticks and
+  unticks, once a day, only on a day it falls on; the device ticks with no name and another
+  home's device cannot; switching Routines off empties today and no line can be added to the tab;
+  the first board sets the zone, a later one does not, an unknown id is ignored, only an admin
+  moves it and the next reminder moves with it; the sweep reminds every device for a home routine
+  and only the member's for a personal one, never twice; a routine ticked before its time is not
+  nagged and a stale occurrence is skipped but moved on; an untimed one is never on the sweep; old
+  ticks are purged, today's stay; a removed member's routines and ticks go, the home's stay, and
+  deleting the home takes all; routines and the zone round-trip through a backup with members
+  remapped and the every-other-week anchor kept, ticks not; a hand-edited backup can plant
+  neither a `ROUTINES` line nor a routine for a member who is not there. `RoutineUiTest`: an
+  admin adds one in the editor (no day refused on the spot, every other week asks which week)
+  and it shows on the tab and on today's strip; ticking on the strip marks it done by them and
+  unticking takes it back; a member sees everyone's but edits only their own and gets no "For";
+  the device sees everyone's today with whose it is, ticks them and has no editor; switching the
+  tab off takes the strip with it. `ListOrderServiceTest`, `ListOrderUiTest` and `ListEditUiTest`
+  count Routines among the built-ins. Verified by hand at 360px in the browser pane: the tab, the
+  editor, the strip and the Home settings zone; push delivery itself is not reachable there.
 - **Message-bundle parity** (`MessageParityTest`): the three properties files carry identical key
   sets, and no parameterized value hides a lone apostrophe. A missing key fails nothing at
   runtime — it simply renders as the key — so it needs a test rather than a reviewer.
@@ -1768,3 +1860,6 @@ scales up, not the other way round.
 ## 7. Out of scope (possible future work)
 - Real authentication/accounts; weekly/monthly leaderboards;
   per-member chore preferences; native mobile apps.
+- Routines (§4.4f) beyond weekly and every other week: monthly dates ("the 5th"), other
+  intervals, a "missed yesterday" view, and answering a routine reminder from the notification
+  (Done / Snooze) the way a list reminder is answered in-app.

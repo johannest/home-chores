@@ -15,6 +15,7 @@ import com.homechores.service.ChoreReminderService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
 import com.homechores.service.PushReminderService;
+import com.homechores.service.RoutineService;
 import com.homechores.service.SharedDeviceService;
 import com.homechores.service.WebPushSender;
 import com.homechores.service.ChoreService.CompleteOutcome;
@@ -57,6 +58,7 @@ class ChoresPanel extends VerticalLayout {
     private final PushReminderService reminders;
     private final WebPushSender pushSender;
     private final SharedDeviceService sharedDevices;
+    private final RoutineService routines;
     private final Viewer viewer;
 
     /** taskId → when its nudge fires, refreshed once per board render. */
@@ -75,6 +77,7 @@ class ChoresPanel extends VerticalLayout {
 
     private final Div dailyStrip = new Div();
     private final Div doneTodayHolder = new Div();
+    private final Div routinesHolder = new Div();
     private final Div undoStrip = new Div();
     private final Div leaderboard = new Div();
     private final Div filterBar = new Div();
@@ -131,13 +134,14 @@ class ChoresPanel extends VerticalLayout {
 
     ChoresPanel(ChoreService service, CreditService creditService, ChoreReminderService snoozes,
                 PushReminderService reminders, WebPushSender pushSender,
-                SharedDeviceService sharedDevices, Viewer viewer) {
+                SharedDeviceService sharedDevices, RoutineService routines, Viewer viewer) {
         this.service = service;
         this.creditService = creditService;
         this.snoozes = snoozes;
         this.reminders = reminders;
         this.pushSender = pushSender;
         this.sharedDevices = sharedDevices;
+        this.routines = routines;
         this.viewer = viewer;
         this.homeCode = viewer.homeCode();
         this.memberId = viewer.memberId();
@@ -156,7 +160,10 @@ class ChoresPanel extends VerticalLayout {
         // Hidden until there is something worth choosing between, so a simple home looks
         // exactly as it did before.
         filterBar.setVisible(false);
-        add(dailyStrip, doneTodayHolder, undoStrip, sectionLabel(T.tr("board.leaderboard")),
+        routinesHolder.setWidthFull();
+        // Today's routines right under the daily strip: the 7 am glance is "what is on today",
+        // and they are few by nature, unlike the chores below.
+        add(dailyStrip, routinesHolder, doneTodayHolder, undoStrip, sectionLabel(T.tr("board.leaderboard")),
                 leaderboard, sectionLabel(T.tr("board.tapPrompt")), filterBar, board);
 
         // Where a held-and-dragged card was let go (board-drag.js). The ids arrive as strings —
@@ -208,6 +215,11 @@ class ChoresPanel extends VerticalLayout {
         if (!viewer.isDevice()) {
             renderDaily();
         }
+        routinesHolder.removeAll();
+        RoutinesPanel today = new RoutinesPanel(RoutinesPanel.Mode.TODAY, routines, service,
+                pushSender, viewer, this::refresh);
+        routinesHolder.add(today);
+        routinesHolder.setVisible(today.isVisible());
         renderDoneToday();
         renderUndo();
         renderLeaderboard();

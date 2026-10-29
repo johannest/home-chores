@@ -41,6 +41,7 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **Members without a phone** | A child with no phone of their own is added from the Members card (the admin accepts the agreement on their behalf) and gets a leaderboard chip, rotation turns, credits and stats like everyone else. Admins log their chores under **Log a chore for someone**; the card says *no phone yet* until they sign in from a phone with **"I'm already a member"** and their nickname. |
 | **Optional approval** | Admins can require approval. Completions then wait as **pending** until an admin **approves** (counts) or **rejects** (discarded). A badge shows the pending count. |
 | **Shared lists** | A **Lists** tab with **Groceries**, **To-do** and **Dinner** for the whole family. Anyone adds a line, whoever is at the store ticks it off — nothing here is a chore, so ticking earns no credits and starts no streak. Ticked lines show struck through with who ticked them, can be unticked, and vanish after 24 h (or on **Clear done**). **Hold a line and drag it** to arrange the list, the way the board is arranged (↑/↓ on each line do the same for keyboards and screen readers); a line with a reminder sorts itself instead — due today it leads the list, due next month it waits at the bottom. **Dinner** is a sliding window of today plus a full week: one free-text slot per day, labelled with the weekday, today highlighted; as days pass a new empty slot appears at the far end, and a Sunday plan still reaches next Sunday. Included in backups. |
+| **Routines** | Things the family does on **fixed weekdays**, every week or every other week — "🏋️ Workout, Tue & Thu 18:00", "Bins out, Sunday 19:00", "Piano, every other Thursday" — on a **Routines** tab under Lists. A member makes their own; an admin makes them for the whole home or for a child. **Today's routines** sit at the top of the Chores tab, anyone can tick them (the kitchen tablet too), and a routine with a time sends a push at that time to its member, or to everyone for a home routine. Times and days follow **one time zone for the family**, taken from the first phone and changeable under Home settings. Not chores: no credits, no streaks. |
 | **List reminders** | Tap 🔔 on a to-do or grocery line and pick *in 1 hour / tomorrow 9:00 / next week / next month*, or a date and time — one push notification naming the line goes to **everyone in the home**, and the line shows when it will fire. When it does, opening the app (or tapping the notification) shows the reminder with the same choices to **snooze** it, plus **Done** and **Dismiss** — so it works on iPhone too, where notifications have no buttons. Any member can move or cancel it (the shared device shows it but cannot, having no member of its own); ticking the line off clears it. Needs the same VAPID keys as the other reminders. |
 | **Statistics & charts** | The **Stats** tab opens on four counts side by side — **today, this week, this month, all time** — and tapping a count picks that period for the charts below. Personal charts (chores by type, **💎 diamonds earned** today / this week / this month / all time with a 7-day trend, **💎 diamonds redeemed** — earned · redeemed · balance, then each reward the admin noted — feedback split, 7-day trend) plus **12-week and 12-month trends** for the longer view. Admins also get **Home stats**: per-member totals, **what each member did** (every member's own chores-by-type chart, folded), **redeemed rewards** (who redeemed what, by name), chore popularity, feedback per chore, 14-day activity, daily-goal adherence. Charts are dependency-free (no licensed add-on). |
 | **Delete the home** | A **Danger zone** at the bottom of the Admin tab wipes the whole family — members, chores, completions, credits, settings. Confirmed by typing the home code, and it prompts for a backup first. Everyone still on the board is signed out live. |
@@ -395,6 +396,7 @@ src/main/java/com/homechores/
 │   ├── ChoreReminder.java        # one-shot "remind me about this chore later"
 │   ├── ListItem.java             # a grocery / to-do line or a dinner slot
 │   ├── ListReminder.java         # the home's reminder about one list line (fired = unanswered)
+│   ├── Routine / RoutineDone     # fixed-weekday routines and their daily ticks
 │   ├── FeedbackCount.java        # one row of the home's all-time reaction tally, grouped in the DB
 │   ├── MemberCount.java          # one member's all-time approved count, grouped in the DB
 │   ├── CreditEntry / SpreeTier   # credit rewards
@@ -414,6 +416,7 @@ src/main/java/com/homechores/
 │   ├── Author.java               # who writes a list line: a member, or the shared device
 │   ├── SharedDeviceService.java  # pair / verify / unpair a shared device; what it does for members
 │   ├── ListReminderService.java  # the list-line reminder sweep; fired rows wait for an answer
+│   ├── RoutineService.java       # routines: who may do what, today's, ticks, home clock, push sweep
 │   ├── BackupService.java        # per-home JSON export / restore
 │   └── HomeState.java            # per-home revision Signal (live sync)
 ├── i18n/
@@ -434,7 +437,10 @@ src/main/java/com/homechores/
     ├── Charts.java               # dependency-free bar / segment / trend charts
     ├── AppearanceMenu.java       # colour scheme + brand palette, per device
     ├── SnoozeDialog.java         # "remind me about this chore in 2h"
-    ├── ListPanel.java            # Groceries / To-do / Dinner
+    ├── ListPanel.java            # Groceries / To-do / Dinner / Routines
+    ├── RoutinesPanel.java        # the Routines tab, and today's strip on the Chores tab
+    ├── RoutineDialog.java        # make or change a routine
+    ├── RoutineFormat.java        # "Tue, Thu · 18:00 · every other week · Sam"
     ├── ListReminderDialog.java   # "remind us about this line tomorrow 9:00" + snooze on fire
     ├── Celebrations.java         # confetti + congratulation + feedback + trophy dialogs
     ├── PrivacyView.java          # /privacy notice

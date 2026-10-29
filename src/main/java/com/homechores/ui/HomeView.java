@@ -13,6 +13,7 @@ import com.homechores.service.ChoreReminderService;
 import com.homechores.service.ListItemService;
 import com.homechores.service.ListReminderService;
 import com.homechores.service.PushReminderService;
+import com.homechores.service.RoutineService;
 import com.homechores.service.SharedDeviceService;
 import com.homechores.service.StatsService;
 import com.homechores.service.WebPushSender;
@@ -70,6 +71,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
     private final ChoreReminderService snoozeService;
     private final WebPushSender pushSender;
     private final SharedDeviceService sharedDevices;
+    private final RoutineService routineService;
 
     private String homeCode;
     private Long memberId;
@@ -89,8 +91,9 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
                     CreditService creditService, HomeState homeState, ListItemService listService,
                     ListReminderService listReminderService, PushReminderService reminderService,
                     ChoreReminderService snoozeService, WebPushSender pushSender,
-                    SharedDeviceService sharedDevices) {
+                    SharedDeviceService sharedDevices, RoutineService routineService) {
         this.service = service;
+        this.routineService = routineService;
         this.sharedDevices = sharedDevices;
         this.statsService = statsService;
         this.backupService = backupService;
@@ -136,13 +139,13 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         }
 
         choresPanel = new ChoresPanel(service, creditService, snoozeService, reminderService,
-                pushSender, sharedDevices, viewer);
+                pushSender, sharedDevices, routineService, viewer);
         listPanel = new ListPanel(listService, service, listReminderService, reminderService,
-                pushSender, viewer);
+                pushSender, routineService, viewer);
         statsPanel = new StatsPanel(statsService, service, viewer);
         choresPanel.onShowTrophies(this::showTrophies);
         adminPanel = new AdminPanel(service, creditService, backupService, listService,
-                sharedDevices, homeCode, memberId);
+                sharedDevices, routineService, homeCode, memberId);
         // Initial render happens from the Signal.effect registered in onAttach.
     }
 
@@ -575,6 +578,9 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
             if (tz != null && !tz.isBlank()) {
                 try {
                     SessionContext.setTimeZone(java.time.ZoneId.of(tz));
+                    // The family's clock, if it has none yet: the first board opened sets it
+                    // (§4.4f); after that only an admin moves it.
+                    routineService.adoptZone(homeCode, tz);
                     // Persist it too: the reminder sweep runs with no session to ask,
                     // and "remind me at 19:00" means 19:00 on this member's own clock.
                     if (!viewer.isDevice()) {
