@@ -1,5 +1,7 @@
 package com.homechores.service;
 
+import com.homechores.domain.CustomList;
+import com.homechores.domain.CustomListRepository;
 import com.homechores.domain.ListItem;
 import com.homechores.domain.ListItemRepository;
 import com.homechores.domain.ListReminder;
@@ -108,6 +110,7 @@ public class ListReminderService {
 
     private final ListReminderRepository reminders;
     private final ListItemRepository items;
+    private final CustomListRepository customLists;
     private final MemberRepository members;
     private final PushSubscriptionRepository subscriptions;
     private final WebPushSender sender;
@@ -116,11 +119,13 @@ public class ListReminderService {
     private final TransactionTemplate transactions;
 
     public ListReminderService(ListReminderRepository reminders, ListItemRepository items,
+                               CustomListRepository customLists,
                                MemberRepository members, PushSubscriptionRepository subscriptions,
                                WebPushSender sender, Translations translations, HomeState homeState,
                                org.springframework.transaction.PlatformTransactionManager txManager) {
         this.reminders = reminders;
         this.items = items;
+        this.customLists = customLists;
         this.members = members;
         this.subscriptions = subscriptions;
         this.sender = sender;
@@ -210,8 +215,13 @@ public class ListReminderService {
             for (Member m : members.findByHomeCodeOrderByJoinedAtAsc(r.getHomeCode())) {
                 locales.put(m.getId(), localeOf(m));
             }
+            // A private list's line is its owner's business alone (§4.4e): only their devices.
+            Long owner = ownerOf(item);
+            List<PushSubscription> audience = owner == null
+                    ? subscriptions.findByHomeCode(r.getHomeCode())
+                    : subscriptions.findByMemberId(owner);
             Map<PushSubscription, String[]> messages = new LinkedHashMap<>();
-            for (PushSubscription sub : subscriptions.findByHomeCode(r.getHomeCode())) {
+            for (PushSubscription sub : audience) {
                 Locale locale = locales.getOrDefault(sub.getMemberId(), Locale.ENGLISH);
                 messages.put(sub, new String[] {
                         translations.getTranslation("listReminder.notification.title", locale),
@@ -269,6 +279,7 @@ public class ListReminderService {
     public Instant schedule(Long itemId, Long memberId, Instant dueAt, Locale locale) {
         ListItem item = items.findById(itemId).orElseThrow();
         Member member = memberOf(item.getHomeCode(), memberId);
+        mayTouch(item, memberId);
         Instant now = Instant.now();
         Instant floor = now.plus(MIN_OFFSET);
         Instant ceiling = now.plus(MAX_OFFSET);
@@ -304,6 +315,7 @@ public class ListReminderService {
             return false;
         }
         memberOf(found.get().getHomeCode(), memberId);
+        items.findById(itemId).ifPresent(item -> mayTouch(item, memberId));
         reminders.delete(found.get());
         homeState.bump(found.get().getHomeCode());
         return true;
@@ -322,9 +334,29 @@ public class ListReminderService {
         return reminders.findByItemId(itemId);
     }
 
-    /** The unanswered notifications in one home, oldest first. */
-    public List<ListReminder> firedForHome(String homeCode) {
-        return reminders.findByHomeCodeAndFiredAtIsNotNullOrderByFiredAtAsc(homeCode);
+    /** The unanswered notifications in one home that this member may see, oldest first: one
+     *  about a line on somebody else's private list is not shown to them. */
+    public List<ListReminder> firedFor(String homeCode, Long memberId) {
+        return reminders.findByHomeCodeAndFiredAtIsNotNullOrderByFiredAtAsc(homeCode).stream()
+                .filter(r -> items.findById(r.getItemId()).map(item -> {
+                    Long owner = ownerOf(item);
+                    return owner == null || owner.equals(memberId);
+                }).orElse(false))
+                .toList();
+    }
+
+    /** The member a line's private list belongs to, or null for a line anyone may see. */
+    private Long ownerOf(ListItem item) {
+        return item.getListId() == null ? null
+                : customLists.findById(item.getListId()).map(CustomList::getOwnerMemberId).orElse(null);
+    }
+
+    /** Somebody else's private line is not there to remind about, for an admin either. */
+    private void mayTouch(ListItem item, Long memberId) {
+        Long owner = ownerOf(item);
+        if (owner != null && !owner.equals(memberId)) {
+            throw new IllegalArgumentException("Not this member's list");
+        }
     }
 
     /** The member, if they belong to the home — the same line ListItemService holds. */

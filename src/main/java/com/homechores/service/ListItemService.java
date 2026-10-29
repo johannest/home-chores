@@ -94,9 +94,9 @@ public class ListItemService {
         return items.findById(itemId);
     }
 
-    /** Open lines of one list, in the family's order (see {@link #placeItem}). */
+    /** Open lines of one built-in list, in the family's order (see {@link #placeItem}). */
     public List<ListItem> openItems(String homeCode, ListKind kind) {
-        return openItems(homeCode, kind, null);
+        return open(homeCode, kind, null);
     }
 
     /**
@@ -105,7 +105,14 @@ public class ListItemService {
      * ever dragged, the order they were written in. The panel lays lines with a reminder around
      * this order by their due time ({@link #displayOrder}).
      */
-    public List<ListItem> openItems(String homeCode, ListKind kind, Long listId) {
+    public List<ListItem> openItems(String homeCode, ListKind kind, Long listId, Author viewer) {
+        if (listId != null && findList(homeCode, listId, viewer).isEmpty()) {
+            return List.of(); // gone, another home's, or somebody else's private list
+        }
+        return open(homeCode, kind, listId);
+    }
+
+    private List<ListItem> open(String homeCode, ListKind kind, Long listId) {
         return listId == null
                 ? items.findByHomeCodeAndKindAndListIdIsNullAndDoneAtIsNullOrderBySortOrderAscCreatedAtAscIdAsc(
                         homeCode, kind)
@@ -152,11 +159,19 @@ public class ListItemService {
 
     /** Lines ticked within the retention window, most recently ticked first. */
     public List<ListItem> doneItems(String homeCode, ListKind kind) {
-        return doneItems(homeCode, kind, null);
+        return done(homeCode, kind, null);
     }
 
-    /** {@link #doneItems(String, ListKind)} for a custom list when {@code listId} is set. */
-    public List<ListItem> doneItems(String homeCode, ListKind kind, Long listId) {
+    /** {@link #doneItems(String, ListKind)} for a custom list the viewer may see when
+     *  {@code listId} is set. */
+    public List<ListItem> doneItems(String homeCode, ListKind kind, Long listId, Author viewer) {
+        if (listId != null && findList(homeCode, listId, viewer).isEmpty()) {
+            return List.of();
+        }
+        return done(homeCode, kind, listId);
+    }
+
+    private List<ListItem> done(String homeCode, ListKind kind, Long listId) {
         Instant cutoff = Instant.now().minus(DONE_RETENTION);
         return listId == null
                 ? items.findByHomeCodeAndKindAndListIdIsNullAndDoneAtAfterOrderByDoneAtDescIdDesc(
@@ -259,7 +274,7 @@ public class ListItemService {
         if (clean == null || clean.isBlank()) {
             return Optional.empty();
         }
-        if (listId != null && findList(homeCode, listId).isEmpty()) {
+        if (listId != null && findList(homeCode, listId, author).isEmpty()) {
             return Optional.empty();
         }
         ListItem line = new ListItem(homeCode, listId == null ? kind : ListKind.TODO, clean, author.memberId());
@@ -267,7 +282,7 @@ public class ListItemService {
         // After the last open line, in a list that may have been arranged: on one nobody ever
         // dragged every line sits at 0 and a new 0 would still sort last by createdAt, but after a
         // drag the numbers are real, and a 0 would surface the new line at the top.
-        line.setSortOrder(openItems(homeCode, line.getKind(), listId).stream()
+        line.setSortOrder(open(homeCode, line.getKind(), listId).stream()
                 .mapToInt(ListItem::getSortOrder).max().orElse(-1) + 1);
         ListItem saved = items.save(line);
         touchAndBump(homeCode);
@@ -290,6 +305,9 @@ public class ListItemService {
         }
         ListItem item = found.get();
         memberOf(item.getHomeCode(), author);
+        if (!lineVisible(item, author)) {
+            return false;
+        }
         String clean = InputLimits.clip(text == null ? null : text.trim(), InputLimits.LIST_ITEM);
         if (item.getKind() == ListKind.DINNER || clean == null || clean.isBlank()) {
             return false;
@@ -317,6 +335,9 @@ public class ListItemService {
         }
         ListItem item = found.get();
         memberOf(item.getHomeCode(), author);
+        if (!lineVisible(item, author)) {
+            return false;
+        }
         if (done == item.isDone()) {
             return true;
         }
@@ -346,6 +367,9 @@ public class ListItemService {
         }
         ListItem item = found.get();
         memberOf(item.getHomeCode(), author);
+        if (!lineVisible(item, author)) {
+            return false;
+        }
         reminders.deleteByItemId(item.getId());
         items.delete(item);
         touchAndBump(item.getHomeCode());
@@ -373,7 +397,8 @@ public class ListItemService {
         if (itemId == null || itemId.equals(beforeItemId)) {
             return false; // "before itself" is where it already is, not "to the end"
         }
-        ListItem line = items.findById(itemId).filter(l -> arrangeable(homeCode, l)).orElse(null);
+        ListItem line = items.findById(itemId)
+                .filter(l -> arrangeable(homeCode, l) && lineVisible(l, author)).orElse(null);
         if (line == null) {
             return false;
         }
@@ -387,7 +412,7 @@ public class ListItemService {
                 return false; // another list's line, or one that is gone: nowhere to put it
             }
         }
-        List<ListItem> open = new ArrayList<>(openItems(homeCode, line.getKind(), line.getListId()));
+        List<ListItem> open = new ArrayList<>(open(homeCode, line.getKind(), line.getListId()));
         List<Long> was = open.stream().map(ListItem::getId).toList();
         open.removeIf(l -> l.getId().equals(itemId));
         int at = open.size();
@@ -412,21 +437,32 @@ public class ListItemService {
         return true;
     }
 
+    /**
+     * Whether the author may see this line: any line of a built-in or shared list, and a private
+     * list's lines for its owner only. Callers treat an invisible line as absent, so a private
+     * line's existence is not confirmed to anyone else either.
+     */
+    private boolean lineVisible(ListItem line, Author author) {
+        return line.getListId() == null || customLists.findById(line.getListId())
+                .map(l -> l.isVisibleTo(author.memberId())).orElse(true);
+    }
+
     /** An open grocery or to-do line of this home — what a drag may lift or land beside. */
     private static boolean arrangeable(String homeCode, ListItem line) {
         return homeCode.equals(line.getHomeCode()) && !line.isDone() && line.getKind() != ListKind.DINNER;
     }
 
-    /** Removes every ticked line from one list. Returns how many went. */
+    /** Removes every ticked line from one built-in list. Returns how many went. */
     @Transactional
     public long clearDone(String homeCode, ListKind kind) {
-        return clearDone(homeCode, kind, null);
+        return clearDone(homeCode, kind, null, null);
     }
 
-    /** {@link #clearDone(String, ListKind)} on a custom list when {@code listId} is set. */
+    /** {@link #clearDone(String, ListKind)} on a custom list the viewer may see when
+     *  {@code listId} is set. */
     @Transactional
-    public long clearDone(String homeCode, ListKind kind, Long listId) {
-        if (listId != null && findList(homeCode, listId).isEmpty()) {
+    public long clearDone(String homeCode, ListKind kind, Long listId, Author viewer) {
+        if (listId != null && findList(homeCode, listId, viewer).isEmpty()) {
             return 0;
         }
         long removed = listId == null
@@ -458,15 +494,43 @@ public class ListItemService {
 
     // ---- The home's own lists ------------------------------------------------
 
-    /** The home's own lists, in the order they were made. */
+    /** Every one of the home's own lists, private ones too, in the order they were made — what
+     *  counts against {@link InputLimits#CUSTOM_LISTS}. Not for showing: see {@link #listSlots}. */
     public List<CustomList> customLists(String homeCode) {
         return customLists.findByHomeCodeOrderByCreatedAtAscIdAsc(homeCode);
     }
 
-    /** One of the home's own lists; empty if it is gone or belongs to another home. */
-    public Optional<CustomList> findList(String homeCode, Long listId) {
+    /** One of the home's own lists the viewer may see; empty if it is gone, another home's, or
+     *  somebody else's private list. */
+    public Optional<CustomList> findList(String homeCode, Long listId, Author viewer) {
         return listId == null ? Optional.empty()
-                : customLists.findById(listId).filter(l -> l.getHomeCode().equals(homeCode));
+                : customLists.findById(listId).filter(l -> l.getHomeCode().equals(homeCode)
+                        && l.isVisibleTo(viewer == null ? null : viewer.memberId()));
+    }
+
+    /**
+     * Makes one of the home's own lists private to the author, or shares it with the family
+     * again (§4.4e). Only the list's maker may make it private, and only its owner may share it;
+     * the shared device has no member to own anything.
+     *
+     * @return false if the list is gone, not the author's to change, or already so
+     * @throws IllegalArgumentException if the author is not in that home
+     */
+    @Transactional
+    public boolean setListPrivate(String homeCode, Long listId, Author author, boolean makePrivate) {
+        memberOf(homeCode, author);
+        CustomList list = findList(homeCode, listId, author).orElse(null);
+        Long me = author.memberId();
+        if (list == null || me == null || list.isPrivate() == makePrivate) {
+            return false;
+        }
+        if (makePrivate ? !me.equals(list.getCreatedByMemberId()) : !me.equals(list.getOwnerMemberId())) {
+            return false;
+        }
+        list.setOwnerMemberId(makePrivate ? me : null);
+        customLists.save(list);
+        touchAndBump(homeCode);
+        return true;
     }
 
     /**
@@ -497,7 +561,7 @@ public class ListItemService {
     @Transactional
     public boolean renameList(String homeCode, Long listId, Author author, String name) {
         memberOf(homeCode, author);
-        Optional<CustomList> found = findList(homeCode, listId);
+        Optional<CustomList> found = findList(homeCode, listId, author);
         String clean = InputLimits.clip(name == null ? null : name.trim(), InputLimits.LIST_NAME);
         if (found.isEmpty() || clean == null || clean.isBlank()) {
             return false;
@@ -520,7 +584,7 @@ public class ListItemService {
     @Transactional
     public boolean deleteList(String homeCode, Long listId, Author author) {
         memberOf(homeCode, author);
-        Optional<CustomList> found = findList(homeCode, listId);
+        Optional<CustomList> found = findList(homeCode, listId, author);
         if (found.isEmpty()) {
             return false;
         }
@@ -568,11 +632,22 @@ public class ListItemService {
     }
 
     /**
-     * Every list of the home, switched off or not, in the order its admin set. Self-healing:
-     * tokens of deleted lists are dropped, a built-in missing from the stored order goes back to
-     * its default place, and a custom list missing from it (every new one) goes last.
+     * Every list of the home this viewer may see, switched off or not, in the order its admin
+     * set: other members' private lists are left out — for an admin too. The order itself is the
+     * home's, private lists' places included, so they keep their place for their owners.
      */
-    public List<ListSlot> listSlots(String homeCode) {
+    public List<ListSlot> listSlots(String homeCode, Author viewer) {
+        Long me = viewer == null ? null : viewer.memberId();
+        return allSlots(homeCode).stream()
+                .filter(slot -> slot.isBuiltIn() || slot.custom().isVisibleTo(me)).toList();
+    }
+
+    /**
+     * Every list of the home, private ones included. Self-healing: tokens of deleted lists are
+     * dropped, a built-in missing from the stored order goes back to its default place, and a
+     * custom list missing from it (every new one) goes last.
+     */
+    private List<ListSlot> allSlots(String homeCode) {
         Map<String, ListSlot> all = new LinkedHashMap<>();
         for (ListKind k : BUILT_INS) {
             all.put(k.name(), ListSlot.builtIn(k));
@@ -609,9 +684,9 @@ public class ListItemService {
     }
 
     /** The lists the Lists tab shows: {@link #listSlots} without the built-ins switched off. */
-    public List<ListSlot> visibleSlots(String homeCode) {
+    public List<ListSlot> visibleSlots(String homeCode, Author viewer) {
         Set<ListKind> hidden = hiddenLists(homeCode);
-        return listSlots(homeCode).stream()
+        return listSlots(homeCode, viewer).stream()
                 .filter(slot -> !slot.isBuiltIn() || !hidden.contains(slot.kind())).toList();
     }
 
@@ -635,18 +710,24 @@ public class ListItemService {
     @Transactional
     public boolean moveList(String homeCode, Long memberId, String token, int direction) {
         adminOf(homeCode, memberId);
-        List<ListSlot> slots = new ArrayList<>(listSlots(homeCode));
+        // Steps are among the lists this admin can see: a step past somebody's private list would
+        // otherwise look like nothing happened. The two swap places in the home's full order.
+        List<ListSlot> seen = listSlots(homeCode, Author.member(memberId));
         int i = -1;
-        for (int k = 0; k < slots.size(); k++) {
-            if (slots.get(k).token().equals(token)) {
+        for (int k = 0; k < seen.size(); k++) {
+            if (seen.get(k).token().equals(token)) {
                 i = k;
             }
         }
         int j = i + Integer.signum(direction);
-        if (i < 0 || direction == 0 || j < 0 || j >= slots.size()) {
+        if (i < 0 || direction == 0 || j < 0 || j >= seen.size()) {
             return false;
         }
-        slots.set(i, slots.set(j, slots.get(i)));
+        List<ListSlot> slots = new ArrayList<>(allSlots(homeCode));
+        List<String> tokens = slots.stream().map(ListSlot::token).toList();
+        int a = tokens.indexOf(seen.get(i).token());
+        int b = tokens.indexOf(seen.get(j).token());
+        slots.set(a, slots.set(b, slots.get(a)));
         Home home = homes.findById(homeCode).orElseThrow();
         home.setListOrder(slots.stream().map(ListSlot::token).collect(Collectors.joining(",")));
         homes.save(home);

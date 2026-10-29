@@ -61,11 +61,11 @@ class RoutineServiceTest {
     private static final Set<DayOfWeek> EVERY_DAY = EnumSet.allOf(DayOfWeek.class);
 
     private static Spec spec(String name, Long forMemberId) {
-        return new Spec(name, "🏋️", EVERY_DAY, 1, false, null, forMemberId);
+        return new Spec(name, "🏋️", EVERY_DAY, 1, false, null, forMemberId, false);
     }
 
     private static Spec timed(String name, Long forMemberId, LocalTime time) {
-        return new Spec(name, "🏋️", EVERY_DAY, 1, false, time, forMemberId);
+        return new Spec(name, "🏋️", EVERY_DAY, 1, false, time, forMemberId, false);
     }
 
     private void subscribe(Member m) {
@@ -96,7 +96,7 @@ class RoutineServiceTest {
 
         assertTrue(routines.create(code, alex.getId(), spec("Bins out", null)).isPresent());
         assertTrue(routines.create(code, alex.getId(), spec("Piano", sam.getId())).isPresent());
-        assertEquals(3, routines.routinesOf(code).size());
+        assertEquals(3, routines.routinesOf(code, alex.getId()).size());
     }
 
     @Test
@@ -146,11 +146,76 @@ class RoutineServiceTest {
         String code = alex.getHomeCode();
         assertTrue(routines.create(code, alex.getId(), spec("  ", null)).isEmpty());
         assertTrue(routines.create(code, alex.getId(),
-                new Spec("No days", null, Set.of(), 1, false, null, null)).isEmpty());
+                new Spec("No days", null, Set.of(), 1, false, null, null, false)).isEmpty());
         for (int i = 0; i < InputLimits.MAX_ROUTINES_PER_HOME; i++) {
             routines.create(code, alex.getId(), spec("R" + i, null)).orElseThrow();
         }
         assertTrue(routines.create(code, alex.getId(), spec("One too many", null)).isEmpty());
+    }
+
+    // ---- Private routines --------------------------------------------------------
+
+    @Test
+    void aPrivateRoutine_isItsOwnersAlone_toSeeEditDeleteOrTick_adminsAndTheDeviceIncluded() {
+        Member alex = chores.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = chores.joinHome(code, "Sam").orElseThrow();
+        Long device = devices.pair(code, chores.findHome(code).orElseThrow().getAdminPin(), "Tab", "Tab")
+                .paired().device().getId();
+        Routine therapy = routines.create(code, sam.getId(), new Spec("Therapy", null, EVERY_DAY, 1,
+                false, LocalTime.of(15, 0), sam.getId(), true)).orElseThrow();
+
+        assertEquals(List.of("Therapy"), names(routines.today(code, sam.getId())));
+        assertEquals(1, routines.routinesOf(code, sam.getId()).size());
+        assertTrue(routines.routinesOf(code, alex.getId()).isEmpty(), "not even the admin sees it");
+        assertTrue(routines.routinesOf(code, null).isEmpty(), "nor the kitchen tablet");
+        assertTrue(routines.today(code, alex.getId()).isEmpty());
+        assertTrue(routines.today(code, null).isEmpty());
+
+        assertTrue(routines.update(code, alex.getId(), therapy.getId(), spec("Renamed", null)).isEmpty(),
+                "an admin's edit finds nothing");
+        assertFalse(routines.delete(code, alex.getId(), therapy.getId()));
+        assertFalse(routines.setDone(code, therapy.getId(), Author.member(alex.getId()), true));
+        assertFalse(routines.setDone(code, therapy.getId(), Author.device(device), true));
+        assertEquals("Therapy", repo.findById(therapy.getId()).orElseThrow().getName());
+
+        assertTrue(routines.setDone(code, therapy.getId(), Author.member(sam.getId()), true));
+        assertTrue(routines.update(code, sam.getId(), therapy.getId(), new Spec("Therapy", null,
+                EVERY_DAY, 1, false, null, sam.getId(), false)).isPresent(), "its owner may share it");
+        assertEquals(1, routines.routinesOf(code, alex.getId()).size(), "and now the family sees it");
+    }
+
+    @Test
+    void onlyARoutineOfOnesOwn_canBePrivate() {
+        Member alex = chores.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+        Member milla = chores.addMemberWithoutDevice(code, "Milla", alex.getId()).orElseThrow();
+        assertThrows(IllegalArgumentException.class, () -> routines.create(code, alex.getId(),
+                new Spec("Piano", null, EVERY_DAY, 1, false, null, milla.getId(), true)),
+                "a parent's routine for a child stays the parents' to see");
+        assertThrows(IllegalArgumentException.class, () -> routines.create(code, alex.getId(),
+                new Spec("Bins", null, EVERY_DAY, 1, false, null, null, true)));
+        assertTrue(routines.create(code, alex.getId(),
+                new Spec("Run", null, EVERY_DAY, 1, false, null, alex.getId(), true)).isPresent());
+    }
+
+    @Test
+    void aPrivateRoutine_staysPrivateThroughABackup_whichAnAdminCanRead() {
+        Member alex = chores.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = chores.joinHome(code, "Sam").orElseThrow();
+        routines.create(code, sam.getId(), new Spec("Therapy", null, EVERY_DAY, 1, false, null,
+                sam.getId(), true)).orElseThrow();
+        String json = backup.export(code);
+        assertTrue(json.contains("Therapy"), "the family's backup is the whole record (§4.15)");
+
+        backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
+        Member newSam = chores.membersOf(code).stream().filter(m -> m.getName().equals("Sam"))
+                .findFirst().orElseThrow();
+        Member newAlex = chores.membersOf(code).stream().filter(m -> m.getName().equals("Alex"))
+                .findFirst().orElseThrow();
+        assertEquals(1, routines.routinesOf(code, newSam.getId()).size());
+        assertTrue(routines.routinesOf(code, newAlex.getId()).isEmpty(), "still private after restore");
     }
 
     // ---- Today and ticking ----------------------------------------------------
@@ -165,7 +230,7 @@ class RoutineServiceTest {
         routines.create(code, alex.getId(), spec("Sam piano", sam.getId())).orElseThrow();
         DayOfWeek notToday = routines.today(code).getDayOfWeek().plus(1);
         routines.create(code, alex.getId(),
-                new Spec("Tomorrow only", null, Set.of(notToday), 1, false, null, null)).orElseThrow();
+                new Spec("Tomorrow only", null, Set.of(notToday), 1, false, null, null, false)).orElseThrow();
 
         assertEquals(List.of("Alex run", "Bins"), names(routines.today(code, alex.getId())));
         assertEquals(List.of("Bins", "Sam piano"), names(routines.today(code, sam.getId())));
@@ -187,7 +252,7 @@ class RoutineServiceTest {
 
         DayOfWeek notToday = routines.today(code).getDayOfWeek().plus(1);
         Routine tomorrow = routines.create(code, alex.getId(),
-                new Spec("Tomorrow", null, Set.of(notToday), 1, false, null, null)).orElseThrow();
+                new Spec("Tomorrow", null, Set.of(notToday), 1, false, null, null, false)).orElseThrow();
         assertFalse(routines.setDone(code, tomorrow.getId(), Author.member(alex.getId()), true),
                 "a day it does not fall on cannot be ticked");
     }
@@ -321,7 +386,7 @@ class RoutineServiceTest {
         routines.setDone(code, piano.getId(), Author.member(sam.getId()), true);
 
         assertTrue(chores.removeMember(sam.getId()));
-        assertEquals(List.of("Bins"), routines.routinesOf(code).stream().map(Routine::getName).toList());
+        assertEquals(List.of("Bins"), routines.routinesOf(code, alex.getId()).stream().map(Routine::getName).toList());
         assertTrue(ticks.findAll().isEmpty());
 
         assertTrue(chores.deleteHome(code));
@@ -335,10 +400,10 @@ class RoutineServiceTest {
         Member sam = chores.joinHome(code, "Sam").orElseThrow();
         routines.adoptZone(code, "Europe/Stockholm");
         routines.create(code, alex.getId(), new Spec("Piano", "🎹", EnumSet.of(DayOfWeek.THURSDAY),
-                Routine.EVERY_OTHER_WEEK, true, LocalTime.of(16, 30), sam.getId())).orElseThrow();
+                Routine.EVERY_OTHER_WEEK, true, LocalTime.of(16, 30), sam.getId(), false)).orElseThrow();
         Routine bins = routines.create(code, alex.getId(), spec("Bins", null)).orElseThrow();
         routines.setDone(code, bins.getId(), Author.member(alex.getId()), true);
-        LocalDate anchor = routines.routinesOf(code).stream().filter(r -> r.getName().equals("Piano"))
+        LocalDate anchor = routines.routinesOf(code, alex.getId()).stream().filter(r -> r.getName().equals("Piano"))
                 .findFirst().orElseThrow().getAnchorMonday();
         String json = backup.export(code);
 
@@ -346,7 +411,7 @@ class RoutineServiceTest {
 
         Member newSam = chores.membersOf(code).stream().filter(m -> m.getName().equals("Sam"))
                 .findFirst().orElseThrow();
-        Routine piano = routines.routinesOf(code).stream().filter(r -> r.getName().equals("Piano"))
+        Routine piano = routines.routinesOf(code, alex.getId()).stream().filter(r -> r.getName().equals("Piano"))
                 .findFirst().orElseThrow();
         assertEquals(newSam.getId(), piano.getForMemberId());
         assertEquals(Routine.EVERY_OTHER_WEEK, piano.getEveryWeeks());
@@ -354,7 +419,7 @@ class RoutineServiceTest {
         assertEquals(LocalTime.of(16, 30), piano.getTime());
         assertNotNull(piano.getNextFireAt());
         assertEquals(ZoneId.of("Europe/Stockholm"), routines.zoneOf(code));
-        assertEquals(2, routines.routinesOf(code).size());
+        assertEquals(2, routines.routinesOf(code, alex.getId()).size());
         assertTrue(routines.doneToday(code).isEmpty(), "ticks are not family history");
     }
 
@@ -369,7 +434,7 @@ class RoutineServiceTest {
         assertTrue(json.contains("Ghost") && json.contains("\"ROUTINES\""), "the edit took");
         backup.restore(json.getBytes(StandardCharsets.UTF_8), code, alex.getId());
         assertTrue(lists.openItems(code, ListKind.TODO).isEmpty());
-        assertTrue(routines.routinesOf(code).isEmpty());
+        assertTrue(routines.routinesOf(code, alex.getId()).isEmpty());
     }
 
     private static List<String> names(List<RoutineService.Today> today) {

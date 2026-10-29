@@ -46,8 +46,10 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -162,7 +164,7 @@ public class BackupService {
         // restore brings back the half-finished shopping list too.
         for (CustomList cl : customLists.findByHomeCodeOrderByCreatedAtAscIdAsc(homeCode)) {
             b.customLists.add(new CustomListDto(cl.getId(), cl.getName(), cl.getCreatedAt(),
-                    cl.getCreatedByMemberId()));
+                    cl.getCreatedByMemberId(), cl.getOwnerMemberId()));
         }
         for (ListItem li : listItems.findByHomeCodeOrderByCreatedAtAscIdAsc(homeCode)) {
             b.listItems.add(new ListItemDto(li.getKind(), li.getText(), li.getCreatedAt(),
@@ -173,7 +175,7 @@ public class BackupService {
         for (Routine r : routines.findByHomeCodeOrderByTimeAscNameAscIdAsc(homeCode)) {
             b.routines.add(new RoutineDto(r.getName(), r.getEmoji(), r.getWeekdays(),
                     r.getEveryWeeks(), r.getAnchorMonday(), r.getTime(), r.getForMemberId(),
-                    r.getCreatedByMemberId(), r.getCreatedAt()));
+                    r.getCreatedByMemberId(), r.getCreatedAt(), r.isPrivateToOwner()));
         }
         try {
             return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(b);
@@ -367,13 +369,22 @@ public class BackupService {
         }
         // Lists before their lines, ids remapped as groups are for tasks.
         Map<Long, Long> listIdMap = new HashMap<>();
+        // Private lists whose owner did not come back. Their lines must be dropped with them,
+        // not landed on the shared To-do like a line whose list is merely missing (below).
+        Set<Long> droppedPrivate = new HashSet<>();
         for (CustomListDto cl : b.customLists) {
             String name = InputLimits.clip(cl.name, InputLimits.LIST_NAME);
+            Long owner = cl.ownerMemberId == null ? null : memberIdMap.get(cl.ownerMemberId);
+            if (cl.ownerMemberId != null && owner == null) {
+                droppedPrivate.add(cl.id);
+                continue;
+            }
             if (name == null || name.isBlank() || listIdMap.size() >= InputLimits.CUSTOM_LISTS) {
                 continue;
             }
             CustomList entity = new CustomList(code, name,
                     cl.createdByMemberId == null ? null : memberIdMap.get(cl.createdByMemberId));
+            entity.setOwnerMemberId(owner);
             if (cl.createdAt != null) {
                 entity.setCreatedAt(cl.createdAt);
             }
@@ -397,6 +408,9 @@ public class BackupService {
             }
             if (li.kind != null && !li.kind.holdsLines()) {
                 continue; // a tab, not a kind of line — see ListKind.ROUTINES
+            }
+            if (li.listId != null && droppedPrivate.contains(li.listId)) {
+                continue;
             }
             if (li.kind == ListKind.DINNER && li.day == null) {
                 continue; // a dinner without a day would never show and never be purged
@@ -561,6 +575,8 @@ public class BackupService {
             r.setAnchorMonday(dto.anchorMonday() == null ? null : Routine.mondayOf(dto.anchorMonday()));
             r.setTime(dto.time());
             r.setForMemberId(forMember);
+            // Private needs an owner; a hand-edited home routine marked private stays shared.
+            r.setPrivateToOwner(Boolean.TRUE.equals(dto.privateToOwner()) && forMember != null);
             if (dto.createdAt() != null) {
                 r.setCreatedAt(dto.createdAt());
             }
@@ -684,13 +700,19 @@ public class BackupService {
                               Integer sortOrder) {
     }
 
-    public record CustomListDto(Long id, String name, Instant createdAt, Long createdByMemberId) {
+    /** {@code ownerMemberId} is set for a private list (§4.4e) and null in older files. An admin's
+     *  backup holds private lists too — the family's whole record — and the privacy notice says so. */
+    public record CustomListDto(Long id, String name, Instant createdAt, Long createdByMemberId,
+                                Long ownerMemberId) {
     }
 
-    /** {@code forMemberId} null = the whole home's. Member ids are the file's own, remapped. */
+    /** {@code forMemberId} null = the whole home's. Member ids are the file's own, remapped.
+     *  Private routines are in the file too: an admin's backup is the family's whole record, and
+     *  the privacy notice says so (§4.15). */
     public record RoutineDto(String name, String emoji, int weekdays, int everyWeeks,
                              LocalDate anchorMonday, LocalTime time,
-                             Long forMemberId, Long createdByMemberId, Instant createdAt) {
+                             Long forMemberId, Long createdByMemberId, Instant createdAt,
+                             Boolean privateToOwner) {
     }
 
     /** {@code taskId} is null (and {@code note} set) for an "other help" entry. */

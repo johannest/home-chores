@@ -59,7 +59,9 @@ final class RoutineFormat {
         if (r.getEveryWeeks() == Routine.EVERY_OTHER_WEEK) {
             parts.add(T.tr("routine.everyOtherWeek"));
         }
-        parts.add(r.getForMemberId() == null ? T.tr("routine.forEveryone")
+        // A private routine is only ever drawn for its owner, so "only you" is the whole answer.
+        parts.add(r.isPrivateToOwner() ? T.tr("routine.onlyYou")
+                : r.getForMemberId() == null ? T.tr("routine.forEveryone")
                 : names.getOrDefault(r.getForMemberId(), "?"));
         return String.join(" · ", parts);
     }

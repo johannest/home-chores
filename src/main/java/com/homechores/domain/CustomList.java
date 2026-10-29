@@ -39,6 +39,14 @@ public class CustomList {
     /** Who made it. Null once that member is removed from the home. */
     private Long createdByMemberId;
 
+    /**
+     * Set when the list is private (§4.4e): only this member sees it or anything on it — not the
+     * rest of the family, not an admin, not the shared device — and its reminders reach only them.
+     * Null for a shared list. Only the list's maker can make it private. Nullable, so
+     * {@code ddl-auto=update} adds it to a populated table with every existing list shared.
+     */
+    private Long ownerMemberId;
+
     protected CustomList() {
     }
 
@@ -74,5 +82,22 @@ public class CustomList {
 
     public Long getCreatedByMemberId() {
         return createdByMemberId;
+    }
+
+    public Long getOwnerMemberId() {
+        return ownerMemberId;
+    }
+
+    public void setOwnerMemberId(Long ownerMemberId) {
+        this.ownerMemberId = ownerMemberId;
+    }
+
+    public boolean isPrivate() {
+        return ownerMemberId != null;
+    }
+
+    /** Whether this member — null for the shared device — may see the list and its lines. */
+    public boolean isVisibleTo(Long memberId) {
+        return ownerMemberId == null || ownerMemberId.equals(memberId);
     }
 }

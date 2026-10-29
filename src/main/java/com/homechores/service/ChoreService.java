@@ -13,7 +13,9 @@ import com.homechores.domain.Feedback;
 import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
 import com.homechores.domain.InputLimits;
+import com.homechores.domain.CustomList;
 import com.homechores.domain.CustomListRepository;
+import com.homechores.domain.ListItem;
 import com.homechores.domain.ListItemRepository;
 import com.homechores.domain.ListReminderRepository;
 import com.homechores.domain.Member;
@@ -676,6 +678,14 @@ public class ChoreService {
         rejoins.deleteByMemberId(memberId);
         pushSubscriptions.deleteByMemberId(memberId);
         choreReminders.deleteByMemberId(memberId);
+        // Their private lists go with them, lines and reminders included: nobody else may see
+        // them, so nobody else could ever clear them up.
+        for (CustomList list : customLists.findByOwnerMemberId(memberId)) {
+            List<ListItem> lines = listItems.findByListId(list.getId());
+            lines.forEach(line -> listReminders.deleteByItemId(line.getId()));
+            listItems.deleteAll(lines);
+            customLists.delete(list);
+        }
         // Their own routines go with them; the home's stay, whoever made them.
         for (Routine r : routines.findByForMemberId(memberId)) {
             routineTicks.deleteByRoutineId(r.getId());

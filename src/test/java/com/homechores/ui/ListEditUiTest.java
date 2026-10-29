@@ -168,7 +168,7 @@ class ListEditUiTest extends HomeChoresUiTest {
         $(Button.class).all().stream().filter(b -> "Add".equals(b.getText()) && usable(b))
                 .findFirst().ifPresent(b -> test(b).click());
         Long listId = lists.customLists(code).get(0).getId();
-        assertEquals(1, lists.openItems(code, ListKind.TODO, listId).size());
+        assertEquals(1, lists.openItems(code, ListKind.TODO, listId, null).size());
         assertTrue(lists.openItems(code, ListKind.TODO).isEmpty(), "not on the built-in To-do");
 
         kindTabs().setSelectedIndex(1);
@@ -223,6 +223,51 @@ class ListEditUiTest extends HomeChoresUiTest {
         assertEquals("Birthday gifts", lists.customLists(code).get(0).getName());
         assertTrue(kindTabs().getElement().getTextRecursively().contains("Birthday gifts"));
         assertEquals(4, kindTabs().getSelectedIndex(), "still on it");
+    }
+
+    @Test
+    void makingAListPrivate_locksItsTab_andTakesItOffTheOthersBoards() {
+        Member alex = signedIn("Alex");
+        String code = alex.getHomeCode();
+        lists.createList(code, Author.member(alex.getId()), "Diary");
+        openLists(4);
+
+        clickMenuItem("Make private");
+        assertTrue(kindTabs().getElement().getTextRecursively().contains("🔒 Diary"));
+        assertTrue(lists.findList(code, lists.customLists(code).get(0).getId(), null).isEmpty(),
+                "the kitchen tablet no longer finds it");
+
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        SessionContext.signOut();
+        navigate(LandingView.class);
+        SessionContext.signIn(sam.getId(), code);
+        navigate(HomeView.class);
+        openLists(0);
+        assertFalse(kindTabs().getElement().getTextRecursively().contains("Diary"), "Sam has no such tab");
+    }
+
+    /** The notice must tell the truth about "private": hidden in the app, but in an admin's backup. */
+    @Test
+    void thePrivacyNotice_saysPrivateMeansHiddenInTheApp_notAbsentFromAdminBackups() {
+        navigate(PrivacyView.class);
+        String page = $(Div.class).all().stream().map(d -> d.getElement().getTextRecursively())
+                .reduce("", String::concat);
+        assertTrue(page.contains("marked private"));
+        assertTrue(page.contains("private lists and routines included"));
+        assertFalse(page.contains("Nothing inside the app is private"));
+    }
+
+    @Test
+    void theMenuOffersPrivacyOnlyToTheListsMaker() {
+        Member alex = signedIn("Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        lists.createList(code, Author.member(sam.getId()), "Sam's ideas");
+        openLists(4);
+        assertTrue($(MenuBar.class).all().stream().filter(this::usable)
+                .flatMap(m -> m.getItems().stream()).flatMap(i -> i.getSubMenu().getItems().stream())
+                .noneMatch(i -> "Make private".equals(i.getElement().getTextRecursively().trim())),
+                "an admin cannot hide a member's list either");
     }
 
     @Test

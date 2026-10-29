@@ -16,6 +16,7 @@ import com.homechores.domain.Seasons;
 import com.homechores.domain.SpreeTier;
 import com.homechores.domain.TimeWindows;
 import com.homechores.domain.Trophy;
+import com.homechores.service.Author;
 import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
@@ -1096,7 +1097,7 @@ class AdminPanel extends VerticalLayout {
      * hides it and cancels its reminders but keeps its lines (see ListItemService.setListEnabled).
      */
     private Details listsSection() {
-        List<ListSlot> slots = lists.listSlots(homeCode);
+        List<ListSlot> slots = lists.listSlots(homeCode, Author.member(memberId));
         Set<ListKind> hidden = lists.hiddenLists(homeCode);
         Details s = section(Section.LISTS, T.tr("admin.lists"), false);
 

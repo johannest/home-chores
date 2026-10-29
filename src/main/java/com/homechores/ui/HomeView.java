@@ -254,7 +254,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         if (!pushSender.isEnabled() || viewer.isDevice()) {
             return;
         }
-        List<ListReminder> fired = listReminderService.firedForHome(homeCode);
+        List<ListReminder> fired = listReminderService.firedFor(homeCode, memberId);
         if (firedDialog != null && firedDialog.isOpened()) {
             Long showing = firedDialog.reminderId();
             if (fired.stream().anyMatch(r -> r.getId().equals(showing))) {

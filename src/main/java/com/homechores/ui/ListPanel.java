@@ -118,7 +118,7 @@ class ListPanel extends VerticalLayout {
         content.removeAll();
         boolean hadCustom = listId != null;
         // The admin's order, without the built-ins switched off (see ListItemService.listSlots).
-        List<ListSlot> slots = lists.visibleSlots(homeCode);
+        List<ListSlot> slots = lists.visibleSlots(homeCode, author);
         int selected = indexOfSelection(slots);
         if (selected < 0 && !slots.isEmpty()) {
             // What this phone was showing is gone: another phone deleted the list, or an admin
@@ -192,7 +192,8 @@ class ListPanel extends VerticalLayout {
     /** A built-in list's tab label, or a custom list's own name. Shared with the admin card. */
     static String slotLabel(ListSlot slot) {
         if (!slot.isBuiltIn()) {
-            return slot.custom().getName();
+            // Only its owner ever sees a private list, so the lock tells them nobody else does.
+            return (slot.custom().isPrivate() ? "🔒 " : "") + slot.custom().getName();
         }
         return T.tr(switch (slot.kind()) {
             case GROCERY -> "list.tab.groceries";
@@ -268,6 +269,19 @@ class ListPanel extends VerticalLayout {
                             }
                             return ok;
                         }).open());
+        // Private: only the list's maker may make it so, only its owner may share it again, and the
+        // shared device owns nothing. The service re-checks all three.
+        if (memberId != null && (list.isPrivate() ? memberId.equals(list.getOwnerMemberId())
+                : memberId.equals(list.getCreatedByMemberId()))) {
+            boolean makePrivate = !list.isPrivate();
+            root.getSubMenu().addItem(T.tr(makePrivate ? "list.custom.makePrivate" : "list.custom.share"),
+                    e -> {
+                        if (lists.setListPrivate(homeCode, list.getId(), author, makePrivate)) {
+                            toast(T.tr(makePrivate ? "list.custom.nowPrivate" : "list.custom.nowShared"), false);
+                            refresh();
+                        }
+                    });
+        }
         root.getSubMenu().addItem(T.tr("list.custom.delete"), e -> confirmDeleteList(list))
                 .addClassName("danger-item");
 
@@ -286,7 +300,7 @@ class ListPanel extends VerticalLayout {
         Button delete = new Button(T.tr("common.delete"), e -> {
             lists.deleteList(homeCode, list.getId(), author);
             d.close();
-            List<ListSlot> left = lists.visibleSlots(homeCode);
+            List<ListSlot> left = lists.visibleSlots(homeCode, author);
             ListSlot to = left.isEmpty() ? ListSlot.builtIn(ListKind.TODO) : fallback(left);
             show(to.kind(), to.listId());
         });
@@ -314,13 +328,13 @@ class ListPanel extends VerticalLayout {
             return;
         }
         if (listId != null) {
-            lists.findList(homeCode, listId).ifPresent(l -> body.add(customListHead(l)));
+            lists.findList(homeCode, listId, author).ifPresent(l -> body.add(customListHead(l)));
         }
         body.add(addRow());
 
         Map<Long, String> names = memberNames();
-        List<ListItem> open = lists.openItems(homeCode, kind, listId);
-        List<ListItem> done = lists.doneItems(homeCode, kind, listId);
+        List<ListItem> open = lists.openItems(homeCode, kind, listId, author);
+        List<ListItem> done = lists.doneItems(homeCode, kind, listId, author);
         // One query for the home's reminders, never one per line — and none at all when push is
         // not configured, in which case the ⏰ is not offered either (see ChoresPanel for why).
         Map<Long, ListReminder> armed = pushSender.isEnabled() ? reminders.forHome(homeCode) : Map.of();
@@ -358,7 +372,7 @@ class ListPanel extends VerticalLayout {
             Span title = new Span(T.tr("list.done", done.size()));
             title.addClassName("list-done-title");
             Button clear = new Button(T.tr("list.clearDone"), e -> {
-                lists.clearDone(homeCode, kind, listId);
+                lists.clearDone(homeCode, kind, listId, author);
                 refresh();
             });
             clear.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);

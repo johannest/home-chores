@@ -100,7 +100,7 @@ class RoutinesPanel extends Div {
             add(add);
         }
 
-        List<Routine> all = routines.routinesOf(homeCode);
+        List<Routine> all = routines.routinesOf(homeCode, viewer.memberId());
         if (all.isEmpty()) {
             Paragraph empty = new Paragraph(T.tr("routine.empty"));
             empty.addClassName("feedback-hint");

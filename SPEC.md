@@ -387,10 +387,15 @@ hold whatever screen the call came from.
   board growing another progress element.
 - **US-66 Routines on fixed weekdays.** As a member, I set "🏋️ Workout, Tuesdays and Thursdays
   18:00" for myself — every week or every other week — get a push at 18:00 on those days, and
-  tick it off when done. As an admin, I set routines for the whole home ("Bins out, Sunday
-  19:00") or for a child ("Piano, every other Thursday 16:30"). Today's routines sit at the top
+  tick it off when done — and can mark one of my own "only visible to me", so nobody else
+  sees it. As an admin, I set routines for the whole home ("Bins out, Sunday 19:00") or for a
+  child ("Piano, every other Thursday 16:30"). Today's routines sit at the top
   of the Chores tab, the Routines tab on Lists holds them all, and "Tuesday 18:00" means the
   family's clock — one time zone for the home — whoever's phone is asking.
+- **US-67 A list of my own.** As a member, I can make a list I created private, so only I see
+  it and its reminders reach only my devices — not the rest of the family, not an admin, not
+  the kitchen tablet — and share it with the family again whenever I like. The privacy notice
+  tells me plainly that an admin's backup file still contains it.
 
 ## 4. Functional specification
 
@@ -812,6 +817,32 @@ message and shows a matching badge on the card (`LockReason`):
 - Backed up and restored with the home (`listItems` in the JSON, member ids remapped; a file
   from before the lists restores with empty lists) and wiped by `deleteHome`.
 - A fourth built-in tab, **Routines**, holds no lines; see §4.4f.
+- **Private lists.** A list the home named itself (`CustomList`) can be made private by **its
+  maker** from its ⋯ menu ("Make private"; "Share with the family" undoes it, for its owner
+  only). `CustomList.ownerMemberId` is set while it is private (nullable, so an existing
+  database upgrades with every list shared). The built-in lists are always shared, and the
+  shared device owns nothing, so a member without a phone has no private lists.
+  - **Only its owner sees it**: `listSlots` and `visibleSlots` take the viewer and leave other
+    members' private lists out — for an admin too, whose Lists card in Admin does not show
+    them either — and `findList`, `openItems`, `doneItems` and `clearDone` for a list id take
+    the viewer and read somebody else's private list as absent. The tab reads "🔒 Diary".
+  - **Only its owner writes to it**: `add`, `rename`, `setDone`, `delete`, `placeItem`,
+    `renameList`, `deleteList` and `setListPrivate` treat a line or list of somebody else's
+    private list as absent (false / empty), whoever asks — so its existence is not confirmed
+    either. The ids come from the browser; a hidden tab is not the check.
+  - **Order**: the home's one list order keeps a private list's place. An admin's ↑/↓ steps
+    among the lists *they* see, swapping the two in the full order, so a step never seems to
+    do nothing and the owner's list keeps its place.
+  - **Reminders** on its lines go to the owner's devices only, only the owner may set or cancel
+    one, and the "reminder fired" dialog (`ListReminderService.firedFor(home, member)`) shows
+    only to them.
+  - **Leaving**: a removed member's private lists go with them, lines and reminders included;
+    lists they shared stay. Deleting the home deletes them like everything else.
+  - **Backup**: an admin's backup includes private lists (`ownerMemberId`, remapped), so a
+    restore loses nothing, and the privacy notice says that an admin can read them in that
+    file (§4.15). On restore a private list whose owner did not come back is dropped **with its
+    lines** — they never land on the shared To-do the way a line of a merely missing list does.
+  - Private lists count against the home's `InputLimits.CUSTOM_LISTS`.
 
 ### 4.4f Routines
 Things a home does on **fixed weekdays** (US-66), as opposed to a chore's floating "due again N
@@ -821,7 +852,7 @@ starts no streak and needs no approval — organisation, like a list line.
 - **Model.** `Routine`: `homeCode`, `name` (≤ `TASK_NAME`), `emoji` (default 🔁), `weekdays`
   (bit mask, Monday = bit 0), `everyWeeks` (1, or 2 = every other week), `anchorMonday`,
   optional `time` (wall clock, no reminder without one), `forMemberId` (null = the whole home),
-  `createdByMemberId`, `nextFireAt`. `RoutineDone`: one row per routine per day ticked
+  `createdByMemberId`, `privateToOwner`, `nextFireAt`. `RoutineDone`: one row per routine per day ticked
   (`done_day` — `DAY` is reserved in H2), `doneByMemberId` null for the shared device.
   Occurrences are **computed**: a routine falls on a date when its weekday is in the mask and,
   every other week, when the date's week is an even number of weeks from `anchorMonday`
@@ -837,6 +868,13 @@ starts no streak and needs no approval — organisation, like a list line.
   an admin's to make or change; **anyone in the home ticks any routine**, the shared device too.
   A routine id or a member of another home is refused or reads as absent. At most
   `InputLimits.MAX_ROUTINES_PER_HOME` = 100 per home. A blank name or no weekday makes nothing.
+- **Private routines.** A routine a member makes **for themselves** can be "Only visible to me"
+  (`privateToOwner`; the switch shows only when "For" is the author — a parent's routine for a
+  child stays the parents' to see — and the service refuses it otherwise). Every read
+  (`routinesOf`, `today`) leaves it out for anyone else, the shared device included, and every
+  write (`update`, `delete`, `setDone`) treats it as absent — for an admin too. Its reminder
+  already goes to its member only. It reads "… · 🔒 only you" on its owner's Routines tab. An
+  admin's backup includes it (§4.15).
 - **Every other week** asks "Starting: this week / next week", which sets `anchorMonday`; the
   anchor only moves when the rhythm or the start is chosen again, so renaming an every-other-week
   routine does not flip its weeks.
@@ -866,7 +904,7 @@ starts no streak and needs no approval — organisation, like a list line.
   restoring a backup deletes all of them.
 - **Backup.** `routines` in the JSON (name, emoji, weekdays, rhythm, anchor, time, whose — member
   ids remapped — created by and when) and `home.timeZone`; ticks are not exported. Restore
-  re-validates like everything else: a blank name or empty mask is skipped, a personal routine
+  re-validates like everything else (the private flag kept only with an owner): a blank name or empty mask is skipped, a personal routine
   whose member did not come back is dropped, the mask is cut to seven bits, an unknown zone keeps
   the home's, and a line of kind `ROUTINES` is ignored.
 
@@ -1526,6 +1564,11 @@ scales up, not the other way round.
   when, until it fires. Each has its own bullet under "What data we store", each says when the
   data goes away, and both say they never enter a backup. The notice has to grow when the
   stored data does, or "what we store" quietly becomes a lower bound rather than a list.
+- **Private lists and routines** (§4.4e, §4.4f). "Who can see it" says that almost everything
+  is shared with the home, names the two things a member can keep to themselves, and is plain
+  that private means hidden *in the app*: an admin's backup download contains them, and they are
+  stored on the server and in the safety export like everything else. "What data we store" lists
+  routines and the home's time zone.
 - **Erasure requests.** Self-service is the primary route and is already complete: an admin
   can erase one member (Admin → Members) or the whole home (Admin → Danger zone), and
   export first via Backup & restore. For operator-assisted requests the notice asks for the
@@ -1830,9 +1873,28 @@ scales up, not the other way round.
   and it shows on the tab and on today's strip; ticking on the strip marks it done by them and
   unticking takes it back; a member sees everyone's but edits only their own and gets no "For";
   the device sees everyone's today with whose it is, ticks them and has no editor; switching the
-  tab off takes the strip with it. `ListOrderServiceTest`, `ListOrderUiTest` and `ListEditUiTest`
+  tab off takes the strip with it; "only visible to me" is offered for one's own routine, hides it
+  from the admin's strip and tab, and is not offered for a routine for someone else.
+  `RoutineServiceTest` also: a private routine is its owner's alone to see, edit, delete or tick
+  (not an admin's, not the device's), and its owner may share it; only a routine of one's own can
+  be private (not a parent's for a child, not the home's); it stays private through a backup the
+  admin can read. `ListOrderServiceTest`, `ListOrderUiTest` and `ListEditUiTest`
   count Routines among the built-ins. Verified by hand at 360px in the browser pane: the tab, the
   editor, the strip and the Home settings zone; push delivery itself is not reachable there.
+- **Private lists** (`PrivateListServiceTest`, sender mocked): only the owner sees a private
+  list — no tab, no admin card row, no `findList`, no lines open or done for another member, an
+  admin or the device, and its lines are not on the shared To-do; nobody but the owner writes to
+  it by any route (add, rename, tick, delete, drag, clear done, rename or delete the list, share
+  it) and nothing changes when they try; only the maker makes a list private, only the owner
+  shares it, and the device does neither; an admin's move steps over a list they cannot see and
+  the owner's list keeps its place; a private line's reminder reaches only the owner's device,
+  nobody else may set or cancel it, and the fired dialog is the owner's alone; a removed member's
+  private lists, lines and reminders go and their shared lists stay; a backup holds private lists,
+  restore keeps them private, and a private list whose owner is not in the file is dropped with
+  its lines rather than spilling onto To-do. `ListEditUiTest`: "Make private" locks the tab and
+  takes it off another member's board and the tablet; the menu offers it only to the list's
+  maker, not to an admin; the privacy notice says private means hidden in the app and that an
+  admin's backup still holds it.
 - **Message-bundle parity** (`MessageParityTest`): the three properties files carry identical key
   sets, and no parameterized value hides a lone apostrophe. A missing key fails nothing at
   runtime — it simply renders as the key — so it needs a test rather than a reviewer.

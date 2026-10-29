@@ -11,6 +11,9 @@ public interface CustomListRepository extends JpaRepository<CustomList, Long> {
 
     long countByHomeCode(String homeCode);
 
+    /** A member's private lists — deleted with them when they leave the home. */
+    List<CustomList> findByOwnerMemberId(Long memberId);
+
     @Transactional
     void deleteByHomeCode(String homeCode);
 }

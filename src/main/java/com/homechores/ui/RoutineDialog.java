@@ -8,6 +8,7 @@ import com.homechores.service.RoutineService.Spec;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
+import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.checkbox.CheckboxGroup;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Div;
@@ -112,6 +113,18 @@ class RoutineDialog extends Dialog {
         start.setVisible(repeat.getValue() == Routine.EVERY_OTHER_WEEK
                 && everyBefore != Routine.EVERY_OTHER_WEEK);
 
+        // Only for a routine of one's own: a parent's "Piano for Milla" is the parents' to see.
+        Checkbox onlyMe = new Checkbox(T.tr("routine.private"));
+        onlyMe.setHelperText(T.tr("routine.private.helper"));
+        onlyMe.setValue(existing != null && existing.isPrivateToOwner());
+        Runnable syncOnlyMe = () -> {
+            boolean own = !admin || (owner.getValue() != null && owner.getValue().member() != null
+                    && owner.getValue().member().getId().equals(memberId));
+            onlyMe.setVisible(own);
+        };
+        syncOnlyMe.run();
+        owner.addValueChangeListener(e -> syncOnlyMe.run());
+
         Paragraph error = new Paragraph();
         error.addClassName("form-error");
         error.setVisible(false);
@@ -120,7 +133,7 @@ class RoutineDialog extends Dialog {
         if (admin) {
             add(owner);
         }
-        add(error);
+        add(onlyMe, error);
 
         Button save = new Button(T.tr("common.save"), e -> {
             if (days.getValue().isEmpty()) {
@@ -132,7 +145,8 @@ class RoutineDialog extends Dialog {
                     .map(Member::getId).orElse(null) : memberId;
             Spec spec = new Spec(name.getValue(), emoji.getValue(), days.getValue(),
                     repeat.getValue() == null ? 1 : repeat.getValue(),
-                    start.isVisible() && Boolean.TRUE.equals(start.getValue()), time.getValue(), forId);
+                    start.isVisible() && Boolean.TRUE.equals(start.getValue()), time.getValue(), forId,
+                    onlyMe.isVisible() && onlyMe.getValue());
             Optional<Routine> saved = existing == null
                     ? routines.create(homeCode, memberId, spec)
                     : routines.update(homeCode, memberId, existing.getId(), spec);

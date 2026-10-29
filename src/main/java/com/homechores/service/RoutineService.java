@@ -45,10 +45,13 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <p>Who may do what, checked here against the database rather than trusted from the UI:
  * <ul>
- *   <li>any member makes, edits and deletes their <em>own</em> routines;
+ *   <li>any member makes, edits and deletes their <em>own</em> routines, and may make one of
+ *       them private;
  *   <li>a routine for the whole home or for another member is an admin's to make or change;
  *   <li>anyone in the home — the shared device included — ticks any routine, as anyone ticks
- *       a list line: it is organisation, not a score.
+ *       a list line: it is organisation, not a score;
+ *   <li>a private routine is none of that to anyone but its member: every read filters it out
+ *       and every write treats it as absent, admins included.
  * </ul>
  *
  * <p>The sweep is a fourth sibling of {@link ListReminderService}, with its transaction
@@ -73,9 +76,13 @@ public class RoutineService {
 
     static final String DEFAULT_EMOJI = "🔁";
 
-    /** What the routine editor hands over; validated and clipped here. */
+    /**
+     * What the routine editor hands over; validated and clipped here. {@code privateToOwner} is
+     * only allowed on a routine the author makes for themselves.
+     */
     public record Spec(String name, String emoji, Set<DayOfWeek> days, int everyWeeks,
-                       boolean startNextWeek, LocalTime time, Long forMemberId) {
+                       boolean startNextWeek, LocalTime time, Long forMemberId,
+                       boolean privateToOwner) {
     }
 
     /** A routine that occurs today, and its tick if it has one. */
@@ -190,9 +197,14 @@ public class RoutineService {
 
     // ---- Reading ------------------------------------------------------------
 
-    /** Every routine of the home, by time of day (untimed last) and name. */
-    public List<Routine> routinesOf(String homeCode) {
+    /**
+     * The home's routines this viewer may see — every one but other members' private ones; on the
+     * shared device ({@code memberId} null), every one but the private ones — by time of day
+     * (untimed last) and name.
+     */
+    public List<Routine> routinesOf(String homeCode, Long memberId) {
         List<Routine> all = new ArrayList<>(routines.findByHomeCodeOrderByTimeAscNameAscIdAsc(homeCode));
+        all.removeIf(r -> !r.isVisibleTo(memberId));
         // Untimed ("some time that day") after the timed ones, whatever the database does with nulls.
         all.sort(Comparator.comparing(Routine::getTime, Comparator.nullsLast(Comparator.naturalOrder())));
         return all;
@@ -212,7 +224,7 @@ public class RoutineService {
         for (RoutineDone d : done.findByHomeCodeAndDay(homeCode, day)) {
             ticks.putIfAbsent(d.getRoutineId(), d);
         }
-        return routinesOf(homeCode).stream()
+        return routinesOf(homeCode, memberId).stream()
                 .filter(r -> r.occursOn(day))
                 .filter(r -> memberId == null || r.getForMemberId() == null
                         || r.getForMemberId().equals(memberId))
@@ -241,7 +253,7 @@ public class RoutineService {
     @Transactional
     public Optional<Routine> create(String homeCode, Long memberId, Spec spec) {
         Member author = memberOf(homeCode, memberId);
-        mayAssign(author, spec.forMemberId());
+        mayAssign(author, spec);
         if (routines.countByHomeCode(homeCode) >= InputLimits.MAX_ROUTINES_PER_HOME) {
             return Optional.empty();
         }
@@ -259,12 +271,12 @@ public class RoutineService {
     @Transactional
     public Optional<Routine> update(String homeCode, Long memberId, Long routineId, Spec spec) {
         Member author = memberOf(homeCode, memberId);
-        Routine r = find(homeCode, routineId).orElse(null);
+        Routine r = find(homeCode, routineId, memberId).orElse(null);
         if (r == null) {
             return Optional.empty();
         }
         mayChange(author, r);
-        mayAssign(author, spec.forMemberId());
+        mayAssign(author, spec);
         return apply(r, spec);
     }
 
@@ -277,7 +289,7 @@ public class RoutineService {
     @Transactional
     public boolean delete(String homeCode, Long memberId, Long routineId) {
         Member author = memberOf(homeCode, memberId);
-        Routine r = find(homeCode, routineId).orElse(null);
+        Routine r = find(homeCode, routineId, memberId).orElse(null);
         if (r == null) {
             return false;
         }
@@ -298,7 +310,7 @@ public class RoutineService {
     @Transactional
     public boolean setDone(String homeCode, Long routineId, Author author, boolean isDone) {
         authorOf(homeCode, author);
-        Routine r = find(homeCode, routineId).orElse(null);
+        Routine r = find(homeCode, routineId, author.memberId()).orElse(null);
         LocalDate day = today(homeCode);
         if (r == null || !r.occursOn(day)) {
             return false;
@@ -341,20 +353,28 @@ public class RoutineService {
         r.setEveryWeeks(every);
         r.setTime(spec.time() == null ? null : spec.time().withSecond(0).withNano(0));
         r.setForMemberId(spec.forMemberId());
+        r.setPrivateToOwner(spec.privateToOwner());
         r.setNextFireAt(r.fireAfter(Instant.now(), zone));
         Routine saved = routines.save(r);
         homeState.bump(homeCode);
         return Optional.of(saved);
     }
 
-    private Optional<Routine> find(String homeCode, Long routineId) {
+    /** The routine, if it is this home's and the viewer may see it: another member's private
+     *  routine reads as absent, so its existence is not confirmed either. */
+    private Optional<Routine> find(String homeCode, Long routineId, Long viewerId) {
         return routineId == null ? Optional.empty()
-                : routines.findById(routineId).filter(r -> homeCode.equals(r.getHomeCode()));
+                : routines.findById(routineId)
+                        .filter(r -> homeCode.equals(r.getHomeCode()) && r.isVisibleTo(viewerId));
     }
 
-    private static void mayAssign(Member author, Long forMemberId) {
-        if (!author.isAdmin() && !author.getId().equals(forMemberId)) {
+    private static void mayAssign(Member author, Spec spec) {
+        boolean own = author.getId().equals(spec.forMemberId());
+        if (!author.isAdmin() && !own) {
             throw new IllegalArgumentException("Only an admin makes routines for others or the home");
+        }
+        if (spec.privateToOwner() && !own) {
+            throw new IllegalArgumentException("Only a routine of one's own can be private");
         }
     }
 

@@ -66,6 +66,13 @@ public class Routine {
     private Long createdByMemberId;
 
     /**
+     * Seen only by {@link #forMemberId} (§4.4f): not on anyone else's Routines tab or strip, not
+     * on the shared device, and not editable by an admin. Only a routine a member made for
+     * themselves can be private, so it is never true with a null {@code forMemberId}.
+     */
+    private boolean privateToOwner;
+
+    /**
      * When the reminder sweep next looks at this routine: the next occurrence's time as an
      * instant in the home's zone, or null without a {@link #time}. Recomputed on every save,
      * after every sweep and when the home's zone changes — so the sweep's query is a bounded
@@ -81,6 +88,11 @@ public class Routine {
     public Routine(String homeCode, Long createdByMemberId) {
         this.homeCode = homeCode;
         this.createdByMemberId = createdByMemberId;
+    }
+
+    /** Whether this member — null for the shared device — may see the routine. */
+    public boolean isVisibleTo(Long memberId) {
+        return !privateToOwner || (memberId != null && memberId.equals(forMemberId));
     }
 
     // ---- Schedule ----------------------------------------------------------
@@ -215,6 +227,14 @@ public class Routine {
 
     public void setCreatedByMemberId(Long createdByMemberId) {
         this.createdByMemberId = createdByMemberId;
+    }
+
+    public boolean isPrivateToOwner() {
+        return privateToOwner;
+    }
+
+    public void setPrivateToOwner(boolean privateToOwner) {
+        this.privateToOwner = privateToOwner;
     }
 
     public Instant getNextFireAt() {

@@ -46,7 +46,7 @@ class ListOrderServiceTest {
         CustomList b = lists.createList(code, Author.member(alex.getId()), "B").orElseThrow();
 
         assertEquals(List.of("GROCERY", "TODO", "DINNER", "ROUTINES", "L:" + a.getId(), "L:" + b.getId()),
-                tokens(lists.listSlots(code)));
+                tokens(lists.listSlots(code, null)));
     }
 
     @Test
@@ -60,7 +60,7 @@ class ListOrderServiceTest {
         assertTrue(lists.moveList(code, alex.getId(), "L:" + a.getId(), -1));
         assertTrue(lists.moveList(code, alex.getId(), "DINNER", -1));
         assertEquals(List.of("GROCERY", "L:" + a.getId(), "DINNER", "TODO", "ROUTINES"),
-                tokens(lists.listSlots(code)));
+                tokens(lists.listSlots(code, null)));
 
         assertFalse(lists.moveList(code, alex.getId(), "GROCERY", -1), "already first");
         assertFalse(lists.moveList(code, alex.getId(), "ROUTINES", 1), "already last");
@@ -79,12 +79,12 @@ class ListOrderServiceTest {
 
         CustomList b = lists.createList(code, Author.member(alex.getId()), "B").orElseThrow();
         assertEquals(List.of("GROCERY", "DINNER", "TODO", "ROUTINES", "L:" + a.getId(), "L:" + b.getId()),
-                tokens(lists.listSlots(code)),
+                tokens(lists.listSlots(code, null)),
                 "dead tokens drop, a built-in goes back to its default place, own lists go last");
 
         lists.deleteList(code, a.getId(), Author.member(alex.getId()));
         assertEquals(List.of("GROCERY", "DINNER", "TODO", "ROUTINES", "L:" + b.getId()),
-                tokens(lists.listSlots(code)));
+                tokens(lists.listSlots(code, null)));
     }
 
     @Test
@@ -99,15 +99,15 @@ class ListOrderServiceTest {
         lists.setListEnabled(code, alex.getId(), ListKind.GROCERY, false);
 
         assertEquals(Set.of(ListKind.GROCERY), lists.hiddenLists(code));
-        assertEquals(List.of("TODO", "DINNER", "ROUTINES"), tokens(lists.visibleSlots(code)));
-        assertEquals(4, lists.listSlots(code).size(), "still in the order, just not shown");
+        assertEquals(List.of("TODO", "DINNER", "ROUTINES"), tokens(lists.visibleSlots(code, null)));
+        assertEquals(4, lists.listSlots(code, null).size(), "still in the order, just not shown");
         assertTrue(reminderRepo.findByItemId(milk.getId()).isEmpty(), "nobody is nudged about a hidden list");
         assertTrue(reminderRepo.findByItemId(call.getId()).isPresent(), "other lists keep theirs");
         assertEquals(1, lists.openItems(code, ListKind.GROCERY).size(), "the milk is kept");
 
         lists.setListEnabled(code, alex.getId(), ListKind.GROCERY, true);
         assertTrue(lists.hiddenLists(code).isEmpty());
-        assertEquals("GROCERY", lists.visibleSlots(code).get(0).token(), "back in its place");
+        assertEquals("GROCERY", lists.visibleSlots(code, null).get(0).token(), "back in its place");
         assertEquals(null, homes.findById(code).orElseThrow().getHiddenLists(), "all on stores as null");
     }
 
@@ -139,7 +139,7 @@ class ListOrderServiceTest {
         CustomList restored = lists.customLists(code).get(0);
         assertFalse(restored.getId().equals(a.getId()), "precondition: restore issued a new id");
         assertEquals(List.of("L:" + restored.getId(), "GROCERY", "TODO", "DINNER", "ROUTINES"),
-                tokens(lists.listSlots(code)),
+                tokens(lists.listSlots(code, null)),
                 "Gifts is still first, under its new id");
         assertEquals(Set.of(ListKind.DINNER), lists.hiddenLists(code));
     }

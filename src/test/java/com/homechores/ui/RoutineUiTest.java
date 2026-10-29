@@ -78,7 +78,7 @@ class RoutineUiTest extends HomeChoresUiTest {
         $(TimePicker.class).first().setValue(LocalTime.of(18, 0));
         clickButton("Save");
 
-        Routine made = routines.routinesOf(alex.getHomeCode()).get(0);
+        Routine made = routines.routinesOf(alex.getHomeCode(), alex.getId()).get(0);
         assertEquals("Workout", made.getName());
         assertEquals(alex.getId(), made.getForMemberId(), "an admin's default is themselves");
         assertEquals(Routine.EVERY_OTHER_WEEK, made.getEveryWeeks());
@@ -93,7 +93,7 @@ class RoutineUiTest extends HomeChoresUiTest {
         Member alex = service.createHome("Nest", "Alex");
         String code = alex.getHomeCode();
         routines.create(code, alex.getId(), new Spec("Bins out", "🗑️", EVERY_DAY, 1, false,
-                LocalTime.of(19, 0), null)).orElseThrow();
+                LocalTime.of(19, 0), null, false)).orElseThrow();
         SessionContext.signIn(alex.getId(), code);
         navigate(HomeView.class);
 
@@ -110,8 +110,8 @@ class RoutineUiTest extends HomeChoresUiTest {
         Member alex = service.createHome("Nest", "Alex");
         String code = alex.getHomeCode();
         Member sam = service.joinHome(code, "Sam").orElseThrow();
-        routines.create(code, alex.getId(), new Spec("Bins out", null, EVERY_DAY, 1, false, null, null));
-        routines.create(code, sam.getId(), new Spec("Run", null, EVERY_DAY, 1, false, null, sam.getId()));
+        routines.create(code, alex.getId(), new Spec("Bins out", null, EVERY_DAY, 1, false, null, null, false));
+        routines.create(code, sam.getId(), new Spec("Run", null, EVERY_DAY, 1, false, null, sam.getId(), false));
         SessionContext.signIn(sam.getId(), code);
         navigate(HomeView.class);
         openRoutinesTab();
@@ -132,7 +132,7 @@ class RoutineUiTest extends HomeChoresUiTest {
         String code = alex.getHomeCode();
         Member milla = service.addMemberWithoutDevice(code, "Milla", alex.getId()).orElseThrow();
         routines.create(code, alex.getId(), new Spec("Piano", "🎹", EVERY_DAY, 1, false,
-                LocalTime.of(16, 30), milla.getId())).orElseThrow();
+                LocalTime.of(16, 30), milla.getId(), false)).orElseThrow();
         String pin = service.findHome(code).orElseThrow().getAdminPin();
         Long device = devices.pair(code, pin, "Kitchen", "Kitchen").paired().device().getId();
         SessionContext.signInDevice(device, code);
@@ -151,7 +151,7 @@ class RoutineUiTest extends HomeChoresUiTest {
     void anAdminCanSwitchTheRoutinesTabOff_whichTakesTheStripWithIt() {
         Member alex = service.createHome("Nest", "Alex");
         String code = alex.getHomeCode();
-        routines.create(code, alex.getId(), new Spec("Bins out", null, EVERY_DAY, 1, false, null, null));
+        routines.create(code, alex.getId(), new Spec("Bins out", null, EVERY_DAY, 1, false, null, null, false));
         SessionContext.signIn(alex.getId(), code);
         navigate(HomeView.class);
         assertEquals(1, rows("routines-today").size());
@@ -159,6 +159,52 @@ class RoutineUiTest extends HomeChoresUiTest {
         lists.setListEnabled(code, alex.getId(), ListKind.ROUTINES, false);
         navigate(HomeView.class);
         assertTrue(rows("routines-today").isEmpty());
+    }
+
+    @Test
+    void onlyVisibleToMe_isOfferedForOnesOwn_andHidesItFromTheRestOfTheFamily() {
+        Member alex = service.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        SessionContext.signIn(sam.getId(), code);
+        navigate(HomeView.class);
+        openRoutinesTab();
+        clickButton("Add routine");
+        field("Name").setValue("Therapy");
+        @SuppressWarnings("unchecked")
+        CheckboxGroup<DayOfWeek> days = $(CheckboxGroup.class).all().stream()
+                .filter(g -> "Days".equals(g.getLabel())).findFirst().orElseThrow();
+        days.setValue(EVERY_DAY);
+        Checkbox onlyMe = onlyMeBox();
+        assertTrue(usable(onlyMe), "a member's routine is always their own");
+        onlyMe.setValue(true);
+        clickButton("Save");
+        assertTrue(texts().stream().anyMatch(t -> t.endsWith("🔒 only you")));
+
+        // Another person on another phone: leave first, so the board is built afresh for them
+        // rather than the same view instance being re-entered with Sam's panels still in it.
+        SessionContext.signOut();
+        navigate(LandingView.class);
+        SessionContext.signIn(alex.getId(), code);
+        navigate(HomeView.class);
+        assertTrue(rows("routines-today").isEmpty(), "the admin's strip does not show it");
+        openRoutinesTab();
+        assertTrue(rows("routines-panel").isEmpty(), "nor their Routines tab");
+
+        clickButton("Add routine");
+        assertTrue(usable(onlyMeBox()), "for themselves, the admin may make one private too");
+        @SuppressWarnings("unchecked")
+        Select<Object> owner = $(Select.class).all().stream().filter(this::usable).findFirst().orElseThrow();
+        owner.setValue(owner.getListDataView().getItems()
+                .filter(o -> "Sam".equals(owner.getItemLabelGenerator().apply(o))).findFirst().orElseThrow());
+        assertTrue($(Checkbox.class).all().stream().filter(this::usable)
+                .noneMatch(c -> "Only visible to me".equals(c.getLabel())),
+                "but not one they make for someone else");
+    }
+
+    private Checkbox onlyMeBox() {
+        return $(Checkbox.class).all().stream().filter(c -> "Only visible to me".equals(c.getLabel()))
+                .findFirst().orElseThrow();
     }
 
     // ---- helpers ----
