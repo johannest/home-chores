@@ -1,5 +1,6 @@
 package com.homechores.ui;
 
+import com.homechores.domain.ChoreCatalog.Pick;
 import com.homechores.domain.Home;
 import com.homechores.domain.InputLimits;
 import com.homechores.domain.Member;
@@ -207,6 +208,21 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         yourNameField.setHelperText(T.tr("landing.nicknameTip"));
         yourNameField.bindValue(yourName, yourName::set);
 
+        // The picker is a dialog rather than sixty checkboxes on the form: most families take the
+        // pre-ticked eleven, and the form has to fit a phone screen above the keyboard.
+        ValueSignal<Pick> chores = new ValueSignal<>(Pick.starters());
+        Span starterLabel = new Span(T.tr("landing.starter.label"));
+        starterLabel.addClassName("starter-label");
+        Span starterCount = new Span();
+        starterCount.addClassName("feedback-hint");
+        starterCount.bindText(Signal.computed(() -> T.tr("landing.starter.count", chores.get().keys().size())));
+        Button choose = new Button(T.tr("landing.starter.choose"), VaadinIcon.LIST_SELECT.create(),
+                e -> new StarterChoresDialog(chores.peek(), chores::set).open());
+        choose.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        Div starterText = new Div(starterLabel, starterCount);
+        Div starterRow = new Div(starterText, choose);
+        starterRow.addClassName("starter-row");
+
         Checkbox agree = termsCheckbox(agreed);
 
         Button create = new Button(T.tr("landing.create"));
@@ -223,7 +239,8 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
                 warn(T.tr("landing.rateLimited"));
                 return;
             }
-            Member m = service.createHome(homeName.peek(), yourName.peek(), getLocale());
+            Member m = service.createHome(homeName.peek(), yourName.peek(), getLocale(),
+                    chores.peek());
             signIn(m.getId(), m.getHomeCode());
             String pin = service.findHome(m.getHomeCode()).map(h -> h.getAdminPin()).orElse("----");
             showCreatedDialog(m.getHomeCode(), pin);
@@ -231,7 +248,7 @@ public class LandingView extends VerticalLayout implements BeforeEnterObserver {
         create.addClickListener(e -> submit.run());
         yourNameField.addKeyPressListener(Key.ENTER, e -> submit.run());
 
-        Div form = new Div(adultNote, homeNameField, yourNameField, agree, create);
+        Div form = new Div(adultNote, homeNameField, yourNameField, starterRow, agree, create);
         form.getStyle().set("display", "flex").set("flex-direction", "column")
                 .set("gap", "var(--lumo-space-m)").set("margin-top", "var(--lumo-space-m)");
         return form;

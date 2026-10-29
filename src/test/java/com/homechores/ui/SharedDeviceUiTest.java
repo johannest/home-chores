@@ -18,9 +18,11 @@ import com.vaadin.flow.component.ClickEvent;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.ComponentUtil;
 import com.vaadin.flow.component.button.Button;
+import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
+import com.vaadin.flow.component.menubar.MenuBar;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.tabs.Tab;
@@ -73,8 +75,8 @@ class SharedDeviceUiTest extends HomeChoresUiTest {
         assertInstanceOf(HomeView.class, getCurrentView());
         assertEquals(3, tabCount(), "Chores, Lists, Stats — never Admin");
         assertTrue(hasSpanWithText("📺 Kitchen iPad · shared device"));
-        assertFalse(buttons().contains("Admin?"), "a counter-top screen is never an admin");
-        assertFalse(buttons().contains("Leave"));
+        assertFalse(menuItems().contains("Admin?"), "a counter-top screen is never an admin");
+        assertTrue(menuItems().contains("Leave"));
         assertTrue($(Div.class).all().stream().noneMatch(d -> d.getClassNames().contains("daily-ring")
                 && usable(d)), "the daily target is one person's, and the device is nobody");
     }
@@ -230,7 +232,47 @@ class SharedDeviceUiTest extends HomeChoresUiTest {
         assertFalse(SessionContext.isSignedIn());
     }
 
+    /** Leave on the device asks first, Cancel keeps it, and the yes unpairs it for good. */
+    @Test
+    void leavingTheDevice_asksFirst_thenUnpairsIt() {
+        openAsDevice();
+        clickMenuItem("Leave");
+        clickButton("Cancel");
+        assertInstanceOf(HomeView.class, getCurrentView());
+        assertTrue(devices.find(device.getId()).isPresent(), "Cancel keeps the device paired");
+
+        clickMenuItem("Leave");
+        assertTrue(hasSpanWithText("It stops showing the board. Pairing it again needs the admin PIN."
+                + " Nothing logged on it is lost."));
+        clickButton("Leave");
+        assertInstanceOf(LandingView.class, getCurrentView());
+        assertFalse(SessionContext.isSignedIn());
+        assertTrue(devices.find(device.getId()).isEmpty(), "the stored secret no longer works");
+    }
+
     // ---- helpers (the private ones in HomeUiTest, for the three this class needs) ----
+
+    private java.util.stream.Stream<MenuItem> allMenuItems() {
+        return $(MenuBar.class).all().stream().filter(this::usable)
+                .flatMap(m -> m.getItems().stream()).flatMap(this::withSubItems);
+    }
+
+    private java.util.stream.Stream<MenuItem> withSubItems(MenuItem item) {
+        return java.util.stream.Stream.concat(java.util.stream.Stream.of(item),
+                item.getSubMenu().getItems().stream().flatMap(this::withSubItems));
+    }
+
+    private List<String> menuItems() {
+        return allMenuItems().map(i -> i.getElement().getTextRecursively().trim()).toList();
+    }
+
+    private void clickMenuItem(String text) {
+        MenuItem item = allMenuItems()
+                .filter(i -> text.equals(i.getElement().getTextRecursively().trim()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No menu item: " + text));
+        ComponentUtil.fireEvent(item, new ClickEvent<>(item));
+    }
 
     private Long bookedBy(ChoreTask chore) {
         return service.tasksOf(code).stream().filter(t -> t.getId().equals(chore.getId()))

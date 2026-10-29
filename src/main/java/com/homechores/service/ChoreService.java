@@ -1,5 +1,9 @@
 package com.homechores.service;
 
+import com.homechores.domain.ChoreCatalog;
+import com.homechores.domain.ChoreCatalog.Entry;
+import com.homechores.domain.ChoreCatalog.Pick;
+import com.homechores.domain.ChoreCatalog.Section;
 import com.homechores.domain.ChoreTask;
 import com.homechores.domain.ChoreGroup;
 import com.homechores.domain.ChoreReminderRepository;
@@ -131,18 +135,19 @@ public class ChoreService {
 
     // ---- Home create / join -------------------------------------------------
 
-    /** Creates a new home with English default chores (see the locale-aware overload). */
+    /** Creates a new home with the English starter chores (see the full overload). */
     @Transactional
     public Member createHome(String homeName, String memberName) {
-        return createHome(homeName, memberName, Locale.ENGLISH);
+        return createHome(homeName, memberName, Locale.ENGLISH, Pick.starters());
     }
 
     /**
-     * Creates a new home (with a unique code + admin PIN) and its first, admin member.
-     * The default chores are seeded with names in {@code locale}.
+     * Creates a new home (with a unique code + admin PIN) and its first, admin member, with
+     * the {@link ChoreCatalog} chores in {@code chores} — none is a valid pick — named in
+     * {@code locale}.
      */
     @Transactional
-    public Member createHome(String homeName, String memberName, Locale locale) {
+    public Member createHome(String homeName, String memberName, Locale locale, Pick chores) {
         String code;
         do {
             code = generateCode();
@@ -151,7 +156,7 @@ public class ChoreService {
         Home home = new Home(code, InputLimits.clip(homeName, InputLimits.HOME_NAME), generatePin());
         home.setLastActiveAt(Instant.now());
         homes.save(home);
-        seedDefaultTasks(code, locale);
+        seedCatalogChores(code, locale, chores);
         return addMember(code, memberName, true);
     }
 
@@ -698,34 +703,41 @@ public class ChoreService {
 
     // ---- Tasks (CRUD) -------------------------------------------------------
 
-    /** The starter chores every new home gets, named in the creator's language. */
-    private void seedDefaultTasks(String homeCode, Locale locale) {
+    /**
+     * The chores picked from {@link ChoreCatalog}, named in the creator's language, in catalogue
+     * order — under one board section per catalogue section when the pick asks for it. Keys not
+     * in the catalogue are ignored: they come from the picker's checkboxes, but nothing else
+     * checks.
+     */
+    private void seedCatalogChores(String homeCode, Locale locale, Pick pick) {
         Instant base = Instant.now();
-        int i = 0;
-        i = seed(homeCode, locale, base, i, "chore.default.emptyDishwasher", "🍽️", 0, null, null);
-        i = seed(homeCode, locale, base, i, "chore.default.trash", "🗑️", 0, null, null);
-        i = seed(homeCode, locale, base, i, "chore.default.vacuum", "🧹", 0, null, null);
-        i = seed(homeCode, locale, base, i, "chore.default.cookDinner", "🍳", 0, null, null);
-        i = seed(homeCode, locale, base, i, "chore.default.fillDishwasher", "🫧", 0, null, null);
-        i = seed(homeCode, locale, base, i, "chore.default.hangLaundry", "🧺", 0, null, null);
-        i = seed(homeCode, locale, base, i, "chore.default.foldLaundry", "👕", 0, null, null);
-        i = seed(homeCode, locale, base, i, "chore.default.vestibule", "🧥", 0, null, null);
-        i = seed(homeCode, locale, base, i, "chore.default.salad", "🥗", 0, null, null);
-        i = seed(homeCode, locale, base, i, "chore.default.waterPlants", "🪴", 7, null, null);
-        seed(homeCode, locale, base, i, "chore.default.dogOut", "🐕", 0, "08:00-10:00,18:00-22:00", null);
-    }
-
-    /** Saves one seeded chore with a strictly increasing createdAt so list order is stable. */
-    private int seed(String homeCode, Locale locale, Instant base, int index,
-                     String nameKey, String emoji, int intervalDays, String windows,
-                     String seasons) {
-        ChoreTask t = new ChoreTask(homeCode, translations.getTranslation(nameKey, locale), emoji);
-        t.setIntervalDays(intervalDays);
-        t.setAvailableWindows(windows);
-        t.setSeasons(seasons);
-        t.setCreatedAt(base.plusMillis(index));
-        tasks.save(t);
-        return index + 1;
+        int index = 0;
+        for (Section section : Section.values()) {
+            List<Entry> picked = ChoreCatalog.inSection(section).stream()
+                    .filter(e -> pick.keys().contains(e.key())).toList();
+            if (picked.isEmpty()) {
+                continue;
+            }
+            Long groupId = pick.inSections()
+                    ? addGroup(homeCode, translations.getTranslation(section.messageKey(), locale),
+                            section.emoji()).getId()
+                    : null;
+            for (int i = 0; i < picked.size(); i++) {
+                Entry e = picked.get(i);
+                ChoreTask t = new ChoreTask(homeCode, translations.getTranslation(e.messageKey(), locale),
+                        e.emoji());
+                t.setIntervalDays(e.intervalDays());
+                t.setAvailableWindows(e.windows());
+                t.setSeasons(e.seasons());
+                if (groupId != null) {
+                    t.setGroupId(groupId);
+                    t.setSortOrder(i);
+                }
+                // Strictly increasing: on a flat board, creation time is the order.
+                t.setCreatedAt(base.plusMillis(index++));
+                tasks.save(t);
+            }
+        }
     }
 
     @Transactional

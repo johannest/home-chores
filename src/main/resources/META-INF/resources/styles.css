@@ -634,6 +634,13 @@ vaadin-checkbox-group::part(group-field) {
        ("🕒 8–10, 18–22"). */
     white-space: nowrap;
 }
+/* The badge is out of flow, so the card's own padding is all that keeps it off the emoji: a due
+   card carrying a Book button fills its 112px, starts the emoji 16px from the top, and the pill
+   (8px + ~23px) sat on it. Clearing the pill's bottom edge costs a few pixels of height only on
+   cards that have one. */
+.task-card:has(> .streak) {
+    padding-top: 36px;
+}
 /* Tapping the corner chip must not play the card's own press animation — that animation is the
    board's feedback for "chore logged", and borrowing it here would say the wrong thing. */
 .task-card:has(.snooze-chip:active) {
@@ -2075,6 +2082,39 @@ body.hold-dragging {
     }
     .task-grid {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    }
+}
+
+/* ---- Starter chores on the create-home form (§4.2.1) ---- */
+.starter-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--lumo-space-s);
+}
+.starter-label {
+    display: block;
+    font-weight: 600;
+    font-size: var(--lumo-font-size-s);
+}
+.starter-dialog .starter-bulk {
+    display: flex;
+    gap: var(--lumo-space-xs);
+}
+.starter-dialog .starter-section {
+    width: 100%;
+}
+/* The section names are what the eye runs down, so they read as headings, not field labels. */
+.starter-dialog .starter-section::part(label) {
+    font-size: var(--lumo-font-size-m);
+    font-weight: 700;
+    color: var(--lumo-body-text-color);
+}
+/* Two columns where there is room for them; one on a phone, where the labels need the width. */
+@media (min-width: 560px) {
+    .starter-dialog .starter-section::part(group-field) {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
     }
 }
 
