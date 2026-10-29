@@ -148,9 +148,9 @@ class ListEditUiTest extends HomeChoresUiTest {
         String code = alex.getHomeCode();
         openLists(0);
         Tabs tabs = kindTabs();
-        assertEquals(4, tabs.getComponentCount(), "three built-ins and the +");
+        assertEquals(5, tabs.getComponentCount(), "four built-ins and the +");
 
-        tabs.setSelectedIndex(3);
+        tabs.setSelectedIndex(4);
         TextPromptDialog d = open(TextPromptDialog.class).get(0);
         assertEquals(0, kindTabs().getSelectedIndex(), "+ is an action, not a place to stay");
         test(d.field).setValue("Hardware store");
@@ -158,8 +158,8 @@ class ListEditUiTest extends HomeChoresUiTest {
 
         assertEquals(1, lists.customLists(code).size());
         Tabs after = kindTabs();
-        assertEquals(5, after.getComponentCount());
-        assertEquals(3, after.getSelectedIndex(), "the new list is showing");
+        assertEquals(6, after.getComponentCount());
+        assertEquals(4, after.getSelectedIndex(), "the new list is showing");
         assertTrue(after.getElement().getTextRecursively().contains("Hardware store"));
 
         $(com.vaadin.flow.component.textfield.TextField.class).all().stream()
@@ -168,7 +168,7 @@ class ListEditUiTest extends HomeChoresUiTest {
         $(Button.class).all().stream().filter(b -> "Add".equals(b.getText()) && usable(b))
                 .findFirst().ifPresent(b -> test(b).click());
         Long listId = lists.customLists(code).get(0).getId();
-        assertEquals(1, lists.openItems(code, ListKind.TODO, listId).size());
+        assertEquals(1, lists.openItems(code, ListKind.TODO, listId, null).size());
         assertTrue(lists.openItems(code, ListKind.TODO).isEmpty(), "not on the built-in To-do");
 
         kindTabs().setSelectedIndex(1);
@@ -179,7 +179,7 @@ class ListEditUiTest extends HomeChoresUiTest {
     void aBlankName_keepsTheDialogOpen() {
         signedIn("Alex");
         openLists(0);
-        kindTabs().setSelectedIndex(3);
+        kindTabs().setSelectedIndex(4);
         TextPromptDialog d = open(TextPromptDialog.class).get(0);
         test(footerButton(d, "Create")).click();
         assertTrue(d.isOpened());
@@ -192,7 +192,7 @@ class ListEditUiTest extends HomeChoresUiTest {
         String code = alex.getHomeCode();
         CustomList gifts = lists.createList(code, Author.member(alex.getId()), "Gifts").orElseThrow();
         lists.add(code, ListKind.TODO, gifts.getId(), Author.member(alex.getId()), "Book");
-        openLists(3);
+        openLists(4);
         assertEquals(1, rows().size());
 
         clickMenuItem("Delete list");
@@ -204,7 +204,7 @@ class ListEditUiTest extends HomeChoresUiTest {
 
         assertTrue(lists.customLists(code).isEmpty());
         assertEquals(1, kindTabs().getSelectedIndex(), "back on To-do");
-        assertEquals(4, kindTabs().getComponentCount());
+        assertEquals(5, kindTabs().getComponentCount());
     }
 
     @Test
@@ -212,7 +212,7 @@ class ListEditUiTest extends HomeChoresUiTest {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
         lists.createList(code, Author.member(alex.getId()), "Gifts");
-        openLists(3);
+        openLists(4);
 
         clickMenuItem("Rename list");
         TextPromptDialog d = open(TextPromptDialog.class).get(0);
@@ -222,7 +222,52 @@ class ListEditUiTest extends HomeChoresUiTest {
 
         assertEquals("Birthday gifts", lists.customLists(code).get(0).getName());
         assertTrue(kindTabs().getElement().getTextRecursively().contains("Birthday gifts"));
-        assertEquals(3, kindTabs().getSelectedIndex(), "still on it");
+        assertEquals(4, kindTabs().getSelectedIndex(), "still on it");
+    }
+
+    @Test
+    void makingAListPrivate_locksItsTab_andTakesItOffTheOthersBoards() {
+        Member alex = signedIn("Alex");
+        String code = alex.getHomeCode();
+        lists.createList(code, Author.member(alex.getId()), "Diary");
+        openLists(4);
+
+        clickMenuItem("Make private");
+        assertTrue(kindTabs().getElement().getTextRecursively().contains("🔒 Diary"));
+        assertTrue(lists.findList(code, lists.customLists(code).get(0).getId(), null).isEmpty(),
+                "the kitchen tablet no longer finds it");
+
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        SessionContext.signOut();
+        navigate(LandingView.class);
+        SessionContext.signIn(sam.getId(), code);
+        navigate(HomeView.class);
+        openLists(0);
+        assertFalse(kindTabs().getElement().getTextRecursively().contains("Diary"), "Sam has no such tab");
+    }
+
+    /** The notice must tell the truth about "private": hidden in the app, but in an admin's backup. */
+    @Test
+    void thePrivacyNotice_saysPrivateMeansHiddenInTheApp_notAbsentFromAdminBackups() {
+        navigate(PrivacyView.class);
+        String page = $(Div.class).all().stream().map(d -> d.getElement().getTextRecursively())
+                .reduce("", String::concat);
+        assertTrue(page.contains("marked private"));
+        assertTrue(page.contains("private lists and routines included"));
+        assertFalse(page.contains("Nothing inside the app is private"));
+    }
+
+    @Test
+    void theMenuOffersPrivacyOnlyToTheListsMaker() {
+        Member alex = signedIn("Alex");
+        String code = alex.getHomeCode();
+        Member sam = service.joinHome(code, "Sam").orElseThrow();
+        lists.createList(code, Author.member(sam.getId()), "Sam's ideas");
+        openLists(4);
+        assertTrue($(MenuBar.class).all().stream().filter(this::usable)
+                .flatMap(m -> m.getItems().stream()).flatMap(i -> i.getSubMenu().getItems().stream())
+                .noneMatch(i -> "Make private".equals(i.getElement().getTextRecursively().trim())),
+                "an admin cannot hide a member's list either");
     }
 
     @Test
@@ -230,7 +275,7 @@ class ListEditUiTest extends HomeChoresUiTest {
         Member alex = signedIn("Alex");
         String code = alex.getHomeCode();
         CustomList gifts = lists.createList(code, Author.member(alex.getId()), "Gifts").orElseThrow();
-        openLists(3);
+        openLists(4);
         Member sam = service.joinHome(code, "Sam").orElseThrow();
 
         lists.deleteList(code, gifts.getId(), Author.member(sam.getId())); // bumps the home: the board redraws

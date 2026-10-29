@@ -2117,3 +2117,44 @@ body.hold-dragging {
         grid-template-columns: 1fr 1fr;
     }
 }
+
+/* ---- Routines (§4.4f): the Lists tab and the Chores tab's "Today's routines" ---- */
+.routine-row {
+    display: flex;
+    align-items: center;
+    gap: var(--lumo-space-s);
+    width: 100%;
+}
+.routines-panel .routine-add {
+    margin: var(--lumo-space-s) 0;
+}
+/* Only a routine the viewer may edit opens on a tap, so only that one looks tappable. */
+.routine-item .list-text:not(.editable) {
+    cursor: auto;
+}
+.routines-today {
+    margin-bottom: var(--lumo-space-s);
+}
+.routine-dialog .routine-name-row {
+    display: flex;
+    gap: var(--lumo-space-s);
+    align-items: flex-end;
+}
+.routine-dialog .routine-emoji {
+    width: 4.5em;
+    flex: none;
+}
+.routine-dialog vaadin-checkbox-group,
+.routine-dialog vaadin-radio-group,
+.routine-dialog vaadin-time-picker,
+.routine-dialog vaadin-select {
+    width: 100%;
+}
+.routine-dialog .routine-delete {
+    margin-inline-end: auto;
+}
+.routine-dialog .form-error {
+    color: var(--lumo-error-text-color);
+    font-size: var(--lumo-font-size-s);
+    margin: 0;
+}

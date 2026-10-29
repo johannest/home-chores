@@ -45,7 +45,7 @@ class BackupServiceTest {
 
         var restored = lists.customLists(code);
         assertEquals(List.of("Gifts"), restored.stream().map(com.homechores.domain.CustomList::getName).toList());
-        assertEquals(List.of("Book"), lists.openItems(code, ListKind.TODO, restored.get(0).getId())
+        assertEquals(List.of("Book"), lists.openItems(code, ListKind.TODO, restored.get(0).getId(), null)
                 .stream().map(ListItem::getText).toList(), "the line is back on its list");
         assertEquals(List.of("Call the plumber"), lists.openItems(code, ListKind.TODO)
                 .stream().map(ListItem::getText).toList(), "and not on the built-in To-do");

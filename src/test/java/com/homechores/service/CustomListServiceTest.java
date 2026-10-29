@@ -62,15 +62,15 @@ class CustomListServiceTest {
         assertEquals(List.of("Call the plumber"),
                 lists.openItems(code, ListKind.TODO).stream().map(ListItem::getText).toList());
         assertEquals(List.of("Book"),
-                lists.openItems(code, ListKind.TODO, gifts.getId()).stream().map(ListItem::getText).toList());
+                lists.openItems(code, ListKind.TODO, gifts.getId(), null).stream().map(ListItem::getText).toList());
         assertEquals(List.of("Screws"),
-                lists.openItems(code, ListKind.TODO, hw.getId()).stream().map(ListItem::getText).toList());
+                lists.openItems(code, ListKind.TODO, hw.getId(), null).stream().map(ListItem::getText).toList());
 
         lists.setDone(book.getId(), Author.member(alex.getId()), true);
-        assertEquals(1, lists.doneItems(code, ListKind.TODO, gifts.getId()).size());
+        assertEquals(1, lists.doneItems(code, ListKind.TODO, gifts.getId(), null).size());
         assertTrue(lists.doneItems(code, ListKind.TODO).isEmpty(), "the built-in To-do's done list is its own");
         assertEquals(0, lists.clearDone(code, ListKind.TODO), "clearing To-do leaves the gift list alone");
-        assertEquals(1, lists.clearDone(code, ListKind.TODO, gifts.getId()));
+        assertEquals(1, lists.clearDone(code, ListKind.TODO, gifts.getId(), null));
     }
 
     @Test
@@ -80,7 +80,7 @@ class CustomListServiceTest {
         CustomList samsList = lists.createList(sam.getHomeCode(), Author.member(sam.getId()), "Private").orElseThrow();
         lists.add(sam.getHomeCode(), ListKind.TODO, samsList.getId(), Author.member(sam.getId()), "Secret");
 
-        assertTrue(lists.openItems(alex.getHomeCode(), ListKind.TODO, samsList.getId()).isEmpty());
+        assertTrue(lists.openItems(alex.getHomeCode(), ListKind.TODO, samsList.getId(), null).isEmpty());
         assertTrue(lists.add(alex.getHomeCode(), ListKind.TODO, samsList.getId(), Author.member(alex.getId()), "x").isEmpty());
         assertFalse(lists.renameList(alex.getHomeCode(), samsList.getId(), Author.member(alex.getId()), "Mine"));
         assertFalse(lists.deleteList(alex.getHomeCode(), samsList.getId(), Author.member(alex.getId())));
@@ -95,9 +95,9 @@ class CustomListServiceTest {
         CustomList l = lists.createList(code, Author.member(alex.getId()), "Gifts").orElseThrow();
 
         assertTrue(lists.renameList(code, l.getId(), Author.member(alex.getId()), " Birthday gifts "));
-        assertEquals("Birthday gifts", lists.findList(code, l.getId()).orElseThrow().getName());
+        assertEquals("Birthday gifts", lists.findList(code, l.getId(), null).orElseThrow().getName());
         assertFalse(lists.renameList(code, l.getId(), Author.member(alex.getId()), "  "));
-        assertEquals("Birthday gifts", lists.findList(code, l.getId()).orElseThrow().getName());
+        assertEquals("Birthday gifts", lists.findList(code, l.getId(), null).orElseThrow().getName());
     }
 
     @Test

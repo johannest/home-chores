@@ -16,10 +16,12 @@ import com.homechores.domain.Seasons;
 import com.homechores.domain.SpreeTier;
 import com.homechores.domain.TimeWindows;
 import com.homechores.domain.Trophy;
+import com.homechores.service.Author;
 import com.homechores.service.BackupService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.CreditService;
 import com.homechores.service.ListItemService;
+import com.homechores.service.RoutineService;
 import com.homechores.service.SharedDeviceService;
 import com.homechores.service.ListItemService.ListSlot;
 import com.vaadin.flow.component.UI;
@@ -27,6 +29,7 @@ import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.checkbox.CheckboxGroup;
+import com.vaadin.flow.component.combobox.ComboBox;
 import com.vaadin.flow.component.checkbox.Switch;
 import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.details.Details;
@@ -57,6 +60,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -111,13 +115,15 @@ class AdminPanel extends VerticalLayout {
      */
     private final ListItemService lists;
     private final SharedDeviceService sharedDevices;
+    private final RoutineService routines;
 
     private final EnumMap<Section, Boolean> openState = new EnumMap<>(Section.class);
 
     AdminPanel(ChoreService service, CreditService creditService, BackupService backup,
-               ListItemService lists, SharedDeviceService sharedDevices, String homeCode,
-               Long memberId) {
+               ListItemService lists, SharedDeviceService sharedDevices, RoutineService routines,
+               String homeCode, Long memberId) {
         this.service = service;
+        this.routines = routines;
         this.lists = lists;
         this.sharedDevices = sharedDevices;
         this.creditService = creditService;
@@ -716,8 +722,23 @@ class AdminPanel extends VerticalLayout {
         HorizontalLayout pinRow = new HorizontalLayout(pin, changePin);
         pinRow.setAlignItems(FlexComponent.Alignment.CENTER);
 
+        // The family's clock (§4.4f). A ComboBox, since the list is long and typing "Hel" is
+        // how anyone finds Europe/Helsinki; set from the first board opened, so most homes
+        // never touch it.
+        ComboBox<String> zone = new ComboBox<>(T.tr("admin.timeZone"));
+        zone.setHelperText(T.tr("admin.timeZone.helper"));
+        zone.setWidthFull();
+        zone.setItems(ZoneId.getAvailableZoneIds().stream().filter(z -> z.contains("/")).sorted().toList());
+        zone.setValue(home.zone().getId());
+        zone.addValueChangeListener(e -> {
+            if (e.isFromClient() && e.getValue() != null
+                    && routines.setZone(homeCode, memberId, e.getValue())) {
+                toast(T.tr("admin.timeZone.saved", e.getValue()));
+            }
+        });
+
         VerticalLayout body = new VerticalLayout(counterReset, resetNow,
-                joinGate, joinHint, rejoinGate, rejoinHint, nameRow, pinLabel, pinRow);
+                joinGate, joinHint, rejoinGate, rejoinHint, nameRow, zone, pinLabel, pinRow);
         body.setPadding(false);
         body.setSpacing(true);
         body.setWidthFull();
@@ -1076,7 +1097,7 @@ class AdminPanel extends VerticalLayout {
      * hides it and cancels its reminders but keeps its lines (see ListItemService.setListEnabled).
      */
     private Details listsSection() {
-        List<ListSlot> slots = lists.listSlots(homeCode);
+        List<ListSlot> slots = lists.listSlots(homeCode, Author.member(memberId));
         Set<ListKind> hidden = lists.hiddenLists(homeCode);
         Details s = section(Section.LISTS, T.tr("admin.lists"), false);
 

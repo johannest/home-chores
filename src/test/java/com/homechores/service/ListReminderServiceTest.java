@@ -101,7 +101,7 @@ class ListReminderServiceTest {
 
         ListReminder after = repo.findByItemId(plumber.getId()).orElseThrow();
         assertTrue(after.isFired(), "kept, marked fired — the board will offer a snooze");
-        assertEquals(1, reminders.firedForHome(code).size());
+        assertEquals(1, reminders.firedFor(code, alex.getId()).size());
         assertEquals(0, reminders.sendDue(Instant.now()), "and never sent twice");
     }
 
@@ -149,7 +149,7 @@ class ListReminderServiceTest {
         ListReminder r = repo.findByItemId(item.getId()).orElseThrow();
         assertNull(r.getFiredAt(), "pending again");
         assertEquals(later, r.getDueAt());
-        assertTrue(reminders.firedForHome(alex.getHomeCode()).isEmpty(), "nothing left to answer");
+        assertTrue(reminders.firedFor(alex.getHomeCode(), alex.getId()).isEmpty(), "nothing left to answer");
         assertEquals(0, reminders.sendDue(Instant.now()), "and it does not fire before its new time");
     }
 

@@ -53,6 +53,10 @@ public class PrivacyView extends VerticalLayout {
                         + "each one and when, and who ticked it off. Ticked lines are deleted "
                         + "automatically a day later. Open lines are part of the home's backup "
                         + "export so a restored home keeps its shopping list.",
+                "Routines your family sets up (\"Workout, Tuesdays 18:00\"): their name, days, "
+                        + "time and whose they are, the day each was last ticked off and by whom, "
+                        + "and the home's time zone. Ticks are deleted after a week. Routines are "
+                        + "part of the home's backup export.",
                 "A short home code and a 4-digit admin PIN used to manage the home.",
                 "Only if you turn on the optional chore reminder: your chosen reminder time, "
                         + "your device's timezone, and the push-notification address and keys your "
@@ -66,12 +70,18 @@ public class PrivacyView extends VerticalLayout {
                         + "exports either.",
         }));
         card.add(section("Who can see it",
-                "Everything in a home is shared with every member of that home. The grocery and "
-                        + "to-do lists are household lists, not personal ones: every line you add, "
-                        + "who added it and who ticked it off is visible to the whole family, as "
-                        + "are chores, feedback and history. Nothing inside the app is private to "
-                        + "one member, so please be mindful of what you write there. Nobody "
-                        + "outside your home can see any of it."));
+                "Almost everything in a home is shared with every member of that home: chores, "
+                        + "feedback and history, the grocery, to-do and dinner lists (every line, "
+                        + "who added it and who ticked it off), and routines. Two things can be "
+                        + "kept to yourself: a list you made yourself and marked private, and a "
+                        + "routine of your own marked \"only visible to me\". Inside the app nobody "
+                        + "else sees those — not other members, not the home's admins, and not the "
+                        + "shared kitchen tablet — and their reminders reach only your devices. "
+                        + "\"Private\" means hidden in the app, not secret from everyone: a home "
+                        + "admin's backup download contains the whole home, private lists and "
+                        + "routines included, so an admin could read them in that file; and like "
+                        + "everything else they are stored on our server and in the safety export "
+                        + "described below. Nobody outside your home can see any of it."));
 
         card.add(section("What we do NOT store",
                 "No email addresses, phone numbers, passwords, home addresses, location, or payment "

@@ -5,7 +5,9 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.ZoneId;
 
 /**
  * A household. The primary key {@code code} is the short, shareable "home id"
@@ -76,6 +78,15 @@ public class Home {
 
     /** Built-in lists an admin switched off, as comma-separated {@link ListKind} names. Null: all on. */
     private String hiddenLists;
+
+    /**
+     * The family's clock (§4.4f), as a zone id: what "Tuesday 18:00" and "today" mean for its
+     * routines, whoever's phone is asking. Taken from the first board opened after it existed and
+     * changeable in Home settings. Nullable, so {@code ddl-auto=update} can add it to a populated
+     * table; read through {@link #zone()}.
+     */
+    @Column(length = 64)
+    private String timeZone;
 
     /** How chores are divided among members. */
     @Enumerated(EnumType.STRING)
@@ -201,6 +212,26 @@ public class Home {
 
     public void setCounterReset(CounterReset counterReset) {
         this.counterReset = counterReset;
+    }
+
+    public String getTimeZone() {
+        return timeZone;
+    }
+
+    public void setTimeZone(String timeZone) {
+        this.timeZone = timeZone;
+    }
+
+    /** The home's zone, or the server's while none is known (or the stored id stopped parsing). */
+    public ZoneId zone() {
+        if (timeZone != null) {
+            try {
+                return ZoneId.of(timeZone);
+            } catch (DateTimeException e) {
+                // fall through — a zone id the JDK no longer knows reads as unset
+            }
+        }
+        return ZoneId.systemDefault();
     }
 
     public String getListOrder() {

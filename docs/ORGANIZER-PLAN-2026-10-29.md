@@ -5,7 +5,16 @@ this week". This note collects what would serve that use case, ranks it, and ske
 first piece the family asked for: **a task that repeats on fixed weekdays** ("workout every
 Tuesday evening").
 
-Nothing here is built. Decisions marked **Q** are open.
+**Status (2026-10-29):** idea 1 is built (routines, SPEC §4.4f), with the plan's open questions
+decided as below, plus private routines and private lists (SPEC §4.4e), which came up while
+building it. The other ideas are not built. Decisions marked **Q** were open when this was written.
+
+- [x] **Q1** Weekly and every other week (anchored to a Monday, "starting this week / next week").
+- [x] **Q2** Monthly dates left for later (SPEC §7).
+- [x] **Q3** A Routines tab on Lists, plus today's routines at the top of the Chores tab.
+- [x] **Q4** One time zone for the whole family (`Home.timeZone`), set from the first board.
+- [x] Not in the plan: a routine of one's own can be private, and so can a list one made.
+- [ ] The in-app Done / Snooze answer to a routine reminder (the notification just opens the board).
 
 ## What the app already has to build on
 
@@ -22,7 +31,7 @@ one floats to the following Wednesday.
 
 ## Ideas, ranked by value for the effort
 
-1. **Routines: things that repeat on fixed weekdays** (the ask). Workout Tue 18:00, piano
+1. ✅ **Routines: things that repeat on fixed weekdays** (the ask — built). Workout Tue 18:00, piano
    lesson Thu 16:30, recycling bin out Sunday evening, pills every morning. Personal or for the
    whole home. Plan below.
 2. **A "Today" agenda on the board** — routines due today, chores due today, today's dinner and

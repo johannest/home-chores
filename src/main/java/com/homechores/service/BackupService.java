@@ -31,16 +31,25 @@ import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
 import com.homechores.domain.RejoinRequestRepository;
+import com.homechores.domain.Routine;
+import com.homechores.domain.RoutineDoneRepository;
+import com.homechores.domain.RoutineRepository;
 import com.homechores.domain.SpreeTier;
 import com.homechores.domain.SpreeTierRepository;
 import com.homechores.domain.Trophy;
 import com.homechores.domain.TrophyReward;
 import com.homechores.domain.TrophyRewardRepository;
+import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,6 +71,8 @@ public class BackupService {
     private final ChoreGroupRepository groups;
     private final ChoreReminderRepository choreReminders;
     private final ListItemRepository listItems;
+    private final RoutineRepository routines;
+    private final RoutineDoneRepository routineTicks;
     private final CustomListRepository customLists;
     private final ListReminderRepository listReminders;
     private final CompletionRepository completions;
@@ -86,6 +97,7 @@ public class BackupService {
                         ListReminderRepository listReminders, CompletionRepository completions,
                         CreditEntryRepository creditEntries, SpreeTierRepository spreeTiers,
                         TrophyRewardRepository trophyRewards, RejoinRequestRepository rejoins,
+                        RoutineRepository routines, RoutineDoneRepository routineTicks,
                         HomeState homeState) {
         this.homes = homes;
         this.members = members;
@@ -93,6 +105,8 @@ public class BackupService {
         this.groups = groups;
         this.choreReminders = choreReminders;
         this.listItems = listItems;
+        this.routines = routines;
+        this.routineTicks = routineTicks;
         this.customLists = customLists;
         this.listReminders = listReminders;
         this.completions = completions;
@@ -114,7 +128,8 @@ public class BackupService {
                 home.isRotationEnforced(), home.getBookingTimeoutHours(), home.isApproveRejoin(),
                 home.isApproveJoin(), home.isConfirmCompletion(), home.isAllowOtherHelp(),
                 home.getCreatedAt(), home.getMaxInARow(), home.getCounterReset(),
-                home.getCounterResetAt(), home.getListOrder(), home.getHiddenLists());
+                home.getCounterResetAt(), home.getListOrder(), home.getHiddenLists(),
+                home.getTimeZone());
         for (Member m : members.findByHomeCodeOrderByJoinedAtAsc(homeCode)) {
             b.members.add(new MemberDto(m.getId(), m.getName(), m.getColor(), m.isAdmin(),
                     m.getJoinedAt(), m.getAvatar(), m.getTrophiesSeen()));
@@ -149,12 +164,18 @@ public class BackupService {
         // restore brings back the half-finished shopping list too.
         for (CustomList cl : customLists.findByHomeCodeOrderByCreatedAtAscIdAsc(homeCode)) {
             b.customLists.add(new CustomListDto(cl.getId(), cl.getName(), cl.getCreatedAt(),
-                    cl.getCreatedByMemberId()));
+                    cl.getCreatedByMemberId(), cl.getOwnerMemberId()));
         }
         for (ListItem li : listItems.findByHomeCodeOrderByCreatedAtAscIdAsc(homeCode)) {
             b.listItems.add(new ListItemDto(li.getKind(), li.getText(), li.getCreatedAt(),
                     li.getCreatedByMemberId(), li.getDoneAt(), li.getDoneByMemberId(), li.getDay(),
                     li.getListId(), li.getSortOrder()));
+        }
+        // Routines are family data; their ticks are not (they only matter on their own day).
+        for (Routine r : routines.findByHomeCodeOrderByTimeAscNameAscIdAsc(homeCode)) {
+            b.routines.add(new RoutineDto(r.getName(), r.getEmoji(), r.getWeekdays(),
+                    r.getEveryWeeks(), r.getAnchorMonday(), r.getTime(), r.getForMemberId(),
+                    r.getCreatedByMemberId(), r.getCreatedAt(), r.isPrivateToOwner()));
         }
         try {
             return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(b);
@@ -281,6 +302,8 @@ public class BackupService {
         groups.deleteByHomeCode(code);
         listItems.deleteByHomeCode(code);
         customLists.deleteByHomeCode(code);
+        routineTicks.deleteByHomeCode(code);
+        routines.deleteByHomeCode(code);
         members.deleteByHomeCode(code);
 
         // Recreate members and tasks, remapping their (identity-generated) ids.
@@ -346,13 +369,22 @@ public class BackupService {
         }
         // Lists before their lines, ids remapped as groups are for tasks.
         Map<Long, Long> listIdMap = new HashMap<>();
+        // Private lists whose owner did not come back. Their lines must be dropped with them,
+        // not landed on the shared To-do like a line whose list is merely missing (below).
+        Set<Long> droppedPrivate = new HashSet<>();
         for (CustomListDto cl : b.customLists) {
             String name = InputLimits.clip(cl.name, InputLimits.LIST_NAME);
+            Long owner = cl.ownerMemberId == null ? null : memberIdMap.get(cl.ownerMemberId);
+            if (cl.ownerMemberId != null && owner == null) {
+                droppedPrivate.add(cl.id);
+                continue;
+            }
             if (name == null || name.isBlank() || listIdMap.size() >= InputLimits.CUSTOM_LISTS) {
                 continue;
             }
             CustomList entity = new CustomList(code, name,
                     cl.createdByMemberId == null ? null : memberIdMap.get(cl.createdByMemberId));
+            entity.setOwnerMemberId(owner);
             if (cl.createdAt != null) {
                 entity.setCreatedAt(cl.createdAt);
             }
@@ -363,11 +395,22 @@ public class BackupService {
         // built-in names and lists this restore created survive.
         home.setListOrder(remapListOrder(b.home.listOrder, listIdMap));
         home.setHiddenLists(cleanHiddenLists(b.home.hiddenLists));
+        // An unknown zone keeps whatever the home had: a hand-edited file must not stop the clock.
+        if (b.home.timeZone != null && validZone(b.home.timeZone)) {
+            home.setTimeZone(b.home.timeZone);
+        }
         homes.save(home);
+        restoreRoutines(b.routines, code, home.zone(), memberIdMap);
         for (ListItemDto li : b.listItems) {
             String text = InputLimits.clip(li.text, InputLimits.LIST_ITEM);
             if (text == null || text.isBlank()) {
                 continue; // a hand-edited file can hold an empty line; nothing to show for it
+            }
+            if (li.kind != null && !li.kind.holdsLines()) {
+                continue; // a tab, not a kind of line — see ListKind.ROUTINES
+            }
+            if (li.listId != null && droppedPrivate.contains(li.listId)) {
+                continue;
             }
             if (li.kind == ListKind.DINNER && li.day == null) {
                 continue; // a dinner without a day would never show and never be purged
@@ -508,6 +551,50 @@ public class BackupService {
         return out.isEmpty() ? null : String.join(",", out);
     }
 
+    /** Routines, re-validated like everything else in a hand-editable file. A personal routine
+     *  whose member did not come back is dropped, as it would be had that member been removed. */
+    private void restoreRoutines(List<RoutineDto> dtos, String code, ZoneId zone,
+                                 Map<Long, Long> memberIdMap) {
+        Instant now = Instant.now();
+        int kept = 0;
+        for (RoutineDto dto : dtos) {
+            String name = InputLimits.clip(dto.name(), InputLimits.TASK_NAME);
+            int days = dto.weekdays() & 0x7F;
+            Long forMember = dto.forMemberId() == null ? null : memberIdMap.get(dto.forMemberId());
+            if (name == null || name.isBlank() || days == 0
+                    || (dto.forMemberId() != null && forMember == null)
+                    || kept >= InputLimits.MAX_ROUTINES_PER_HOME) {
+                continue;
+            }
+            Routine r = new Routine(code,
+                    dto.createdByMemberId() == null ? null : memberIdMap.get(dto.createdByMemberId()));
+            r.setName(name);
+            r.setEmoji(InputLimits.clip(dto.emoji(), InputLimits.EMOJI));
+            r.setWeekdays(days);
+            r.setEveryWeeks(dto.everyWeeks() == Routine.EVERY_OTHER_WEEK ? Routine.EVERY_OTHER_WEEK : 1);
+            r.setAnchorMonday(dto.anchorMonday() == null ? null : Routine.mondayOf(dto.anchorMonday()));
+            r.setTime(dto.time());
+            r.setForMemberId(forMember);
+            // Private needs an owner; a hand-edited home routine marked private stays shared.
+            r.setPrivateToOwner(Boolean.TRUE.equals(dto.privateToOwner()) && forMember != null);
+            if (dto.createdAt() != null) {
+                r.setCreatedAt(dto.createdAt());
+            }
+            r.setNextFireAt(r.fireAfter(now, zone));
+            routines.save(r);
+            kept++;
+        }
+    }
+
+    private static boolean validZone(String zoneId) {
+        try {
+            ZoneId.of(zoneId);
+            return true;
+        } catch (DateTimeException e) {
+            return false;
+        }
+    }
+
     private static String cleanHiddenLists(String hidden) {
         if (hidden == null || hidden.isBlank()) {
             return null;
@@ -544,6 +631,8 @@ public class BackupService {
         public List<ListItemDto> listItems = new ArrayList<>();
         /** Absent in backups written before custom lists existed: Jackson leaves it empty. */
         public List<CustomListDto> customLists = new ArrayList<>();
+        /** Absent in backups written before routines existed: Jackson leaves it empty. */
+        public List<RoutineDto> routines = new ArrayList<>();
     }
 
     /** The boxed booleans are boxed so backups written before those settings existed
@@ -560,7 +649,10 @@ public class BackupService {
                           /** The Lists tab's order and switched-off built-ins; null in older
                            *  files, which means the defaults. Custom-list ids in the order are
                            *  the file's own and are remapped on restore. */
-                          String listOrder, String hiddenLists) {
+                          String listOrder, String hiddenLists,
+                          /** The family's clock (§4.4f); null in older files and for a home
+                           *  that never had a board opened, which keeps the restored home's. */
+                          String timeZone) {
     }
 
     /** {@code avatar} is absent in pre-avatar backups and deserializes to null — fine.
@@ -608,7 +700,19 @@ public class BackupService {
                               Integer sortOrder) {
     }
 
-    public record CustomListDto(Long id, String name, Instant createdAt, Long createdByMemberId) {
+    /** {@code ownerMemberId} is set for a private list (§4.4e) and null in older files. An admin's
+     *  backup holds private lists too — the family's whole record — and the privacy notice says so. */
+    public record CustomListDto(Long id, String name, Instant createdAt, Long createdByMemberId,
+                                Long ownerMemberId) {
+    }
+
+    /** {@code forMemberId} null = the whole home's. Member ids are the file's own, remapped.
+     *  Private routines are in the file too: an admin's backup is the family's whole record, and
+     *  the privacy notice says so (§4.15). */
+    public record RoutineDto(String name, String emoji, int weekdays, int everyWeeks,
+                             LocalDate anchorMonday, LocalTime time,
+                             Long forMemberId, Long createdByMemberId, Instant createdAt,
+                             Boolean privateToOwner) {
     }
 
     /** {@code taskId} is null (and {@code note} set) for an "other help" entry. */
