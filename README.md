@@ -54,6 +54,7 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **PWA install** | Installable on Android (install prompt) and iPhone (Share → *Add to Home Screen*): branded icon, standalone display, themed splash screens, offline fallback page. |
 | **Privacy page** | A plain-language privacy notice at `/privacy` and a brief user agreement at `/terms` (consented via a checkbox on the create/join forms), both linked from the landing page. |
 | **Themes & colours** | Follows the OS theme automatically (`@ColorScheme(SYSTEM)` + CSS `light-dark()`), and one palette-glyph menu in the header holds both axes: auto/light/dark **and** a brand colour — **green, pink, blue or grey**. Both are per device (localStorage), applied before Vaadin loads so there's no flash. A palette is three CSS custom properties, so it composes with light/dark instead of duplicating it. The page is a faint tint of the palette under a wallpaper of chore doodles, the chore tiles are raised like buttons and faintly domed like bubbles, and a shared list's lines are cards of the same kind. |
+| **Sound & vibration** | A short synthesised chime and a buzz when a chore is done, scaled like the confetti (a blip, a rising run, a little fanfare for a trophy); a different sound for a tap the rules refuse; a quiet tick for a ticked list line or routine. Two switches under **Sound & vibration** in the header menu, per device: sound starts **off** (the kitchen tablet should not chime all day), vibration on. On iPhones sound mixes with music and respects the silent switch; iPhones cannot vibrate for a web page, so that switch is hidden there. No audio files. |
 | **Remind me later (per chore)** | Tap ⏰ on a chore card and pick *in 1h / 2h / 4h / 8h / a day / a week* — one push notification naming that chore when the time comes. One per chore per person, replaced if you change your mind, and it cancels itself the moment you do the chore (or somebody else does). Needs the same VAPID keys as the daily reminder. |
 | **Chore reminders (opt-in)** | Real Web Push: each member can pick a wall-clock time (their own timezone) and get a notification on subscribed devices if they haven't logged any chores that day. Requires VAPID keys (see below); on iPhone/iPad it works once the PWA is added to the Home Screen (iOS 16.4+). Each member keeps at most five subscribed devices, and a push the service does not answer within 10 s is given up on rather than waited for. |
 
@@ -438,6 +439,7 @@ src/main/java/com/homechores/
     │                             #   danger zone (delete the whole home)
     ├── Charts.java               # dependency-free bar / segment / trend charts
     ├── AppearanceMenu.java       # colour scheme + brand palette, per device
+    ├── EffectsItems.java         # the Sounds / Vibration switches, per device
     ├── SnoozeDialog.java         # "remind me about this chore in 2h"
     ├── StarterChoresDialog.java  # the create form's starter-chore picker
     ├── ListPanel.java            # Groceries / To-do / Dinner / Routines
@@ -445,7 +447,7 @@ src/main/java/com/homechores/
     ├── RoutineDialog.java        # make or change a routine
     ├── RoutineFormat.java        # "Tue, Thu · 18:00 · every other week · Sam"
     ├── ListReminderDialog.java   # "remind us about this line tomorrow 9:00" + snooze on fire
-    ├── Celebrations.java         # confetti + congratulation + feedback + trophy dialogs
+    ├── Celebrations.java         # confetti, sound + vibration, congratulation + feedback + trophy dialogs
     ├── PrivacyView.java          # /privacy notice
     ├── LanguageSwitcher.java     # en/fi/sv select, persisted in a cookie
     ├── SessionExpiryInitListener.java  # silent expiry: back to the landing page, which restores
@@ -460,6 +462,7 @@ src/main/resources/
 └── META-INF/resources/icons/     # PWA icons + iOS splash screens (generated set),
                                   #   and doodles-2.svg, the page's wallpaper tile (a mask)
 src/main/frontend/confetti.js     # self-contained confetti (no CDN; off under reduced motion)
+src/main/frontend/effects.js      # synthesised chimes + vibration patterns, per-device switches
 src/main/frontend/loading-overlay.js # the loading card, built from the landing restore card's classes
 src/main/frontend/keyboard-inset.js  # how much of the page the on-screen keyboard covers (toasts)
 src/main/frontend/list-swipe.js   # swipe-to-reveal actions on list lines

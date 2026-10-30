@@ -12,7 +12,8 @@ import com.vaadin.flow.component.menubar.MenuBar;
 import com.vaadin.flow.component.menubar.MenuBarVariant;
 
 /**
- * The board header's one "⋯" menu: reminders, appearance, language, "Admin?" and "Leave".
+ * The board header's one "⋯" menu: reminders, appearance, sound and vibration, language,
+ * "Admin?" and "Leave".
  *
  * <p>These used to be a row of their own buttons under the home name, which on a phone made the
  * header three to five rows tall before the first chore was in sight. Every one of them is used
@@ -27,9 +28,10 @@ import com.vaadin.flow.component.menubar.MenuBarVariant;
 class HeaderMenu extends MenuBar {
 
     private final AppearanceItems appearance;
+    private final EffectsItems effects;
 
     /**
-     * @param device the family's shared device (§4.1.3): appearance and language only. It is
+     * @param device the family's shared device (§4.1.3): appearance, sound and language only. It is
      *               never an admin — a counter-top screen is reachable by anyone in the house,
      *               so "Admin?" is not offered. It keeps Leave, which unpairs it: a tablet being
      *               handed on or reset should not need an admin's phone to sign it out.
@@ -53,6 +55,9 @@ class HeaderMenu extends MenuBar {
 
         MenuItem look = sub.addItem(row(VaadinIcon.PALETTE, T.tr("appearance.title")));
         appearance = new AppearanceItems(look.getSubMenu());
+
+        MenuItem feel = sub.addItem(row(VaadinIcon.VOLUME_UP, T.tr("effects.title")));
+        effects = new EffectsItems(feel.getSubMenu());
 
         MenuItem language = sub.addItem(row(VaadinIcon.GLOBE, T.tr("home.menu.language")));
         String current = LanguageSwitcher.currentCode();
@@ -83,5 +88,6 @@ class HeaderMenu extends MenuBar {
     protected void onAttach(AttachEvent event) {
         super.onAttach(event);
         appearance.sync(event.getUI().getPage());
+        effects.sync(event.getUI().getPage());
     }
 }

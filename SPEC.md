@@ -57,6 +57,7 @@ Terms in **bold** map to concepts in the code.
 | Snooze a chore ("remind me later" — a one-shot push about that chore) | ✅ | ✅ |
 | Set, move, snooze or cancel the home's reminder about a to-do / grocery line | ✅ | ✅ |
 | Choose colour scheme and palette (per device) | ✅ | ✅ |
+| Switch sounds and vibration on or off (per device) | ✅ | ✅ |
 | Log **other help** the board has no card for | ✅ | ✅ |
 | Log own other help so it counts at once, naming its reward | — | ✅ |
 | Accept / decline other help, and set its reward | — | ✅ |
@@ -115,7 +116,7 @@ hold whatever screen the call came from.
   the rule off for homes where one person genuinely owns a chore.
 - **US-07 Celebrations.** As a member, I see confetti on completion, a "new chore
   unlocked" popup the first time I do a chore, and a trophy at 5/10/25/50/100/250/500/1000
-  personal chores (US-63).
+  personal chores (US-63) — and hear and feel it, where my phone has that switched on (US-68).
 - **US-08 Live sync.** As a member, when anyone completes a chore my screen updates
   live.
 
@@ -400,6 +401,13 @@ hold whatever screen the call came from.
   it and its reminders reach only my devices — not the rest of the family, not an admin, not
   the kitchen tablet — and share it with the family again whenever I like. The privacy notice
   tells me plainly that an admin's backup file still contains it.
+- **US-68 Hear and feel it.** As a member, finishing a chore gives a short chime and a buzz that
+  grow with the moment — a first chore of the day is a blip, a trophy a little fanfare — a tap the
+  rules refuse sounds different from praise, and ticking off a list line or a routine is a quiet
+  tick. Sound is off until I switch it on in the header menu, because the kitchen tablet should
+  not chime all day; vibration is on. Both are choices for *this* phone only, sound respects my
+  silent switch and never stops my music, and an iPhone, which cannot vibrate for a web page,
+  does not offer the vibration switch at all.
 
 ## 4. Functional specification
 
@@ -655,7 +663,7 @@ member's but no member of its own.
 - **Hold-and-drag** (`board-drag.js`, admins only — a configuration of the shared
   `hold-drag.js`, which `list-drag.js` reuses for shared lists, §4.4e): hold a chore card still
   for 450 ms and it lifts (a swell at 60 % of the hold says the hold is being noticed; a short vibration where the
-  device has one); drag it and the other cards reflow around the slot, like apps on a phone's
+  device has one and vibration is on, §4.12c); drag it and the other cards reflow around the slot, like apps on a phone's
   home screen; let go and it stays. The slot follows the **centre of the lifted card**, not the
   finger: the card under that centre decides, its near half meaning "before it" and its far half
   "after it". A thumb holds a card near one edge, and measured at the finger the first and last
@@ -1269,6 +1277,37 @@ starts no streak and needs no approval — organisation, like a list line.
   `<meta name="theme-color">` is patched to match, since a green address bar above a pink header
   is visible for the whole session.
 
+### 4.12c Sound and vibration
+- Two **per-device** switches in the board header's "⋯" menu, under **Sound & vibration**
+  (`EffectsItems`): **Sounds**, off by default, and **Vibration**, on by default. Both live in
+  `localStorage` (`flashchores.sound`, `flashchores.vibration`: `on` / `off`), never in the home or
+  on the server, like the appearance axes (§4.12b). They are offered on the board, the shared
+  device included, not on the landing page, which plays nothing. Switching one on plays or buzzes
+  a sample at once. Where `localStorage` throws, a choice lasts as long as the page.
+- **What plays when.** The server sends one `window.playEffect(kind)` per moment
+  (`Celebrations.effect`), and `effects.js` plays whichever of the two the device has switched
+  on. A completion sends **exactly one**, at the confetti's scale: `small`, `medium` (a chore new
+  to the member, or the day's second), `fire` (third and later), `big` (a trophy, or a spree,
+  which outranks the chore's own). A completion waiting for approval sends `tick`; a refused tap
+  (any §4.3 lock) sends `blocked`; ticking a list line or a routine sends `tick`, unticking sends
+  nothing; unseen trophies arriving together send one `big`. A held card lifting (§4.2b) buzzes
+  `lift` on the client, with no sound.
+- **Tones are synthesised** with the Web Audio API — short sine blips (C6–E6–G6–C7 rising for
+  praise, G4 falling to E♭4 for `blocked`) at 12% gain with a 10 ms attack — so there is no audio
+  file to fetch, license or cache. Vibration patterns are 10–60 ms pulses, at most five.
+- **Autoplay.** Browsers keep audio suspended until a gesture, and iOS lets only a gesture
+  handler resume it, while our sounds arrive after a server round trip. So while sound is on,
+  every `touchend` / `click` / `keydown` (passive, capturing document listeners — a state check
+  once running) resumes the context, and the chime that follows the tap can play. A chime that
+  could not start within 500 ms is dropped rather than played on some later tap. Sounds are only
+  ever sent to the tapping member's own UI, never to the other boards a push redraw updates.
+- **Safari** gets `navigator.audioSession.type = 'ambient'`: the chime mixes with the member's
+  music instead of pausing it, and is silent when the ring/silent switch is on.
+- **iPhones cannot vibrate** for a web page (no Vibration API in WebKit), so `EffectsItems.sync`
+  asks the browser whether `navigator.vibrate` exists and hides the Vibration switch where it
+  does not. Vibration is not motion, so `prefers-reduced-motion` does not silence it; it is the
+  member's own switch.
+
 ### 4.13 PWA & sharing
 - `@PWA` app shell: manifest (standalone display, theme color `#10b981`, white
   background), service worker, offline fallback stub.
@@ -1776,6 +1815,13 @@ scales up, not the other way round.
   palette, no sideways scroll, and the tile, border and text colours computed for all four palettes
   in both schemes (brand text ≥ 4.7:1 on white, on the page and on a dome's rim in light;
   secondary text ≥ 4.9:1 on a dome's rim; pill text ≥ 5.2:1 light, ≥ 4.5:1 dark). `tools/generate-doodles.cjs` is deterministic for a seed; the doodle ink is ≤ 1.15:1 on the page in every palette.
+- **Sound and vibration** (§4.12c, `EffectsUiTest`): a completion sends exactly one effect, the
+  same kind as its confetti, three completions in a row; a tap refused because another member
+  booked the chore sends `blocked` and records nothing; ticking a list line and a routine sends
+  `tick` and unticking sends nothing; the menu starts with Sounds off and Vibration on, and each
+  flip moves the check mark and stores that choice (`__setEffect`). What the browser does with it —
+  the tones, the buzz, the autoplay unlock, the hidden switch where the browser cannot vibrate —
+  is verified by hand in the browser pane.
 - **Statistics** (`StatsServiceTest`): my/home aggregates; 💎 earned follows an undo and ignores
   redemptions, bucketed by the day the credit landed; 💎 redeemed lists the member's redemptions
   newest first with the note as the reward and a blank note as none, and earned − redeemed is the

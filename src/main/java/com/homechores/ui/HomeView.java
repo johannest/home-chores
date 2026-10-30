@@ -53,6 +53,7 @@ import java.util.Optional;
 @Route("home")
 @PageTitle("FlashChores")
 @JsModule("./confetti.js")
+@JsModule("./effects.js")
 @JsModule("./list-swipe.js")
 @JsModule("./board-drag.js")
 @JsModule("./list-drag.js")

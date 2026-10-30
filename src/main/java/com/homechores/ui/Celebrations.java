@@ -21,7 +21,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
 
-/** Fires confetti and shows congratulation dialogs (with quick feedback capture). */
+/** Fires confetti, sound and vibration, and shows congratulation dialogs (with quick feedback
+ *  capture). */
 final class Celebrations {
 
     private Celebrations() {
@@ -31,6 +32,18 @@ final class Celebrations {
         UI ui = UI.getCurrent();
         if (ui != null) {
             ui.getPage().executeJs("window.fireConfetti && window.fireConfetti($0)", intensity);
+        }
+    }
+
+    /**
+     * Sound and vibration for one moment: {@code tick}, {@code small}, {@code medium},
+     * {@code fire}, {@code big} or {@code blocked}. {@code effects.js} plays whichever of the two
+     * this device has switched on, so the server sends the same call to every device.
+     */
+    static void effect(String kind) {
+        UI ui = UI.getCurrent();
+        if (ui != null) {
+            ui.getPage().executeJs("window.playEffect && window.playEffect($0)", kind);
         }
     }
 
@@ -52,13 +65,15 @@ final class Celebrations {
         // help counts at once and deserves the same moment a chore gets.
         String chore = o.task() != null ? o.task().getName() : T.tr("board.otherHelp");
         if (o.pending()) {
+            effect("tick");
             showDialog(service, o, onUndo, "⏳", T.tr("celebrate.pending.title"),
                     T.tr("celebrate.pending.text", chore), null, null);
             return;
         }
         Trophy trophy = o.trophy();
+        String burst;
         if (trophy != null) {
-            fireConfetti("big");
+            burst = "big";
             int reward = o.award().trophyCredits();
             Paragraph rewardEl = null;
             if (reward > 0) {
@@ -70,31 +85,35 @@ final class Celebrations {
                     T.tr("celebrate.trophy.text", trophy.rung(), o.member().getName()),
                     rewardEl, onShowTrophies);
         } else if (o.newChoreForMember()) {
-            fireConfetti("medium");
+            burst = "medium";
             showDialog(service, o, onUndo, "🌟", T.tr("celebrate.newChore.title"),
                     T.tr("celebrate.newChore.text", chore, o.member().getName()),
                     nearTrophy(credits, o), null);
         } else if (o.doneTodayAfter() >= 3) {
             // Third-or-more chore of the day: the praise (and the confetti) escalates.
-            fireConfetti("fire");
+            burst = "fire";
             showDialog(service, o, onUndo, "🔥", T.tr("celebrate.third.title"),
                     T.tr("celebrate.third.text", chore, o.member().getName(), o.doneTodayAfter()),
                     nearTrophy(credits, o), null);
         } else if (o.doneTodayAfter() == 2) {
-            fireConfetti("medium");
+            burst = "medium";
             showDialog(service, o, onUndo, "💪", T.tr("celebrate.second.title"),
                     T.tr("celebrate.second.text", chore, o.member().getName()),
                     nearTrophy(credits, o), null);
         } else {
-            fireConfetti("small");
+            burst = "small";
             showDialog(service, o, onUndo, o.task() != null ? o.task().getEmoji() : "🙋",
                     T.tr("celebrate.nice.title"),
                     T.tr("celebrate.nice.text", chore, o.member().getName()),
                     nearTrophy(credits, o), null);
         }
 
+        fireConfetti(burst);
+
         // Credit rewards earned by this completion. A trophy's own 💎 is in its dialog.
         CreditService.Award award = o.award();
+        // One sound per completion: a spree outranks whatever the chore itself earned.
+        effect(award.spreeDays() != null ? "big" : burst);
         if (award.spreeDays() != null) {
             fireConfetti("big");
             Notification n = Toasts.show(
@@ -172,6 +191,7 @@ final class Celebrations {
         layout.setSpacing(true);
         dialog.add(layout);
         fireConfetti("big");
+        effect("big");
         dialog.open();
     }
 
@@ -197,6 +217,7 @@ final class Celebrations {
         };
         Notification n = Notification.show(msg, 4000, Notification.Position.MIDDLE);
         n.addThemeVariants(NotificationVariant.LUMO_CONTRAST);
+        effect("blocked");
     }
 
     /** Localized season names for a sentence. The card badge uses emoji; prose uses words. */
