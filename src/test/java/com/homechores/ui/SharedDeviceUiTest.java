@@ -16,14 +16,11 @@ import com.homechores.service.ChoreService;
 import com.homechores.service.ListItemService;
 import com.homechores.service.SharedDeviceService;
 import com.vaadin.flow.component.ClickEvent;
-import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.ComponentUtil;
 import com.vaadin.flow.component.button.Button;
-import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.Span;
-import com.vaadin.flow.component.menubar.MenuBar;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.tabs.Tab;
@@ -260,29 +257,7 @@ class SharedDeviceUiTest extends HomeChoresUiTest {
         assertTrue(devices.find(device.getId()).isEmpty(), "the stored secret no longer works");
     }
 
-    // ---- helpers (the private ones in HomeUiTest, for the three this class needs) ----
-
-    private java.util.stream.Stream<MenuItem> allMenuItems() {
-        return $(MenuBar.class).all().stream().filter(this::usable)
-                .flatMap(m -> m.getItems().stream()).flatMap(this::withSubItems);
-    }
-
-    private java.util.stream.Stream<MenuItem> withSubItems(MenuItem item) {
-        return java.util.stream.Stream.concat(java.util.stream.Stream.of(item),
-                item.getSubMenu().getItems().stream().flatMap(this::withSubItems));
-    }
-
-    private List<String> menuItems() {
-        return allMenuItems().map(i -> i.getElement().getTextRecursively().trim()).toList();
-    }
-
-    private void clickMenuItem(String text) {
-        MenuItem item = allMenuItems()
-                .filter(i -> text.equals(i.getElement().getTextRecursively().trim()))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("No menu item: " + text));
-        ComponentUtil.fireEvent(item, new ClickEvent<>(item));
-    }
+    // ---- helpers ----
 
     private Long bookedBy(ChoreTask chore) {
         return service.tasksOf(code).stream().filter(t -> t.getId().equals(chore.getId()))
@@ -308,17 +283,6 @@ class SharedDeviceUiTest extends HomeChoresUiTest {
         List<Notification> open = $(Notification.class).all().stream()
                 .filter(Notification::isOpened).toList();
         return test(open.get(open.size() - 1)).getText();
-    }
-
-    private boolean usable(Component c) {
-        Component cur = c;
-        while (cur != null) {
-            if (!cur.isVisible()) {
-                return false;
-            }
-            cur = cur.getParent().orElse(null);
-        }
-        return c.getUI().isPresent();
     }
 
     private List<String> buttons() {

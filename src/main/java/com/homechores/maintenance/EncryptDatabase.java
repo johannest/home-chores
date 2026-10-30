@@ -9,6 +9,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Map;
 import org.h2.api.ErrorCode;
+import org.h2.store.FileLister;
 import org.h2.tools.ChangeFileEncryption;
 
 /**
@@ -21,9 +22,12 @@ import org.h2.tools.ChangeFileEncryption;
  * this has to rewrite. Keys come from the environment only, never the command line, where every
  * user of a shared host can read them in the process list.
  *
- * <p>The file is copied aside first, converted, then opened with the new key to prove it reads.
- * Only then is the copy deleted — it holds the old form, plaintext after an {@code encrypt} — and
- * on any failure the copy is put back, so the database is never left half converted.
+ * <p>A database that is still open is refused before anything else happens. Then the file is
+ * copied aside, converted, and opened with the new key to prove it reads. Only then is the copy
+ * deleted — it holds the old form, plaintext after an {@code encrypt} — and on any failure the
+ * copy is put back, so the database is never left half converted. The order matters: a copy put
+ * back over a file the running service is still writing would replace its work with the moment
+ * the copy was taken, so the open check comes first and no copy exists to put back wrongly.
  */
 public final class EncryptDatabase {
 
@@ -77,11 +81,16 @@ public final class EncryptDatabase {
                 from = env.get("FLASHCHORES_DB_OLD_KEY");
                 require(from != null, "Set FLASHCHORES_DB_OLD_KEY to the current key.");
                 DatabaseEncryption.requireUsableKey(key);
+                // The shell that runs the service often carries the current key already; taking
+                // it as the new one would report a rotation that never happened.
+                require(!from.equals(key), "FLASHCHORES_DB_KEY is the same as FLASHCHORES_DB_OLD_KEY:"
+                        + " nothing to change.");
                 to = key;
             }
             default -> throw new IllegalArgumentException("Unknown command: " + command);
         }
 
+        requireClosed(base, file);
         Path aside = file.resolveSibling(file.getFileName() + ".before-" + command);
         Files.copy(file, aside, StandardCopyOption.REPLACE_EXISTING);
         try {
@@ -90,7 +99,13 @@ public final class EncryptDatabase {
                     chars(from), chars(to), true);
             requireReadable(base, to);
         } catch (Exception e) {
-            Files.move(aside, file, StandardCopyOption.REPLACE_EXISTING);
+            try {
+                Files.move(aside, file, StandardCopyOption.REPLACE_EXISTING);
+            } catch (Exception restoring) {
+                // The conversion's failure is the story; the copy that could not be put back is
+                // a footnote to it, and the operator still has that copy on disk.
+                e.addSuppressed(restoring);
+            }
             throw e;
         }
         Files.delete(aside);
@@ -114,6 +129,22 @@ public final class EncryptDatabase {
 
     private static char[] chars(String key) {
         return key == null ? null : key.toCharArray();
+    }
+
+    /**
+     * H2's own in-use check — the lock file, and the lock the store holds on the file itself — run
+     * before the copy exists. The service's own refusal, not H2's, because the operator has to read
+     * it and act on it.
+     */
+    private static void requireClosed(Path base, Path file) {
+        try {
+            FileLister.tryUnlockDatabase(FileLister.getDatabaseFiles(
+                    base.toAbsolutePath().getParent().toString(), base.getFileName().toString(), true),
+                    "encryption");
+        } catch (SQLException e) {
+            throw new IllegalStateException(file + " is open. Stop the service first; nothing was"
+                    + " changed.", e);
+        }
     }
 
     /**

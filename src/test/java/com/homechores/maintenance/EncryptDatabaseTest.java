@@ -91,6 +91,38 @@ class EncryptDatabaseTest {
     }
 
     @Test
+    void anOpenDatabase_isRefusedBeforeAnyCopyIsMade_andWhatItWritesMeanwhileSurvives() throws Exception {
+        // The "service", holding the database open for the whole attempt.
+        try (Connection service = DriverManager.getConnection("jdbc:h2:file:" + base, "sa", "")) {
+            IllegalStateException e = assertThrows(IllegalStateException.class,
+                    () -> EncryptDatabase.run("encrypt", base, Map.of("FLASHCHORES_DB_KEY", KEY)));
+            assertTrue(e.getMessage().contains("Stop the service"), e.getMessage());
+            assertFalse(Files.exists(dir.resolve("homechores.mv.db.before-encrypt")),
+                    "refused before a copy existed, so there was nothing to put back over the live file");
+            service.createStatement().execute("insert into member values ('Pappa Pekka')");
+        }
+        assertFalse(DatabaseEncryption.isEncrypted(file));
+        try (Connection c = DriverManager.getConnection("jdbc:h2:file:" + base + ";IFEXISTS=TRUE", "sa", "");
+             ResultSet r = c.createStatement().executeQuery("select count(*) from member")) {
+            r.next();
+            assertEquals(2, r.getInt(1), "what the service wrote after the refusal is still there");
+        }
+    }
+
+    @Test
+    void rekeyingToTheCurrentKey_isRefused_andChangesNothing() throws Exception {
+        EncryptDatabase.run("encrypt", base, Map.of("FLASHCHORES_DB_KEY", KEY));
+        byte[] before = Files.readAllBytes(file);
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> EncryptDatabase.run(
+                "rekey", base, Map.of("FLASHCHORES_DB_OLD_KEY", KEY, "FLASHCHORES_DB_KEY", KEY)));
+
+        assertTrue(e.getMessage().contains("same"), e.getMessage());
+        assertArrayEquals(before, Files.readAllBytes(file));
+        assertEquals("Mummo Maija", memberName(KEY));
+    }
+
+    @Test
     void refusals_changeNothing() throws Exception {
         byte[] before = Files.readAllBytes(file);
         assertThrows(IllegalStateException.class,

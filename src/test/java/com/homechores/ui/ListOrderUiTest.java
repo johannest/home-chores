@@ -11,7 +11,6 @@ import com.homechores.service.Author;
 import com.homechores.service.ChoreService;
 import com.homechores.service.ListItemService;
 import com.vaadin.flow.component.ClickEvent;
-import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.ComponentUtil;
 import com.vaadin.flow.component.checkbox.Switch;
 import com.vaadin.flow.component.contextmenu.MenuItem;
@@ -33,17 +32,6 @@ class ListOrderUiTest extends HomeChoresUiTest {
 
     @Autowired ChoreService service;
     @Autowired ListItemService lists;
-
-    private boolean usable(Component c) {
-        Component cur = c;
-        while (cur != null) {
-            if (!cur.isVisible()) {
-                return false;
-            }
-            cur = cur.getParent().orElse(null);
-        }
-        return c.getUI().isPresent();
-    }
 
     private Member signedIn(String name) {
         Member m = service.createHome("Listy", name);

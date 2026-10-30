@@ -39,8 +39,10 @@ class StarterChoresDialog extends Dialog {
         Button all = new Button(T.tr("starter.all"), e -> groups.forEach((section, group) ->
                 group.setValue(Set.copyOf(ChoreCatalog.inSection(section)))));
         Button none = new Button(T.tr("starter.none"), e -> groups.values().forEach(CheckboxGroup::clear));
-        all.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
-        none.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+        // Tertiary, not small: quiet beside the sections, but still a finger-sized target
+        // (.starter-bulk in styles.css).
+        all.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        none.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
         Div bulk = new Div(all, none);
         bulk.addClassName("starter-bulk");
         Checkbox inSections = new Checkbox(T.tr("starter.inSections"), pick.inSections());

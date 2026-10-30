@@ -128,11 +128,16 @@ class SharedDeviceTest {
         String code = alex.getHomeCode();
         Paired kitchen = pair(code);
         Paired hall = pair(code);
+        Member kim = service.createHome("Elsewhere", "Kim");
 
-        assertTrue(devices.leave(kitchen.device().getId()));
+        assertFalse(devices.leave(kim.getHomeCode(), kitchen.device().getId()),
+                "another home's code names no device of its own here");
+        assertTrue(devices.verify(kitchen.device().getId(), kitchen.secret()), "still paired");
+
+        assertTrue(devices.leave(code, kitchen.device().getId()));
         assertFalse(devices.verify(kitchen.device().getId(), kitchen.secret()));
         assertTrue(devices.verify(hall.device().getId(), hall.secret()), "the other device stays");
-        assertFalse(devices.leave(kitchen.device().getId()), "already gone");
+        assertFalse(devices.leave(code, kitchen.device().getId()), "already gone");
 
         for (int i = 1; i < SharedDevice.MAX_PER_HOME; i++) {
             pair(code);

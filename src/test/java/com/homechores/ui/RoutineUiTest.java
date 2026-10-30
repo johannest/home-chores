@@ -252,15 +252,4 @@ class RoutineUiTest extends HomeChoresUiTest {
                 .findFirst().orElseThrow(() -> new AssertionError("No usable button: " + text));
         ComponentUtil.fireEvent(b, new ClickEvent<>(b));
     }
-
-    private boolean usable(Component c) {
-        Component cur = c;
-        while (cur != null) {
-            if (!cur.isVisible()) {
-                return false;
-            }
-            cur = cur.getParent().orElse(null);
-        }
-        return c.getUI().isPresent();
-    }
 }

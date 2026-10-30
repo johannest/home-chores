@@ -144,8 +144,13 @@ the old `homechores.trace.db`. On any failure it puts the copy back. The app ref
 when the key and the file disagree, with a message naming the fix. With the key set, H2 writes
 no trace file, because that file is never encrypted. `rekey-db` changes the key (current key in
 `FLASHCHORES_DB_OLD_KEY`, new key in `FLASHCHORES_DB_KEY`, or typed when asked). `decrypt-db`
-is the rollback: run it, then unset the key. **Losing the key loses every family's data**, and
-hosting backups taken before the switch still hold the plain file until they rotate out.
+is the rollback: run it, then unset the key. All three refuse a database that is still open,
+before any copy is made, and `rekey-db` refuses a new key equal to the current one. **Losing
+the key loses every family's data**; hosting backups taken before the switch still hold the
+plain file until they rotate out, and the disk itself keeps the old plaintext in freed blocks
+until they are overwritten (the conversion rewrites the file, it does not wipe it). If a crash
+leaves a `homechores.mv.db.before-<command>` beside the database, that copy is the file as it
+was before the command: stop, put it back over `homechores.mv.db`, and run the command again.
 
 **npm cooldown note:** Vaadin 25.2 skips npm packages published less than a day ago
 (supply-chain cooldown), which can break the frontend install when Vaadin's own

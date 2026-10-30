@@ -369,17 +369,18 @@ public class BackupService {
         }
         // Lists before their lines, ids remapped as groups are for tasks.
         Map<Long, Long> listIdMap = new HashMap<>();
-        // Private lists whose owner did not come back. Their lines must be dropped with them,
-        // not landed on the shared To-do like a line whose list is merely missing (below).
+        // Private lists that do not come back — owner missing, blank name, over the cap. Their
+        // lines must be dropped with them, whatever the reason, not landed on the shared To-do
+        // like a line whose list is merely missing (below).
         Set<Long> droppedPrivate = new HashSet<>();
         for (CustomListDto cl : b.customLists) {
             String name = InputLimits.clip(cl.name, InputLimits.LIST_NAME);
             Long owner = cl.ownerMemberId == null ? null : memberIdMap.get(cl.ownerMemberId);
-            if (cl.ownerMemberId != null && owner == null) {
-                droppedPrivate.add(cl.id);
-                continue;
-            }
-            if (name == null || name.isBlank() || listIdMap.size() >= InputLimits.CUSTOM_LISTS) {
+            if ((cl.ownerMemberId != null && owner == null)
+                    || name == null || name.isBlank() || listIdMap.size() >= InputLimits.CUSTOM_LISTS) {
+                if (cl.ownerMemberId != null) {
+                    droppedPrivate.add(cl.id);
+                }
                 continue;
             }
             CustomList entity = new CustomList(code, name,

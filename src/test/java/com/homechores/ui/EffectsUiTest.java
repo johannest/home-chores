@@ -4,32 +4,35 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.homechores.domain.Completion;
+import com.homechores.domain.CompletionRepository;
+import com.homechores.domain.CompletionStatus;
 import com.homechores.domain.Home;
 import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import com.homechores.service.Author;
 import com.homechores.service.ChoreService;
+import com.homechores.service.CreditService;
 import com.homechores.service.ListItemService;
 import com.homechores.service.RoutineService;
 import com.homechores.service.RoutineService.Spec;
 import com.vaadin.flow.component.ClickEvent;
-import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.ComponentUtil;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.internal.PendingJavaScriptInvocation;
-import com.vaadin.flow.component.menubar.MenuBar;
 import com.vaadin.flow.component.tabs.Tab;
 import com.vaadin.flow.component.tabs.Tabs;
 import java.time.DayOfWeek;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,6 +49,8 @@ class EffectsUiTest extends HomeChoresUiTest {
     @Autowired ChoreService service;
     @Autowired ListItemService lists;
     @Autowired RoutineService routines;
+    @Autowired CreditService credits;
+    @Autowired CompletionRepository completions;
 
     @BeforeEach
     void useEnglish() {
@@ -64,6 +69,54 @@ class EffectsUiTest extends HomeChoresUiTest {
             assertEquals(calls(sent, "fireConfetti").getFirst(), effects.getFirst());
         }
         assertEquals(3, service.completionCount(alex.getId()));
+    }
+
+    @Test
+    void aCompletionWaitingForApproval_ticks_withNoConfetti() {
+        Member alex = service.createHome("Chime", "Alex");
+        Home home = service.findHome(alex.getHomeCode()).orElseThrow();
+        home.setConfirmCompletion(false);
+        home.setRequireApproval(true);
+        service.saveHome(home);
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+        sentJs("");
+
+        clickChoreCard(0);
+
+        List<List<Object>> sent = sentJs("");
+        assertEquals(List.of("tick"), calls(sent, "playEffect"), "a tick, not praise, until an admin says yes");
+        assertTrue(calls(sent, "fireConfetti").isEmpty());
+    }
+
+    @Test
+    void aSpree_outranksTheChoresOwnEffect_withOneBig() {
+        Member alex = signedInWithoutConfirmation();
+        credits.addTier(alex.getHomeCode(), 1, 10); // one day in a row: today's first chore lands it
+        sentJs("");
+
+        clickChoreCard(0);
+
+        List<List<Object>> sent = sentJs("");
+        assertEquals(List.of("big"), calls(sent, "playEffect"), "one effect, and it is the spree's");
+        List<Object> confetti = calls(sent, "fireConfetti");
+        assertEquals(2, confetti.size(), "the chore's own burst, then the spree's");
+        assertEquals("big", confetti.getLast());
+    }
+
+    @Test
+    void trophiesEarnedWhileAway_arriveWithOneBig() {
+        Member alex = service.createHome("Away", "Alex");
+        Long task = service.tasksOf(alex.getHomeCode()).getFirst().getId();
+        for (int i = 0; i < 26; i++) { // 🌱 at 5, 🧹 at 10, 🥉 at 25: three unseen trophies
+            Completion c = new Completion(alex.getHomeCode(), task, alex.getId(), CompletionStatus.APPROVED);
+            c.setDoneAt(Instant.now().minus(Duration.ofHours(2L * (26 - i))));
+            completions.save(c);
+        }
+        SessionContext.signIn(alex.getId(), alex.getHomeCode());
+        navigate(HomeView.class);
+
+        assertEquals(List.of("big"), effectsSent(), "three trophies, one fanfare");
     }
 
     @Test
@@ -125,12 +178,12 @@ class EffectsUiTest extends HomeChoresUiTest {
         assertTrue(vibration.isChecked());
         sentJs("");
 
-        click(sound);
+        clickMenuItem("Sounds");
         assertTrue(sound.isChecked());
         assertEquals(List.of(List.of("__setEffect", "sound", true)), sentJs("__setEffect"));
 
-        click(sound);
-        click(vibration);
+        clickMenuItem("Sounds");
+        clickMenuItem("Vibration");
         assertFalse(sound.isChecked());
         assertFalse(vibration.isChecked());
         assertEquals(List.of(List.of("__setEffect", "sound", false),
@@ -214,31 +267,4 @@ class EffectsUiTest extends HomeChoresUiTest {
                 .findFirst().orElseThrow());
     }
 
-    private MenuItem menuItem(String text) {
-        return $(MenuBar.class).all().stream().filter(this::usable)
-                .flatMap(m -> m.getItems().stream())
-                .flatMap(this::withSubItems)
-                .filter(i -> text.equals(i.getElement().getTextRecursively().trim()))
-                .findFirst().orElseThrow(() -> new AssertionError("No menu item: " + text));
-    }
-
-    private Stream<MenuItem> withSubItems(MenuItem item) {
-        return Stream.concat(Stream.of(item),
-                item.getSubMenu().getItems().stream().flatMap(this::withSubItems));
-    }
-
-    private static void click(MenuItem item) {
-        ComponentUtil.fireEvent(item, new ClickEvent<>(item));
-    }
-
-    private boolean usable(Component c) {
-        Component cur = c;
-        while (cur != null) {
-            if (!cur.isVisible()) {
-                return false;
-            }
-            cur = cur.getParent().orElse(null);
-        }
-        return c.getUI().isPresent();
-    }
 }

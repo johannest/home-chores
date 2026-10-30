@@ -577,10 +577,11 @@ member's but no member of its own.
   the home deletes its devices.
 - **Leaving**, from the device's own ⋯ menu: "Unpair this device?" (`home.leave.device.*`) asks
   first — unlike a member's Leave — because pairing it again needs the admin PIN typed on it.
-  The yes runs `SharedDeviceService.leave(deviceId)`, which deletes the device's row exactly as
+  The yes runs `SharedDeviceService.leave(homeCode, deviceId)`, which deletes the device's row exactly as
   an unpair does (secret dead, slot freed, home bumped), then forgets the stored identity and
   shows the landing page. No admin check: the id is the session's own, never the client's, and
-  it can only remove the caller.
+  it can only remove the caller — and the row must belong to the session's home all the same, so
+  no caller can ever point it at another home's device.
 - **The board belongs to nobody.** `taskViews(homeCode, null)` evaluates only the locks about
   *time* — season, interval, availability hours (in the device's own time zone) — and leaves
   the locks about *who* (rotation, booking, streak) to the tap. The cards still carry the
@@ -643,7 +644,8 @@ member's but no member of its own.
   availability hours (the dog, 08–10 and 18–22). They are starting points: once created, a
   chore is the home's own and is edited like any other.
 - The create-home form shows **Starter chores · 11 chosen · Choose**. *Choose* opens a dialog
-  with one checkbox group per section, *All* / *None*, and **Sort them into sections on the
+  with one checkbox group per section, *All* / *None* (40 px targets, like every control on the
+  board), and **Sort them into sections on the
   board** (off by default). *Done* replaces the pick; *Cancel*, Esc or a tap outside keeps the
   earlier one. Untouched, the pick is the eleven entries marked *starter* — the chores every
   home got before the catalogue existed — on a flat board, so a family that never opens it gets
@@ -942,7 +944,10 @@ starts no streak and needs no approval — organisation, like a list line.
   shows no strip. Three queries per render whatever the number of routines.
 - **Reminders.** `Routine.nextFireAt` is the next occurrence's time as an instant in the home's
   zone, recomputed on every save, after every sweep and on a zone change. The sweep
-  (`homechores.routine.sweep-ms`, 60 s, the shared scheduler thread, `MAX_SENDS_PER_SWEEP` = 10)
+  (`homechores.routine.sweep-ms`, 60 s, the shared scheduler thread, `MAX_SENDS_PER_SWEEP` = 10:
+  the cap decides whether the *next* routine is started and never cuts a started one's audience
+  short, so a home routine cannot reach half the family; the overshoot is at most one home's
+  devices, and a routine not started stays due for the next sweep)
   reads the routines whose `nextFireAt` has passed — normally none — and pushes "🏋️ Workout /
   It's time…" to the routine's member, or to every device in the home for a home routine, each in
   its member's language. No push when it was already ticked that day, when the Routines tab is
@@ -1588,19 +1593,26 @@ retention candidates before enabling the sweep.
 - **Conversion** is `EncryptDatabase`, a plain `main` run from the fat jar through Spring Boot's
   `PropertiesLauncher`, because Spring would open the database it must rewrite. `encrypt` (plain
   → key), `rekey` (`FLASHCHORES_DB_OLD_KEY` → `FLASHCHORES_DB_KEY`) and `decrypt` (key → plain,
-  the rollback) each copy the file to `<file>.before-<command>`, run H2's
-  `ChangeFileEncryption`, and open the result with the new key: H2 decrypts the store before it
-  checks the user, so a refused login still proves the file reads, while a wrong file key fails
-  (90049). Only then is the copy deleted, and after `encrypt`/`rekey` the old trace file too.
-  On any failure the copy is moved back. Keys come from the environment, or the CLI asks for
-  them without echo (twice for a new key). They never go on a command line, where every user of
-  a shared host can see them in the process list.
+  the rollback) first refuse a database that is still open (H2's own in-use check, run before
+  any copy exists: a copy put back over a file the running service still writes would replace
+  its work with the moment the copy was taken), then copy the file to `<file>.before-<command>`,
+  run H2's `ChangeFileEncryption`, and open the result with the new key: H2 decrypts the store
+  before it checks the user, so a refused login still proves the file reads, while a wrong file
+  key fails (90049). Only then is the copy deleted, and after `encrypt`/`rekey` the old trace
+  file too. On any failure the copy is moved back. `rekey` refuses a new key equal to the current
+  one, since the shell that runs the service often carries the current key and a rotation that
+  never happened must not be reported as one. Keys come from the environment, or the CLI asks
+  for them without echo (twice for a new key). They never go on a command line, where every user
+  of a shared host can see them in the process list.
 - **What it protects:** a copy of the file that leaves the host (hosting backups, a misconfigured
   web root, a disk image). **What it does not:** anyone who can read the service's environment
   or memory, because the key has to be on the host for the app to start unattended; the JSON
   exports in `data/retention-exports/` and `data/erasure-exports/`, which stay plain (the runbook
-  sets `data/` to `700`); and hosting backups taken before the switch. The privacy notice does
-  not claim encryption, since it is the operator's choice per deployment.
+  sets `data/` to `700`); hosting backups taken before the switch; and the plaintext the
+  conversion leaves in freed disk blocks — H2 writes a new file and deletes the old, and the copy
+  aside is deleted, not wiped — so a disk image taken after the switch can still carry the old
+  file until those blocks are reused. The privacy notice does not claim encryption, since it is
+  the operator's choice per deployment.
 
 ### 4.15.1 Mobile layout
 The app is used mostly on phones, so the layout is designed for a ~360–400px column and
@@ -1755,7 +1767,8 @@ scales up, not the other way round.
   the catalogue itself (`ChoreCatalogTest`: every chore and section is named in all three
   languages within the length limits and no two chores share a name, keys are unique, cadences
   are canonical and within limits, the starters are the old eleven, entries are in section
-  order), and rejoin requests (gate on/off, PIN bypass
+  order, and the tyre change done on any spring or autumn day is next due in a different season
+  and before the next of its two seasons ends), and rejoin requests (gate on/off, PIN bypass
   without promotion, wrong PIN, member from another home, approve/reject, token
   consumption, newest-device-wins, cancel, cleanup when a member is removed), and home
   deletion (every table wiped, other homes untouched, idempotent, code normalization,
@@ -1858,10 +1871,14 @@ scales up, not the other way round.
   encrypted file (no copy, no old trace file); `rekey` then `decrypt` round-trip the data; a
   wrong old key fails and leaves the file byte-for-byte as it was, with no copy behind; a short
   key, no key, decrypting a plain file, a missing file and encrypting twice are refused and
-  change nothing. The CLI wrapper and the fat-jar launch were run by hand against a copy of a
+  change nothing; a database still open is refused before any copy is made and a row written
+  through the open connection afterwards survives; re-keying to the current key is refused and
+  changes nothing. The CLI wrapper and the fat-jar launch were run by hand against a copy of a
   dev database.
 - **Sound and vibration** (§4.12c, `EffectsUiTest`): a completion sends exactly one effect, the
-  same kind as its confetti, three completions in a row; a tap refused because another member
+  same kind as its confetti, three completions in a row; a completion waiting for approval sends
+  `tick` and no confetti; a spree sends one `big` over the chore's own burst; three trophies
+  earned while away arrive with one `big`; a tap refused because another member
   booked the chore sends `blocked` and records nothing; ticking a list line and a routine sends
   `tick` and unticking sends nothing; the menu starts with Sounds off and Vibration on, and each
   flip moves the check mark and stores that choice (`__setEffect`). What the browser does with it —
@@ -1904,7 +1921,8 @@ scales up, not the other way round.
   it (a wrong or blank one does not); a wrong PIN, an unknown home and a sixth device are
   refused, and a blank name takes the default; wrong pairing guesses lock the PIN for claiming
   too; only an admin of that home unpairs, after which the secret is dead; a device leaving
-  unpairs only itself, a second leave is a no-op, and its slot is free again; a completion from the
+  unpairs only itself, never under another home's code, a second leave is a no-op, and its slot
+  is free again; a completion from the
   device counts for the member picked with their streak lock enforced; a member, chore or device
   from another home is refused for completing, booking, clearing a booking and other help; it
   books for the member picked and clears anyone's booking; other help from it waits for an
@@ -2006,7 +2024,9 @@ scales up, not the other way round.
   home's device cannot; switching Routines off empties today and no line can be added to the tab;
   the first board sets the zone, a later one does not, an unknown id is ignored, only an admin
   moves it and the next reminder moves with it; the sweep reminds every device for a home routine
-  and only the member's for a personal one, never twice; a routine ticked before its time is not
+  and only the member's for a personal one, never twice; the cap starts no further routine once
+  ten sends are made but finishes the audience of the one under way (twelve devices), and the
+  routine left waiting is still due for the next sweep; a routine ticked before its time is not
   nagged and a stale occurrence is skipped but moved on; an untimed one is never on the sweep; old
   ticks are purged, today's stay; a removed member's routines and ticks go, the home's stay, and
   deleting the home takes all; routines and the zone round-trip through a backup with members
@@ -2033,8 +2053,9 @@ scales up, not the other way round.
   the owner's list keeps its place; a private line's reminder reaches only the owner's device,
   nobody else may set or cancel it, and the fired dialog is the owner's alone; a removed member's
   private lists, lines and reminders go and their shared lists stay; a backup holds private lists,
-  restore keeps them private, and a private list whose owner is not in the file is dropped with
-  its lines rather than spilling onto To-do. `ListEditUiTest`: "Make private" locks the tab and
+  restore keeps them private, and a private list that does not come back — its owner not in the
+  file, or its name blank — is dropped with its lines rather than spilling onto To-do.
+  `ListEditUiTest`: "Make private" locks the tab and
   takes it off another member's board and the tablet; the menu offers it only to the list's
   maker, not to an admin; the privacy notice says private means hidden in the app and that an
   admin's backup still holds it.
