@@ -656,7 +656,12 @@ member's but no member of its own.
   `hold-drag.js`, which `list-drag.js` reuses for shared lists, §4.4e): hold a chore card still
   for 450 ms and it lifts (a swell at 60 % of the hold says the hold is being noticed; a short vibration where the
   device has one); drag it and the other cards reflow around the slot, like apps on a phone's
-  home screen; let go and it stays. Dropping it in another section moves it into that group.
+  home screen; let go and it stays. The slot follows the **centre of the lifted card**, not the
+  finger: the card under that centre decides, its near half meaning "before it" and its far half
+  "after it". A thumb holds a card near one edge, and measured at the finger the first and last
+  places of a short list were all but out of reach. On a list, a card dragged past either end
+  (onto the add row, or the empty page under a short list) takes the first or the last place.
+  Dropping it in another section moves it into that group.
   Not HTML5 drag-and-drop, which does not fire on mobile touch: pointer events, with a
   non-passive `touchmove` cancelled only while a card is lifted, so the board still scrolls under
   a finger that starts on a card (`touch-action: pan-y`) and a move within the hold is a scroll,
@@ -1877,7 +1882,11 @@ scales up, not the other way round.
   never beside a To-do neighbour; ↑/↓ sit on the plain lines only, are disabled at the ends of
   the plain run, and move a line through the same path as a drop. `BackupServiceTest`: an arranged
   list comes back arranged, and a file from before lines could be arranged comes back in writing
-  order.
+  order. The gesture itself is browser behaviour, verified by hand at 360px in the browser pane
+  with synthetic touch pointer events on a three-line list: the top line held by its top edge and
+  dragged until it mostly covers the last line goes to the end, the last line held by its bottom
+  edge goes to the top, a line flung far past the end of the list goes to the end, and a board
+  card still drops into its neighbour's place.
 - **List-line reminders** (`ListReminderServiceTest`, sender mocked): fires once to every device
   in the home and is then marked fired rather than deleted, never sent twice; nothing before its
   time; scheduling twice moves the one reminder and anyone in the home may move it; snoozing a
