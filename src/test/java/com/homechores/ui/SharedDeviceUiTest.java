@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.homechores.domain.ChoreTask;
+import com.homechores.domain.ChoreTaskRepository;
 import com.homechores.domain.DivisionStyle;
 import com.homechores.domain.Home;
 import com.homechores.domain.Member;
@@ -52,6 +53,9 @@ class SharedDeviceUiTest extends HomeChoresUiTest {
 
     @Autowired
     ListItemService lists;
+
+    @Autowired
+    ChoreTaskRepository taskRepo;
 
     private Member alex;
     private Member milla;
@@ -112,6 +116,12 @@ class SharedDeviceUiTest extends HomeChoresUiTest {
     @Test
     void underEnforcedRotation_theCardSaysWhoseTurn_andAWrongPickIsRefused() {
         openAsDevice();
+        // Whoever's turn it is may be on the dog walk, which only opens mornings and evenings:
+        // the card would be locked for its hours, not its rotation, depending on the clock.
+        taskRepo.findByHomeCodeOrderByCreatedAtAsc(code).forEach(t -> {
+            t.setAvailableWindows(null);
+            taskRepo.save(t);
+        });
         Home home = service.findHome(code).orElseThrow();
         home.setDivisionStyle(DivisionStyle.ROTATING);
         home.setRotationEnforced(true);

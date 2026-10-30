@@ -2125,6 +2125,11 @@ body.hold-dragging {
     gap: var(--lumo-space-s);
     width: 100%;
 }
+/* A routine is a card like a list line, so it takes the same inset as a line's .swipe-face; the
+   bare .list-row padding is for rows on a plain card, where the card's own padding is the inset. */
+.shared-list > .list-row.routine-item {
+    padding: 8px 12px;
+}
 .routines-panel .routine-add {
     margin: var(--lumo-space-s) 0;
 }

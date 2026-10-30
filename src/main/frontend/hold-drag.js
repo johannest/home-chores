@@ -35,7 +35,7 @@ const SCROLL_STEP = 14;  // px per frame of auto-scroll
 
 const configs = [];
 let pending = null;      // { cfg, item, x0, y0, timer }
-let drag = null;         // { cfg, item, ghost, x, y, dx, dy, raf, originBefore, ... }
+let drag = null;         // { cfg, item, ghost, x, y, dx, dy, w, h, raf, originBefore, ... }
 let installed = false;
 
 const itemAt = (target) => {
@@ -93,6 +93,7 @@ const lift = () => {
         cfg, item, ghost,
         // The ghost keeps the finger where it landed on the item, not the item's centre.
         dx: x0 - rect.left, dy: y0 - rect.top,
+        w: rect.width, h: rect.height,
         x: x0, y: y0, raf: 0,
         originBefore: origin.beforeId, originContainer: origin.container,
         // To put the preview back if the drag is cancelled or lands where it started.
@@ -108,9 +109,12 @@ const position = () => {
     drag.ghost.style.transform = `translate(${drag.x - drag.dx}px, ${drag.y - drag.dy}px)`;
 };
 
-// Move the placeholder to wherever the pointer is. The item under the pointer decides: its
+// Move the placeholder to wherever the ghost is. The item under the ghost's centre decides: its
 // near half means "before it", its far half "after it" — and when that item is the dragged
-// item's own slot, nothing moves. (Measuring against the *nearest other* item instead made the
+// item's own slot, nothing moves. The centre, not the finger: a thumb holds a line near one edge,
+// and measured at the finger, a line held by its top edge had to be dragged most of the way past
+// the last line before it went below it — on a short list, the first and last place were all but
+// out of reach. (Measuring against the *nearest other* item instead made the
 // slot wander in a grid: the moment the placeholder landed under the finger, the nearest other
 // card was in the row above, and the slot climbed a row per frame.) Over a gap, the nearest item
 // in that container stands in. An element without an id is the edge of the landable run: before
@@ -120,9 +124,21 @@ const settle = () => {
     if (!drag) {
         return;
     }
-    const { cfg, item, x, y } = drag;
-    const under = document.elementsFromPoint(x, y);
-    const container = under.find((el) => el.matches?.(cfg.container));
+    const { cfg, item } = drag;
+    const x = drag.x - drag.dx + drag.w / 2;
+    let y = drag.y - drag.dy + drag.h / 2;
+    let under = document.elementsFromPoint(x, y);
+    let container = under.find((el) => el.matches?.(cfg.container));
+    if (!container && cfg.axis === 'y') {
+        // Past either end of a list — the add row above it, the empty page below a short one:
+        // the first or the last place, not "nowhere".
+        const r = item.parentElement?.getBoundingClientRect();
+        if (r && x >= r.left && x <= r.right) {
+            y = Math.min(Math.max(y, r.top + 1), r.bottom - 1);
+            under = document.elementsFromPoint(x, y);
+            container = under.find((el) => el.matches?.(cfg.container));
+        }
+    }
     if (!container) {
         return;
     }
