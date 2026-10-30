@@ -85,10 +85,11 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
+        <!-- Compile scope, not runtime: EncryptDatabase calls H2's ChangeFileEncryption. Same
+             artifact and version as before, so nothing new reaches the jar. -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
-            <scope>runtime</scope>
         </dependency>
 
         <!-- Jackson 2 for backup JSON (not pulled transitively without a web/json starter).

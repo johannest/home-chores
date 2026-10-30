@@ -408,6 +408,11 @@ hold whatever screen the call came from.
   not chime all day; vibration is on. Both are choices for *this* phone only, sound respects my
   silent switch and never stops my music, and an iPhone, which cannot vibrate for a web page,
   does not offer the vibration switch at all.
+- **US-69 An encrypted database file (operator).** As the operator, I can encrypt the database
+  file with a key that only the service's environment holds, so a hosting backup or a stray copy
+  of `data/` does not show anyone a family's names and chores. A key that does not fit the file
+  stops the app with a message saying what to do, and I can change the key or undo the
+  encryption with the same CLI.
 
 ## 4. Functional specification
 
@@ -1553,7 +1558,7 @@ retention candidates before enabling the sweep.
 - **Requires the service stopped**, because H2 holds an exclusive file lock. The script
   probes the port and refuses with an instruction rather than failing part-way.
 - Commands: `list`, `show`, `export`, `delete`, `restore FILE [--overwrite]`,
-  `purge --days N [--dry-run]`. `delete` exports a backup to `data/erasure-exports/` first
+  `purge --days N [--dry-run]`, and `encrypt-db` / `rekey-db` / `decrypt-db` (§4.11.4). `delete` exports a backup to `data/erasure-exports/` first
   (unless `--no-backup`) and requires the home code to be typed, mirroring the in-app
   Danger zone. `--db-url` targets another database, e.g. a restored copy. Exit codes:
   0 success, 2 handled failure.
@@ -1567,6 +1572,35 @@ retention candidates before enabling the sweep.
   here is putting back something that is gone. `BackupService.restoreAnyHome` is the entry
   point; its safety comes from being reachable only from a process the operator starts on
   the host with the service stopped, not from a code comparison.
+
+### 4.11.4 Encryption at rest (operator)
+- **Off unless `FLASHCHORES_DB_KEY` is set** (`homechores.db.key`). With it, `DatabaseEncryption`
+  replaces Spring Boot's connection details: the URL gains `;CIPHER=AES;TRACE_LEVEL_FILE=0` and
+  the password becomes `<key> <user password>` (H2 splits at the first space). An in-memory URL
+  (tests, the verify server) is never touched. A dev checkout without the variable runs as before.
+- **The key must fit the file.** The app reads the first bytes of `<base>.mv.db` (H2 marks an
+  encrypted file `H2encrypt\n`) before H2 opens it, and refuses to start with a message saying
+  what to do in three cases: an encrypted file with no key (H2 would say "file corrupted"), a key
+  over a plain file (run `encrypt-db` or unset the key), and a key shorter than 16 characters or
+  containing whitespace. A missing file with a key is created encrypted.
+- **No trace file.** H2's `.trace.db` is never encrypted and copies failing statements, values
+  included, so with a key H2 writes none. The exceptions still reach the app log.
+- **Conversion** is `EncryptDatabase`, a plain `main` run from the fat jar through Spring Boot's
+  `PropertiesLauncher`, because Spring would open the database it must rewrite. `encrypt` (plain
+  → key), `rekey` (`FLASHCHORES_DB_OLD_KEY` → `FLASHCHORES_DB_KEY`) and `decrypt` (key → plain,
+  the rollback) each copy the file to `<file>.before-<command>`, run H2's
+  `ChangeFileEncryption`, and open the result with the new key: H2 decrypts the store before it
+  checks the user, so a refused login still proves the file reads, while a wrong file key fails
+  (90049). Only then is the copy deleted, and after `encrypt`/`rekey` the old trace file too.
+  On any failure the copy is moved back. Keys come from the environment, or the CLI asks for
+  them without echo (twice for a new key). They never go on a command line, where every user of
+  a shared host can see them in the process list.
+- **What it protects:** a copy of the file that leaves the host (hosting backups, a misconfigured
+  web root, a disk image). **What it does not:** anyone who can read the service's environment
+  or memory, because the key has to be on the host for the app to start unattended; the JSON
+  exports in `data/retention-exports/` and `data/erasure-exports/`, which stay plain (the runbook
+  sets `data/` to `700`); and hosting backups taken before the switch. The privacy notice does
+  not claim encryption, since it is the operator's choice per deployment.
 
 ### 4.15.1 Mobile layout
 The app is used mostly on phones, so the layout is designed for a ~360–400px column and
@@ -1669,8 +1703,8 @@ scales up, not the other way round.
   `<html lang>` from the resolved locale.
 
 ## 5. Non-functional / technical
-- Vaadin 25.3 Flow + Spring Boot 4.1 (Java 25), H2 file DB (`data/`), server push
-  (long-polling) + Vaadin Signals, installable PWA.
+- Vaadin 25.3 Flow + Spring Boot 4.1 (Java 25), H2 file DB (`data/`, optionally AES-encrypted
+  at rest, §4.11.4), server push (long-polling) + Vaadin Signals, installable PWA.
 - Charts, confetti and icons are self-contained (no external CDN, no licensed
   components).
 - **Time zones**: availability hours are evaluated in the member's browser time
@@ -1815,6 +1849,17 @@ scales up, not the other way round.
   palette, no sideways scroll, and the tile, border and text colours computed for all four palettes
   in both schemes (brand text ≥ 4.7:1 on white, on the page and on a dome's rim in light;
   secondary text ≥ 4.9:1 on a dome's rim; pill text ≥ 5.2:1 light, ≥ 4.5:1 dark). `tools/generate-doodles.cjs` is deterministic for a seed; the doodle ink is ≤ 1.15:1 on the page in every palette.
+- **Encryption at rest** (§4.11.4). `DatabaseEncryptionTest`: without a key a plain file and
+  its URL are left alone; an in-memory URL is untouched even with a key; with a key a new file
+  is created encrypted, holds no plaintext name, writes no trace file, and a wrong key is
+  refused by H2 (90049); an encrypted file with no key, a key over a plain file, and a short or
+  spaced key each refuse to start with a message naming the fix; the file is found from the URL
+  without its settings. `EncryptDatabaseTest`: `encrypt` keeps the data and leaves only the
+  encrypted file (no copy, no old trace file); `rekey` then `decrypt` round-trip the data; a
+  wrong old key fails and leaves the file byte-for-byte as it was, with no copy behind; a short
+  key, no key, decrypting a plain file, a missing file and encrypting twice are refused and
+  change nothing. The CLI wrapper and the fat-jar launch were run by hand against a copy of a
+  dev database.
 - **Sound and vibration** (§4.12c, `EffectsUiTest`): a completion sends exactly one effect, the
   same kind as its confetti, three completions in a row; a tap refused because another member
   booked the chore sends `blocked` and records nothing; ticking a list line and a routine sends
@@ -2020,6 +2065,8 @@ scales up, not the other way round.
 ## 7. Out of scope (possible future work)
 - Real authentication/accounts; weekly/monthly leaderboards;
   per-member chore preferences; native mobile apps.
+- Encrypting the JSON exports in `data/` (retention and erasure) with the database key; today
+  they are plain files protected by `data/` permissions (§4.11.4).
 - Routines (§4.4f) beyond weekly and every other week: monthly dates ("the 5th"), other
   intervals, a "missed yesterday" view, and answering a routine reminder from the notification
   (Done / Snooze) the way a list reminder is answered in-app.

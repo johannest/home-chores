@@ -25,10 +25,19 @@ Usage
     ./flashchores-admin.py delete K7QP4ZT
     ./flashchores-admin.py purge --days 30 --dry-run
     ./flashchores-admin.py purge --days 30
+    ./flashchores-admin.py encrypt-db
+    ./flashchores-admin.py rekey-db
+    ./flashchores-admin.py decrypt-db
 
 `delete` exports a JSON backup first (unless --no-backup) and asks you to type the home
 code, mirroring the confirmation the app itself requires. Keep those exports: they are
 your evidence the request was honoured, and your undo if someone changes their mind.
+
+`encrypt-db` converts the database file to AES once (README, "Encrypting the database").
+The key comes from FLASHCHORES_DB_KEY, or is asked for without echoing — never as an
+argument, where everyone on the host could read it in the process list. The other
+commands open an encrypted database as long as FLASHCHORES_DB_KEY is set, exactly as the
+service needs it.
 
 Locating the app
 ----------------
@@ -40,6 +49,7 @@ file containing a Java classpath (see --help).
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import re
@@ -56,6 +66,8 @@ JSON_END = "---FLASHCHORES-JSON-END---"
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = HERE.parent
 DEFAULT_BACKUP_DIR = PROJECT_ROOT / "data" / "erasure-exports"
+DEFAULT_DB_BASE = PROJECT_ROOT / "data" / "homechores"
+ENCRYPT_MAIN = "com.homechores.maintenance.EncryptDatabase"
 DEFAULT_DB_PORT = 8080
 
 
@@ -371,6 +383,55 @@ def cmd_purge(args) -> int:
     return 0
 
 
+def ask_key(variable: str, prompt: str, confirm: bool) -> str:
+    """The key from the environment, or typed in without echo (twice for a new one)."""
+    key = os.environ.get(variable)
+    if key:
+        return key
+    try:
+        key = getpass.getpass(f"{prompt}: ")
+        if confirm and getpass.getpass("Again, to be sure: ") != key:
+            raise Failure("The two keys did not match — nothing was changed.")
+    except (EOFError, KeyboardInterrupt):
+        raise Failure("Aborted.")
+    return key
+
+
+def cmd_encryption(args) -> int:
+    """encrypt-db / decrypt-db / rekey-db: H2's file conversion, which needs no Spring and
+    must not have one running, so it is a plain main class rather than a maintenance run."""
+    command = args.command.removesuffix("-db")
+    env = dict(os.environ)
+    if command == "rekey":
+        env["FLASHCHORES_DB_OLD_KEY"] = ask_key("FLASHCHORES_DB_OLD_KEY", "Current key", False)
+        env["FLASHCHORES_DB_KEY"] = ask_key("FLASHCHORES_DB_KEY", "New key", True)
+    else:
+        env["FLASHCHORES_DB_KEY"] = ask_key("FLASHCHORES_DB_KEY", "Key",
+                                            confirm=command == "encrypt")
+
+    cmd = [java_executable()]
+    if args.classpath:
+        classpath = Path(args.classpath).expanduser()
+        if not classpath.is_file():
+            raise Failure(f"No classpath file at {classpath}")
+        cmd += ["-cp", classpath.read_text().strip(), ENCRYPT_MAIN]
+    else:
+        # Spring Boot's PropertiesLauncher runs another main class from the fat jar.
+        cmd += [f"-Dloader.main={ENCRYPT_MAIN}", "-cp", str(find_jar(args.jar)),
+                "org.springframework.boot.loader.launch.PropertiesLauncher"]
+    cmd += [command, str(Path(args.db).expanduser())]
+    if args.verbose:
+        print("$ " + " ".join(cmd), file=sys.stderr)
+
+    completed = subprocess.run(
+        cmd, cwd=str(PROJECT_ROOT), env=env, capture_output=True, text=True, check=False
+    )
+    if completed.returncode != 0:
+        raise Failure((completed.stderr.strip() or completed.stdout.strip())[-2500:])
+    print(completed.stdout.strip())
+    return 0
+
+
 # ---------------------------------------------------------------------------- wiring
 
 
@@ -431,6 +492,15 @@ def build_parser() -> argparse.ArgumentParser:
                          help="idle days before an unused, empty home qualifies")
     p_purge.add_argument("--dry-run", action="store_true", help="list candidates only")
     p_purge.set_defaults(func=cmd_purge)
+
+    for name, help_text in (
+            ("encrypt-db", "encrypt the database file with FLASHCHORES_DB_KEY (once)"),
+            ("rekey-db", "re-encrypt from FLASHCHORES_DB_OLD_KEY to FLASHCHORES_DB_KEY"),
+            ("decrypt-db", "turn the database back into a plain file (the rollback)")):
+        p_crypt = sub.add_parser(name, help=help_text)
+        p_crypt.add_argument("--db", default=str(DEFAULT_DB_BASE),
+                             help=f"database base path, without .mv.db (default {DEFAULT_DB_BASE})")
+        p_crypt.set_defaults(func=cmd_encryption)
 
     return parser
 
