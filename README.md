@@ -54,6 +54,7 @@ See [SPEC.md](SPEC.md) for the full user stories and specification.
 | **PWA install** | Installable on Android (install prompt) and iPhone (Share → *Add to Home Screen*): branded icon, standalone display, themed splash screens, offline fallback page. |
 | **Privacy page** | A plain-language privacy notice at `/privacy` and a brief user agreement at `/terms` (consented via a checkbox on the create/join forms), both linked from the landing page. |
 | **Themes & colours** | Follows the OS theme automatically (`@ColorScheme(SYSTEM)` + CSS `light-dark()`), and one palette-glyph menu in the header holds both axes: auto/light/dark **and** a brand colour — **green, pink, blue or grey**. Both are per device (localStorage), applied before Vaadin loads so there's no flash. A palette is three CSS custom properties, so it composes with light/dark instead of duplicating it. The page is a faint tint of the palette under a wallpaper of chore doodles, the chore tiles are raised like buttons and faintly domed like bubbles, and a shared list's lines are cards of the same kind. |
+| **Sound & vibration** | A short synthesised chime and a buzz when a chore is done, scaled like the confetti (a blip, a rising run, a little fanfare for a trophy); a different sound for a tap the rules refuse; a quiet tick for a ticked list line or routine. Two switches under **Sound & vibration** in the header menu, per device: sound starts **off** (the kitchen tablet should not chime all day), vibration on. On iPhones sound mixes with music and respects the silent switch; iPhones cannot vibrate for a web page, so that switch is hidden there. No audio files. |
 | **Remind me later (per chore)** | Tap ⏰ on a chore card and pick *in 1h / 2h / 4h / 8h / a day / a week* — one push notification naming that chore when the time comes. One per chore per person, replaced if you change your mind, and it cancels itself the moment you do the chore (or somebody else does). Needs the same VAPID keys as the daily reminder. |
 | **Chore reminders (opt-in)** | Real Web Push: each member can pick a wall-clock time (their own timezone) and get a notification on subscribed devices if they haven't logged any chores that day. Requires VAPID keys (see below); on iPhone/iPad it works once the PWA is added to the Home Screen (iOS 16.4+). Each member keeps at most five subscribed devices, and a push the service does not answer within 10 s is given up on rather than waited for. |
 
@@ -95,6 +96,8 @@ one back (it asks you to type the code, and refuses to overwrite a home that sti
 without `--overwrite`). Keep the exports as evidence the
 request was honoured, and as your undo. Needs the runnable jar (`--jar`, `FLASHCHORES_JAR`,
 or newest in `target/`). `--db-url` points it at another database, e.g. a restored copy.
+With an encrypted database (below) every command needs `FLASHCHORES_DB_KEY` set, as the
+service does.
 
 **Retention on a public instance:** `homechores.retention.empty-home-hours=72` (fast
 anti-spam tier) and `abandoned-home-days=30` clear out never-used sign-ups (zero chore
@@ -119,6 +122,63 @@ when the push service reports them gone, dropped on *Leave*, and never included 
 Sends run over the app's own HTTP client with a hard deadline
 (`homechores.push.send-timeout-ms`, 10 s), so an endpoint that accepts and never answers
 cannot hold the single scheduler thread.
+
+**Encrypting the database:** H2 can encrypt `data/homechores.mv.db` with AES. It is off
+unless `FLASHCHORES_DB_KEY` is set. It protects a copy of the file that leaves the host (a
+hosting backup, a misconfigured web root, a disk image). It does **not** protect against
+someone who can read the service's environment or memory: the key has to be on the host so the
+app can start on its own. Once, with the service stopped:
+
+```bash
+openssl rand -base64 32                       # the key: store a copy OFF this host
+sudo systemctl stop flashchores
+./tools/flashchores-admin.py encrypt-db       # asks for the key twice, never echoes it
+head -c 9 data/homechores.mv.db; echo         # prints H2encrypt
+chmod 700 data                                # exports in data/ stay plain JSON
+```
+
+Then add `FLASHCHORES_DB_KEY=…` to the service's environment, next to the VAPID keys, in a
+file only the service user can read (`chmod 600`), and start it again.
+
+*Where the key file goes, and why it matters.* Encryption at rest only helps if the copies
+that leave the host carry the database **without** the key, so the key lives outside both
+`data/` and the app directory, and outside whatever the host backs up. On a shared
+cPanel/CloudLinux account (no root, no systemd, CageFS) that is:
+
+```bash
+mkdir -p ~/.config/flashchores && chmod 700 ~/.config/flashchores
+( umask 077; printf 'FLASHCHORES_DB_KEY=%s\n' "$(openssl rand -base64 32)" > ~/.config/flashchores/env )
+printf '%s\n' '.config/flashchores/env' >> ~/cpbackup-exclude.conf   # cPanel backups skip the key
+```
+
+and `flashchores.sh` loads it before it runs `java`, next to the VAPID keys:
+
+```bash
+set -a; . "$HOME/.config/flashchores/env"; set +a
+```
+
+The admin tool needs the same variable in its shell: `set -a; . ~/.config/flashchores/env;
+set +a` before `encrypt-db` and every later command. `tools/release.sh` needs no change, since
+it starts the app through `flashchores.sh`. What this does and does not buy: every copy of
+`data/`, of the app directory and of the account's cPanel backup is now useless on its own; the
+provider's root, and anything running as the service user, still has both. With systemd
+available, `LoadCredentialEncrypted=` and `systemd-creds` keep the key off the disk in the
+clear; without it, a key held only in memory (typed once per boot into a `/dev/shm` file) is
+the alternative, at the price of the app staying down after a reboot until someone types it.
+
+The conversion copies
+the file aside, encrypts it, proves it opens with the key, and only then deletes the copy and
+the old `homechores.trace.db`. On any failure it puts the copy back. The app refuses to start
+when the key and the file disagree, with a message naming the fix. With the key set, H2 writes
+no trace file, because that file is never encrypted. `rekey-db` changes the key (current key in
+`FLASHCHORES_DB_OLD_KEY`, new key in `FLASHCHORES_DB_KEY`, or typed when asked). `decrypt-db`
+is the rollback: run it, then unset the key. All three refuse a database that is still open,
+before any copy is made, and `rekey-db` refuses a new key equal to the current one. **Losing
+the key loses every family's data**; hosting backups taken before the switch still hold the
+plain file until they rotate out, and the disk itself keeps the old plaintext in freed blocks
+until they are overwritten (the conversion rewrites the file, it does not wipe it). If a crash
+leaves a `homechores.mv.db.before-<command>` beside the database, that copy is the file as it
+was before the command: stop, put it back over `homechores.mv.db`, and run the command again.
 
 **npm cooldown note:** Vaadin 25.2 skips npm packages published less than a day ago
 (supply-chain cooldown), which can break the frontend install when Vaadin's own
@@ -392,6 +452,7 @@ so the rate limiter sees the visitor and not the edge), and the session cookie c
 ```
 src/main/java/com/homechores/
 ├── Application.java              # Spring Boot entry: @Push, @PWA, Lumo + styles.css
+├── DatabaseEncryption.java       # CIPHER=AES when FLASHCHORES_DB_KEY is set; refuses a mismatch
 ├── domain/                       # JPA entities + repositories
 │   ├── Home / Member / ChoreTask / ChoreGroup / Completion
 │   ├── ChoreReminder.java        # one-shot "remind me about this chore later"
@@ -421,6 +482,9 @@ src/main/java/com/homechores/
 │   ├── RoutineService.java       # routines: who may do what, today's, ticks, home clock, push sweep
 │   ├── BackupService.java        # per-home JSON export / restore
 │   └── HomeState.java            # per-home revision Signal (live sync)
+├── maintenance/
+│   ├── MaintenanceRunner.java    # one-shot operator commands behind flashchores-admin.py
+│   └── EncryptDatabase.java      # encrypt / rekey / decrypt the H2 file (a plain main, no Spring)
 ├── i18n/
 │   ├── Translations.java         # I18NProvider over messages[_fi|_sv].properties
 │   └── LocaleInitListener.java   # applies the "lang" cookie to new sessions
@@ -438,6 +502,7 @@ src/main/java/com/homechores/
     │                             #   danger zone (delete the whole home)
     ├── Charts.java               # dependency-free bar / segment / trend charts
     ├── AppearanceMenu.java       # colour scheme + brand palette, per device
+    ├── EffectsItems.java         # the Sounds / Vibration switches, per device
     ├── SnoozeDialog.java         # "remind me about this chore in 2h"
     ├── StarterChoresDialog.java  # the create form's starter-chore picker
     ├── ListPanel.java            # Groceries / To-do / Dinner / Routines
@@ -445,7 +510,7 @@ src/main/java/com/homechores/
     ├── RoutineDialog.java        # make or change a routine
     ├── RoutineFormat.java        # "Tue, Thu · 18:00 · every other week · Sam"
     ├── ListReminderDialog.java   # "remind us about this line tomorrow 9:00" + snooze on fire
-    ├── Celebrations.java         # confetti + congratulation + feedback + trophy dialogs
+    ├── Celebrations.java         # confetti, sound + vibration, congratulation + feedback + trophy dialogs
     ├── PrivacyView.java          # /privacy notice
     ├── LanguageSwitcher.java     # en/fi/sv select, persisted in a cookie
     ├── SessionExpiryInitListener.java  # silent expiry: back to the landing page, which restores
@@ -460,6 +525,7 @@ src/main/resources/
 └── META-INF/resources/icons/     # PWA icons + iOS splash screens (generated set),
                                   #   and doodles-2.svg, the page's wallpaper tile (a mask)
 src/main/frontend/confetti.js     # self-contained confetti (no CDN; off under reduced motion)
+src/main/frontend/effects.js      # synthesised chimes + vibration patterns, per-device switches
 src/main/frontend/loading-overlay.js # the loading card, built from the landing restore card's classes
 src/main/frontend/keyboard-inset.js  # how much of the page the on-screen keyboard covers (toasts)
 src/main/frontend/list-swipe.js   # swipe-to-reveal actions on list lines
@@ -468,7 +534,8 @@ src/main/frontend/board-drag.js   # …configured for the board's chore cards (a
 src/main/frontend/list-drag.js    # …configured for the lines of a shared list (everyone)
 src/test/java/com/homechores/     # JUnit service tests + Vaadin UI unit tests
 tools/
-├── flashchores-admin.py          # operator maintenance: list / show / export / delete / restore / purge
+├── flashchores-admin.py          # operator maintenance: list / show / export / delete / restore / purge,
+│                                 #   encrypt-db / rekey-db / decrypt-db
 ├── release.sh                    # deploy or roll back a release
 ├── generate-icons.cjs            # regenerates the PWA icons + iOS splash screens
 ├── generate-doodles.cjs [seed]   # regenerates icons/doodles-2.svg, the seamless doodle tile

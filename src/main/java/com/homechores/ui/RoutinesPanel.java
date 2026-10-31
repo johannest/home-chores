@@ -176,6 +176,9 @@ class RoutinesPanel extends Div {
         tick.addValueChangeListener(e -> {
             if (e.isFromClient()) {
                 routines.setDone(viewer.homeCode(), r.getId(), viewer.author(), e.getValue());
+                if (e.getValue()) {
+                    Celebrations.effect("tick");
+                }
                 onChanged.run();
             }
         });

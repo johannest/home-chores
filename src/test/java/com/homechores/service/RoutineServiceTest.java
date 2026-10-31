@@ -75,8 +75,12 @@ class RoutineServiceTest {
 
     /** Backdates a routine's next reminder so the next sweep finds it due. */
     private void dueNow(Routine r) {
+        dueAt(r, Instant.now().minusSeconds(30));
+    }
+
+    private void dueAt(Routine r, Instant at) {
         Routine fresh = repo.findById(r.getId()).orElseThrow();
-        fresh.setNextFireAt(Instant.now().minusSeconds(30));
+        fresh.setNextFireAt(at);
         repo.save(fresh);
     }
 
@@ -330,6 +334,38 @@ class RoutineServiceTest {
         verify(sender, times(1)).send(any(), eq("🏋️ Piano"), anyString());
         assertTrue(repo.findById(bins.getId()).orElseThrow().getNextFireAt().isAfter(Instant.now()));
         assertEquals(0, routines.sendDue(Instant.now()), "never twice for one occurrence");
+    }
+
+    @Test
+    void theSendCap_startsNoMoreRoutines_butNeverLeavesAStartedOnesAudienceHalfway() {
+        when(sender.isEnabled()).thenReturn(true);
+        when(sender.send(any(), anyString(), anyString())).thenReturn(true);
+        Member alex = chores.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+        Member sam = chores.joinHome(code, "Sam").orElseThrow();
+        Member kim = chores.joinHome(code, "Kim").orElseThrow();
+        for (Member m : List.of(alex, sam, kim)) {
+            for (int i = 0; i < 4; i++) { // twelve devices: more than one sweep's cap of ten
+                subscriptions.save(new PushSubscription(m.getId(), code,
+                        "https://fcm.googleapis.com/fcm/send/" + m.getId() + "-" + i, "p256dh", "auth"));
+            }
+        }
+        Routine bins = routines.create(code, alex.getId(), timed("Bins", null, LocalTime.of(19, 0))).orElseThrow();
+        Member pat = chores.createHome("Elsewhere", "Pat");
+        subscribe(pat);
+        Routine piano = routines.create(pat.getHomeCode(), pat.getId(),
+                timed("Piano", pat.getId(), LocalTime.of(16, 30))).orElseThrow();
+        dueNow(bins);
+        dueAt(piano, Instant.now().minusSeconds(10)); // due after the bins, so the bins go first
+
+        assertEquals(12, routines.sendDue(Instant.now()), "every device of the started routine, past the cap");
+        verify(sender, times(12)).send(any(), eq("🏋️ Bins"), anyString());
+        verify(sender, never()).send(any(), eq("🏋️ Piano"), anyString());
+        assertFalse(repo.findById(piano.getId()).orElseThrow().getNextFireAt().isAfter(Instant.now()),
+                "not started, so still due rather than skipped");
+
+        assertEquals(1, routines.sendDue(Instant.now()), "the next sweep takes it");
+        verify(sender, times(1)).send(any(), eq("🏋️ Piano"), anyString());
     }
 
     @Test

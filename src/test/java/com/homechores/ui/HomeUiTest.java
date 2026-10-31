@@ -85,18 +85,6 @@ class HomeUiTest extends HomeChoresUiTest {
 
     // ---- helpers ------------------------------------------------------------
 
-    /** Visible up the whole ancestor chain (so components in a hidden form are excluded). */
-    private boolean usable(Component c) {
-        Component cur = c;
-        while (cur != null) {
-            if (!cur.isVisible()) {
-                return false;
-            }
-            cur = cur.getParent().orElse(null);
-        }
-        return c.getUI().isPresent();
-    }
-
     /**
      * The label a user would read: header buttons keep their text in a child span (so it
      * can be hidden on phones), which leaves {@code getText()} empty — fall back to the
@@ -108,28 +96,6 @@ class HomeUiTest extends HomeChoresUiTest {
             return text.trim();
         }
         return b.getAriaLabel().orElseGet(() -> b.getElement().getTextRecursively()).trim();
-    }
-
-    /** Every MenuItem in the UI, sub menus included — the header "⋯" and the admin rows' "⋯". */
-    private java.util.stream.Stream<MenuItem> allMenuItems() {
-        return $(MenuBar.class).all().stream()
-                .filter(this::usable)
-                .flatMap(m -> m.getItems().stream())
-                .flatMap(this::withSubItems);
-    }
-
-    private java.util.stream.Stream<MenuItem> withSubItems(MenuItem item) {
-        return java.util.stream.Stream.concat(java.util.stream.Stream.of(item),
-                item.getSubMenu().getItems().stream().flatMap(this::withSubItems));
-    }
-
-    /** Fires a click on a menu row by its visible text — what a tap on the open menu does. */
-    private void clickMenuItem(String text) {
-        MenuItem item = allMenuItems()
-                .filter(i -> text.equals(i.getElement().getTextRecursively().trim()) && i.isEnabled())
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("No usable menu item: " + text));
-        ComponentUtil.fireEvent(item, new ClickEvent<>(item));
     }
 
     private void clickButton(String text) {

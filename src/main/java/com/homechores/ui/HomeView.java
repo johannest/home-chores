@@ -53,6 +53,7 @@ import java.util.Optional;
 @Route("home")
 @PageTitle("FlashChores")
 @JsModule("./confetti.js")
+@JsModule("./effects.js")
 @JsModule("./list-swipe.js")
 @JsModule("./board-drag.js")
 @JsModule("./list-drag.js")
@@ -399,7 +400,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         d.add(new Span(T.tr("home.leave.device.text")));
         Button yes = new Button(T.tr("home.leave"), e -> {
             d.close();
-            sharedDevices.leave(viewer.deviceId());
+            sharedDevices.leave(homeCode, viewer.deviceId());
             DeviceIdentity.forget();
             SessionContext.signOut();
             getUI().ifPresent(ui -> ui.navigate(LandingView.class));

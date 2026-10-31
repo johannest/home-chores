@@ -10,6 +10,7 @@ import static com.tngtech.archunit.library.GeneralCodingRules.ACCESS_STANDARD_ST
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
 import com.homechores.i18n.LocaleInitListener;
+import com.homechores.maintenance.EncryptDatabase;
 import com.homechores.maintenance.MaintenanceRunner;
 import com.homechores.service.HomeState;
 import com.homechores.service.WebPushSender;
@@ -251,10 +252,10 @@ class ArchitectureTest {
 
     @Test
     void noStandardStreams_exceptTheCliWhoseOutputTheyAre() {
-        noClasses().that().doNotBelongToAnyOf(MaintenanceRunner.class)
+        noClasses().that().doNotBelongToAnyOf(MaintenanceRunner.class, EncryptDatabase.class)
                 .should(ACCESS_STANDARD_STREAMS)
-                .because("MaintenanceRunner's stdout JSON envelope is its documented contract; "
-                        + "everything else logs through SLF4J")
+                .because("MaintenanceRunner's stdout JSON envelope and EncryptDatabase's messages "
+                        + "to the operator are their contract; everything else logs through SLF4J")
                 .check(classes);
     }
 

@@ -2,6 +2,7 @@ package com.homechores.domain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.homechores.domain.ChoreCatalog.Entry;
@@ -9,6 +10,7 @@ import com.homechores.domain.ChoreCatalog.Section;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
@@ -59,6 +61,27 @@ class ChoreCatalogTest {
                         "vacuum", "vestibule", "hangLaundry", "foldLaundry", "waterPlants", "dogOut"),
                 ChoreCatalog.starterKeys());
         assertFalse(ChoreCatalog.starterKeys().contains("mowLawn"));
+    }
+
+    /** The one cadence that leans on the seasons: 150 days, spring and autumn (§4.2.1). */
+    @Test
+    void theTyreChange_isDueEachSpringAndAutumn_neverTwiceInOne() {
+        Entry tyres = ChoreCatalog.ENTRIES.stream().filter(e -> e.key().equals("changeTyres"))
+                .findFirst().orElseThrow();
+        assertEquals(Set.of(Season.SPRING, Season.AUTUMN), Seasons.asSet(tyres.seasons()));
+        for (LocalDate done = LocalDate.of(2026, 1, 1); done.getYear() == 2026; done = done.plusDays(1)) {
+            if (!Seasons.isInSeason(tyres.seasons(), done)) {
+                continue;
+            }
+            Season season = Season.of(done.getMonth());
+            LocalDate due = done.plusDays(tyres.intervalDays());
+            assertNotEquals(season, Season.of(due.getMonth()), "changed " + done + ": not due again that season");
+            // …and due before the next of its two seasons ends: autumn after a spring change,
+            // the following spring after an autumn one. Due in summer or winter, it waits hidden.
+            LocalDate nextSeasonEnds = season == Season.SPRING
+                    ? LocalDate.of(done.getYear(), 11, 30) : LocalDate.of(done.getYear() + 1, 5, 31);
+            assertFalse(due.isAfter(nextSeasonEnds), "changed " + done + ": due by " + nextSeasonEnds);
+        }
     }
 
     @Test

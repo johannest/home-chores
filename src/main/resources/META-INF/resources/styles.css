@@ -2101,6 +2101,10 @@ body.hold-dragging {
     display: flex;
     gap: var(--lumo-space-xs);
 }
+/* All / None are tapped on a phone like everything else here: 40px, not Lumo's 36. */
+.starter-dialog .starter-bulk vaadin-button {
+    min-height: 40px;
+}
 .starter-dialog .starter-section {
     width: 100%;
 }

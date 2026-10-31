@@ -74,7 +74,7 @@ const blockPan = (e) => e.preventDefault();
 const lift = () => {
     const { cfg, item, x0, y0 } = pending;
     pending = null;
-    navigator.vibrate?.(15);
+    window.playEffect?.('lift'); // effects.js: a short buzz, if this device has vibration on
     document.addEventListener('touchmove', blockPan, { passive: false });
 
     const rect = item.getBoundingClientRect();

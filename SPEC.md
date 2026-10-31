@@ -57,6 +57,7 @@ Terms in **bold** map to concepts in the code.
 | Snooze a chore ("remind me later" — a one-shot push about that chore) | ✅ | ✅ |
 | Set, move, snooze or cancel the home's reminder about a to-do / grocery line | ✅ | ✅ |
 | Choose colour scheme and palette (per device) | ✅ | ✅ |
+| Switch sounds and vibration on or off (per device) | ✅ | ✅ |
 | Log **other help** the board has no card for | ✅ | ✅ |
 | Log own other help so it counts at once, naming its reward | — | ✅ |
 | Accept / decline other help, and set its reward | — | ✅ |
@@ -115,7 +116,7 @@ hold whatever screen the call came from.
   the rule off for homes where one person genuinely owns a chore.
 - **US-07 Celebrations.** As a member, I see confetti on completion, a "new chore
   unlocked" popup the first time I do a chore, and a trophy at 5/10/25/50/100/250/500/1000
-  personal chores (US-63).
+  personal chores (US-63) — and hear and feel it, where my phone has that switched on (US-68).
 - **US-08 Live sync.** As a member, when anyone completes a chore my screen updates
   live.
 
@@ -400,6 +401,18 @@ hold whatever screen the call came from.
   it and its reminders reach only my devices — not the rest of the family, not an admin, not
   the kitchen tablet — and share it with the family again whenever I like. The privacy notice
   tells me plainly that an admin's backup file still contains it.
+- **US-68 Hear and feel it.** As a member, finishing a chore gives a short chime and a buzz that
+  grow with the moment — a first chore of the day is a blip, a trophy a little fanfare — a tap the
+  rules refuse sounds different from praise, and ticking off a list line or a routine is a quiet
+  tick. Sound is off until I switch it on in the header menu, because the kitchen tablet should
+  not chime all day; vibration is on. Both are choices for *this* phone only, sound respects my
+  silent switch and never stops my music, and an iPhone, which cannot vibrate for a web page,
+  does not offer the vibration switch at all.
+- **US-69 An encrypted database file (operator).** As the operator, I can encrypt the database
+  file with a key that only the service's environment holds, so a hosting backup or a stray copy
+  of `data/` does not show anyone a family's names and chores. A key that does not fit the file
+  stops the app with a message saying what to do, and I can change the key or undo the
+  encryption with the same CLI.
 
 ## 4. Functional specification
 
@@ -564,10 +577,11 @@ member's but no member of its own.
   the home deletes its devices.
 - **Leaving**, from the device's own ⋯ menu: "Unpair this device?" (`home.leave.device.*`) asks
   first — unlike a member's Leave — because pairing it again needs the admin PIN typed on it.
-  The yes runs `SharedDeviceService.leave(deviceId)`, which deletes the device's row exactly as
+  The yes runs `SharedDeviceService.leave(homeCode, deviceId)`, which deletes the device's row exactly as
   an unpair does (secret dead, slot freed, home bumped), then forgets the stored identity and
   shows the landing page. No admin check: the id is the session's own, never the client's, and
-  it can only remove the caller.
+  it can only remove the caller — and the row must belong to the session's home all the same, so
+  no caller can ever point it at another home's device.
 - **The board belongs to nobody.** `taskViews(homeCode, null)` evaluates only the locks about
   *time* — season, interval, availability hours (in the device's own time zone) — and leaves
   the locks about *who* (rotation, booking, streak) to the tap. The cards still carry the
@@ -630,7 +644,8 @@ member's but no member of its own.
   availability hours (the dog, 08–10 and 18–22). They are starting points: once created, a
   chore is the home's own and is edited like any other.
 - The create-home form shows **Starter chores · 11 chosen · Choose**. *Choose* opens a dialog
-  with one checkbox group per section, *All* / *None*, and **Sort them into sections on the
+  with one checkbox group per section, *All* / *None* (40 px targets, like every control on the
+  board), and **Sort them into sections on the
   board** (off by default). *Done* replaces the pick; *Cancel*, Esc or a tap outside keeps the
   earlier one. Untouched, the pick is the eleven entries marked *starter* — the chores every
   home got before the catalogue existed — on a flat board, so a family that never opens it gets
@@ -655,7 +670,7 @@ member's but no member of its own.
 - **Hold-and-drag** (`board-drag.js`, admins only — a configuration of the shared
   `hold-drag.js`, which `list-drag.js` reuses for shared lists, §4.4e): hold a chore card still
   for 450 ms and it lifts (a swell at 60 % of the hold says the hold is being noticed; a short vibration where the
-  device has one); drag it and the other cards reflow around the slot, like apps on a phone's
+  device has one and vibration is on, §4.12c); drag it and the other cards reflow around the slot, like apps on a phone's
   home screen; let go and it stays. The slot follows the **centre of the lifted card**, not the
   finger: the card under that centre decides, its near half meaning "before it" and its far half
   "after it". A thumb holds a card near one edge, and measured at the finger the first and last
@@ -929,7 +944,10 @@ starts no streak and needs no approval — organisation, like a list line.
   shows no strip. Three queries per render whatever the number of routines.
 - **Reminders.** `Routine.nextFireAt` is the next occurrence's time as an instant in the home's
   zone, recomputed on every save, after every sweep and on a zone change. The sweep
-  (`homechores.routine.sweep-ms`, 60 s, the shared scheduler thread, `MAX_SENDS_PER_SWEEP` = 10)
+  (`homechores.routine.sweep-ms`, 60 s, the shared scheduler thread, `MAX_SENDS_PER_SWEEP` = 10:
+  the cap decides whether the *next* routine is started and never cuts a started one's audience
+  short, so a home routine cannot reach half the family; the overshoot is at most one home's
+  devices, and a routine not started stays due for the next sweep)
   reads the routines whose `nextFireAt` has passed — normally none — and pushes "🏋️ Workout /
   It's time…" to the routine's member, or to every device in the home for a home routine, each in
   its member's language. No push when it was already ticked that day, when the Routines tab is
@@ -1269,6 +1287,37 @@ starts no streak and needs no approval — organisation, like a list line.
   `<meta name="theme-color">` is patched to match, since a green address bar above a pink header
   is visible for the whole session.
 
+### 4.12c Sound and vibration
+- Two **per-device** switches in the board header's "⋯" menu, under **Sound & vibration**
+  (`EffectsItems`): **Sounds**, off by default, and **Vibration**, on by default. Both live in
+  `localStorage` (`flashchores.sound`, `flashchores.vibration`: `on` / `off`), never in the home or
+  on the server, like the appearance axes (§4.12b). They are offered on the board, the shared
+  device included, not on the landing page, which plays nothing. Switching one on plays or buzzes
+  a sample at once. Where `localStorage` throws, a choice lasts as long as the page.
+- **What plays when.** The server sends one `window.playEffect(kind)` per moment
+  (`Celebrations.effect`), and `effects.js` plays whichever of the two the device has switched
+  on. A completion sends **exactly one**, at the confetti's scale: `small`, `medium` (a chore new
+  to the member, or the day's second), `fire` (third and later), `big` (a trophy, or a spree,
+  which outranks the chore's own). A completion waiting for approval sends `tick`; a refused tap
+  (any §4.3 lock) sends `blocked`; ticking a list line or a routine sends `tick`, unticking sends
+  nothing; unseen trophies arriving together send one `big`. A held card lifting (§4.2b) buzzes
+  `lift` on the client, with no sound.
+- **Tones are synthesised** with the Web Audio API — short sine blips (C6–E6–G6–C7 rising for
+  praise, G4 falling to E♭4 for `blocked`) at 12% gain with a 10 ms attack — so there is no audio
+  file to fetch, license or cache. Vibration patterns are 10–60 ms pulses, at most five.
+- **Autoplay.** Browsers keep audio suspended until a gesture, and iOS lets only a gesture
+  handler resume it, while our sounds arrive after a server round trip. So while sound is on,
+  every `touchend` / `click` / `keydown` (passive, capturing document listeners — a state check
+  once running) resumes the context, and the chime that follows the tap can play. A chime that
+  could not start within 500 ms is dropped rather than played on some later tap. Sounds are only
+  ever sent to the tapping member's own UI, never to the other boards a push redraw updates.
+- **Safari** gets `navigator.audioSession.type = 'ambient'`: the chime mixes with the member's
+  music instead of pausing it, and is silent when the ring/silent switch is on.
+- **iPhones cannot vibrate** for a web page (no Vibration API in WebKit), so `EffectsItems.sync`
+  asks the browser whether `navigator.vibrate` exists and hides the Vibration switch where it
+  does not. Vibration is not motion, so `prefers-reduced-motion` does not silence it; it is the
+  member's own switch.
+
 ### 4.13 PWA & sharing
 - `@PWA` app shell: manifest (standalone display, theme color `#10b981`, white
   background), service worker, offline fallback stub.
@@ -1514,7 +1563,7 @@ retention candidates before enabling the sweep.
 - **Requires the service stopped**, because H2 holds an exclusive file lock. The script
   probes the port and refuses with an instruction rather than failing part-way.
 - Commands: `list`, `show`, `export`, `delete`, `restore FILE [--overwrite]`,
-  `purge --days N [--dry-run]`. `delete` exports a backup to `data/erasure-exports/` first
+  `purge --days N [--dry-run]`, and `encrypt-db` / `rekey-db` / `decrypt-db` (§4.11.4). `delete` exports a backup to `data/erasure-exports/` first
   (unless `--no-backup`) and requires the home code to be typed, mirroring the in-app
   Danger zone. `--db-url` targets another database, e.g. a restored copy. Exit codes:
   0 success, 2 handled failure.
@@ -1528,6 +1577,42 @@ retention candidates before enabling the sweep.
   here is putting back something that is gone. `BackupService.restoreAnyHome` is the entry
   point; its safety comes from being reachable only from a process the operator starts on
   the host with the service stopped, not from a code comparison.
+
+### 4.11.4 Encryption at rest (operator)
+- **Off unless `FLASHCHORES_DB_KEY` is set** (`homechores.db.key`). With it, `DatabaseEncryption`
+  replaces Spring Boot's connection details: the URL gains `;CIPHER=AES;TRACE_LEVEL_FILE=0` and
+  the password becomes `<key> <user password>` (H2 splits at the first space). An in-memory URL
+  (tests, the verify server) is never touched. A dev checkout without the variable runs as before.
+- **The key must fit the file.** The app reads the first bytes of `<base>.mv.db` (H2 marks an
+  encrypted file `H2encrypt\n`) before H2 opens it, and refuses to start with a message saying
+  what to do in three cases: an encrypted file with no key (H2 would say "file corrupted"), a key
+  over a plain file (run `encrypt-db` or unset the key), and a key shorter than 16 characters or
+  containing whitespace. A missing file with a key is created encrypted.
+- **No trace file.** H2's `.trace.db` is never encrypted and copies failing statements, values
+  included, so with a key H2 writes none. The exceptions still reach the app log.
+- **Conversion** is `EncryptDatabase`, a plain `main` run from the fat jar through Spring Boot's
+  `PropertiesLauncher`, because Spring would open the database it must rewrite. `encrypt` (plain
+  → key), `rekey` (`FLASHCHORES_DB_OLD_KEY` → `FLASHCHORES_DB_KEY`) and `decrypt` (key → plain,
+  the rollback) first refuse a database that is still open (H2's own in-use check, run before
+  any copy exists: a copy put back over a file the running service still writes would replace
+  its work with the moment the copy was taken), then copy the file to `<file>.before-<command>`,
+  run H2's `ChangeFileEncryption`, and open the result with the new key: H2 decrypts the store
+  before it checks the user, so a refused login still proves the file reads, while a wrong file
+  key fails (90049). Only then is the copy deleted, and after `encrypt`/`rekey` the old trace
+  file too. On any failure the copy is moved back. `rekey` refuses a new key equal to the current
+  one, since the shell that runs the service often carries the current key and a rotation that
+  never happened must not be reported as one. Keys come from the environment, or the CLI asks
+  for them without echo (twice for a new key). They never go on a command line, where every user
+  of a shared host can see them in the process list.
+- **What it protects:** a copy of the file that leaves the host (hosting backups, a misconfigured
+  web root, a disk image). **What it does not:** anyone who can read the service's environment
+  or memory, because the key has to be on the host for the app to start unattended; the JSON
+  exports in `data/retention-exports/` and `data/erasure-exports/`, which stay plain (the runbook
+  sets `data/` to `700`); hosting backups taken before the switch; and the plaintext the
+  conversion leaves in freed disk blocks — H2 writes a new file and deletes the old, and the copy
+  aside is deleted, not wiped — so a disk image taken after the switch can still carry the old
+  file until those blocks are reused. The privacy notice does not claim encryption, since it is
+  the operator's choice per deployment.
 
 ### 4.15.1 Mobile layout
 The app is used mostly on phones, so the layout is designed for a ~360–400px column and
@@ -1630,8 +1715,8 @@ scales up, not the other way round.
   `<html lang>` from the resolved locale.
 
 ## 5. Non-functional / technical
-- Vaadin 25.3 Flow + Spring Boot 4.1 (Java 25), H2 file DB (`data/`), server push
-  (long-polling) + Vaadin Signals, installable PWA.
+- Vaadin 25.3 Flow + Spring Boot 4.1 (Java 25), H2 file DB (`data/`, optionally AES-encrypted
+  at rest, §4.11.4), server push (long-polling) + Vaadin Signals, installable PWA.
 - Charts, confetti and icons are self-contained (no external CDN, no licensed
   components).
 - **Time zones**: availability hours are evaluated in the member's browser time
@@ -1682,7 +1767,8 @@ scales up, not the other way round.
   the catalogue itself (`ChoreCatalogTest`: every chore and section is named in all three
   languages within the length limits and no two chores share a name, keys are unique, cadences
   are canonical and within limits, the starters are the old eleven, entries are in section
-  order), and rejoin requests (gate on/off, PIN bypass
+  order, and the tyre change done on any spring or autumn day is next due in a different season
+  and before the next of its two seasons ends), and rejoin requests (gate on/off, PIN bypass
   without promotion, wrong PIN, member from another home, approve/reject, token
   consumption, newest-device-wins, cancel, cleanup when a member is removed), and home
   deletion (every table wiped, other homes untouched, idempotent, code normalization,
@@ -1776,6 +1862,28 @@ scales up, not the other way round.
   palette, no sideways scroll, and the tile, border and text colours computed for all four palettes
   in both schemes (brand text ≥ 4.7:1 on white, on the page and on a dome's rim in light;
   secondary text ≥ 4.9:1 on a dome's rim; pill text ≥ 5.2:1 light, ≥ 4.5:1 dark). `tools/generate-doodles.cjs` is deterministic for a seed; the doodle ink is ≤ 1.15:1 on the page in every palette.
+- **Encryption at rest** (§4.11.4). `DatabaseEncryptionTest`: without a key a plain file and
+  its URL are left alone; an in-memory URL is untouched even with a key; with a key a new file
+  is created encrypted, holds no plaintext name, writes no trace file, and a wrong key is
+  refused by H2 (90049); an encrypted file with no key, a key over a plain file, and a short or
+  spaced key each refuse to start with a message naming the fix; the file is found from the URL
+  without its settings. `EncryptDatabaseTest`: `encrypt` keeps the data and leaves only the
+  encrypted file (no copy, no old trace file); `rekey` then `decrypt` round-trip the data; a
+  wrong old key fails and leaves the file byte-for-byte as it was, with no copy behind; a short
+  key, no key, decrypting a plain file, a missing file and encrypting twice are refused and
+  change nothing; a database still open is refused before any copy is made and a row written
+  through the open connection afterwards survives; re-keying to the current key is refused and
+  changes nothing. The CLI wrapper and the fat-jar launch were run by hand against a copy of a
+  dev database.
+- **Sound and vibration** (§4.12c, `EffectsUiTest`): a completion sends exactly one effect, the
+  same kind as its confetti, three completions in a row; a completion waiting for approval sends
+  `tick` and no confetti; a spree sends one `big` over the chore's own burst; three trophies
+  earned while away arrive with one `big`; a tap refused because another member
+  booked the chore sends `blocked` and records nothing; ticking a list line and a routine sends
+  `tick` and unticking sends nothing; the menu starts with Sounds off and Vibration on, and each
+  flip moves the check mark and stores that choice (`__setEffect`). What the browser does with it —
+  the tones, the buzz, the autoplay unlock, the hidden switch where the browser cannot vibrate —
+  is verified by hand in the browser pane.
 - **Statistics** (`StatsServiceTest`): my/home aggregates; 💎 earned follows an undo and ignores
   redemptions, bucketed by the day the credit landed; 💎 redeemed lists the member's redemptions
   newest first with the note as the reward and a blank note as none, and earned − redeemed is the
@@ -1813,7 +1921,8 @@ scales up, not the other way round.
   it (a wrong or blank one does not); a wrong PIN, an unknown home and a sixth device are
   refused, and a blank name takes the default; wrong pairing guesses lock the PIN for claiming
   too; only an admin of that home unpairs, after which the secret is dead; a device leaving
-  unpairs only itself, a second leave is a no-op, and its slot is free again; a completion from the
+  unpairs only itself, never under another home's code, a second leave is a no-op, and its slot
+  is free again; a completion from the
   device counts for the member picked with their streak lock enforced; a member, chore or device
   from another home is refused for completing, booking, clearing a booking and other help; it
   books for the member picked and clears anyone's booking; other help from it waits for an
@@ -1915,7 +2024,9 @@ scales up, not the other way round.
   home's device cannot; switching Routines off empties today and no line can be added to the tab;
   the first board sets the zone, a later one does not, an unknown id is ignored, only an admin
   moves it and the next reminder moves with it; the sweep reminds every device for a home routine
-  and only the member's for a personal one, never twice; a routine ticked before its time is not
+  and only the member's for a personal one, never twice; the cap starts no further routine once
+  ten sends are made but finishes the audience of the one under way (twelve devices), and the
+  routine left waiting is still due for the next sweep; a routine ticked before its time is not
   nagged and a stale occurrence is skipped but moved on; an untimed one is never on the sweep; old
   ticks are purged, today's stay; a removed member's routines and ticks go, the home's stay, and
   deleting the home takes all; routines and the zone round-trip through a backup with members
@@ -1942,8 +2053,9 @@ scales up, not the other way round.
   the owner's list keeps its place; a private line's reminder reaches only the owner's device,
   nobody else may set or cancel it, and the fired dialog is the owner's alone; a removed member's
   private lists, lines and reminders go and their shared lists stay; a backup holds private lists,
-  restore keeps them private, and a private list whose owner is not in the file is dropped with
-  its lines rather than spilling onto To-do. `ListEditUiTest`: "Make private" locks the tab and
+  restore keeps them private, and a private list that does not come back — its owner not in the
+  file, or its name blank — is dropped with its lines rather than spilling onto To-do.
+  `ListEditUiTest`: "Make private" locks the tab and
   takes it off another member's board and the tablet; the menu offers it only to the list's
   maker, not to an admin; the privacy notice says private means hidden in the app and that an
   admin's backup still holds it.
@@ -1974,6 +2086,8 @@ scales up, not the other way round.
 ## 7. Out of scope (possible future work)
 - Real authentication/accounts; weekly/monthly leaderboards;
   per-member chore preferences; native mobile apps.
+- Encrypting the JSON exports in `data/` (retention and erasure) with the database key; today
+  they are plain files protected by `data/` permissions (§4.11.4).
 - Routines (§4.4f) beyond weekly and every other week: monthly dates ("the 5th"), other
   intervals, a "missed yesterday" view, and answering a routine reminder from the notification
   (Done / Snooze) the way a list reminder is answered in-app.

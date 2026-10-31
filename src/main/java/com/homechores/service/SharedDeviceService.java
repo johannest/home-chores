@@ -125,11 +125,14 @@ public class SharedDeviceService {
      * The device signing itself out (§4.1.3): the same row deletion as an admin's unpair, so the
      * secret left in the browser stops working and the home's five device slots get one back.
      * No admin check, because it only ever removes the caller — the id comes from the device's
-     * own session, never from the client — and pairing again still needs the admin PIN.
+     * own session, never from the client — and pairing again still needs the admin PIN. The home
+     * is checked all the same: a row from another home is not this device's to remove, whoever
+     * calls.
      */
     @Transactional
-    public boolean leave(Long deviceId) {
-        SharedDevice device = devices.findById(deviceId).orElse(null);
+    public boolean leave(String homeCode, Long deviceId) {
+        SharedDevice device = devices.findById(deviceId)
+                .filter(d -> d.getHomeCode().equals(homeCode)).orElse(null);
         if (device == null) {
             return false;
         }

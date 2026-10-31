@@ -10,7 +10,6 @@ import com.homechores.domain.Member;
 import com.homechores.service.ChoreReminderService;
 import com.homechores.service.ChoreService;
 import com.homechores.service.WebPushSender;
-import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.ComponentUtil;
 import com.vaadin.flow.component.ClickEvent;
 import com.vaadin.flow.component.html.Span;
@@ -42,17 +41,6 @@ class SnoozeUiTest extends HomeChoresUiTest {
     void pushIsConfigured() {
         when(sender.isEnabled()).thenReturn(true);
         when(sender.publicKey()).thenReturn("test-key");
-    }
-
-    private boolean usable(Component c) {
-        Component cur = c;
-        while (cur != null) {
-            if (!cur.isVisible()) {
-                return false;
-            }
-            cur = cur.getParent().orElse(null);
-        }
-        return c.getUI().isPresent();
     }
 
     private List<Span> snoozeChips() {

@@ -207,5 +207,15 @@ class PrivateListServiceTest {
         backup.restore(orphaned.getBytes(StandardCharsets.UTF_8), code, newAlex.getId());
         assertTrue(lists.customLists(code).isEmpty());
         assertTrue(lists.openItems(code, ListKind.TODO).isEmpty());
+
+        // A private list the file cannot bring back for any other reason — here a blank name —
+        // takes its lines with it just the same, owner present or not.
+        String nameless = json.replace("\"name\" : \"Diary\"", "\"name\" : \"\"");
+        assertTrue(nameless.contains("\"name\" : \"\""), "the edit took");
+        Long admin = chores.membersOf(code).stream().filter(m -> m.getName().equals("Alex"))
+                .findFirst().orElseThrow().getId(); // the restore above made the members anew
+        backup.restore(nameless.getBytes(StandardCharsets.UTF_8), code, admin);
+        assertTrue(lists.customLists(code).isEmpty());
+        assertTrue(lists.openItems(code, ListKind.TODO).isEmpty(), "never onto the shared To-do");
     }
 }

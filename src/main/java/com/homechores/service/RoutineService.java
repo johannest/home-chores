@@ -429,6 +429,12 @@ public class RoutineService {
      * <p>Every routine it looks at moves on to its next occurrence, whatever happened — sent,
      * already ticked, stale, nobody subscribed, push off, Routines switched off — so no row is
      * reconsidered by the next sweep and a crash costs at most one duplicate nudge.
+     *
+     * <p>{@link #MAX_SENDS_PER_SWEEP} decides whether the <em>next</em> routine is started, never
+     * whether a started one finishes: once an occurrence is being sent, every device in its
+     * audience hears about it, so a home routine cannot reach half the family and move on. The
+     * overshoot is bounded by one audience (a home's members times their devices); a routine not
+     * started stays due for the next sweep.
      */
     public int sendDue(Instant now) {
         int sent = 0;
@@ -437,9 +443,6 @@ public class RoutineService {
             List<Long> dead = new ArrayList<>();
             if (plan != null && sender.isEnabled()) {
                 for (Map.Entry<PushSubscription, String[]> e : plan.messages().entrySet()) {
-                    if (sent >= MAX_SENDS_PER_SWEEP) {
-                        break;
-                    }
                     if (sender.send(e.getKey(), e.getValue()[0], e.getValue()[1])) {
                         sent++;
                     } else {

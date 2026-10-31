@@ -14,11 +14,8 @@ import com.homechores.service.ChoreService;
 import com.homechores.service.ListItemService;
 import com.homechores.service.ListReminderService;
 import com.homechores.service.WebPushSender;
-import com.vaadin.flow.component.ClickEvent;
 import com.vaadin.flow.component.Component;
-import com.vaadin.flow.component.ComponentUtil;
 import com.vaadin.flow.component.button.Button;
-import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.datetimepicker.DateTimePicker;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.html.Div;
@@ -59,17 +56,6 @@ class ListEditUiTest extends HomeChoresUiTest {
     void pushIsConfigured() {
         when(sender.isEnabled()).thenReturn(true);
         when(sender.publicKey()).thenReturn("test-key");
-    }
-
-    private boolean usable(Component c) {
-        Component cur = c;
-        while (cur != null) {
-            if (!cur.isVisible()) {
-                return false;
-            }
-            cur = cur.getParent().orElse(null);
-        }
-        return c.getUI().isPresent();
     }
 
     private Member signedIn(String name) {
@@ -114,16 +100,6 @@ class ListEditUiTest extends HomeChoresUiTest {
                 .map(e -> e.getComponent().orElse(null))
                 .filter(c -> c instanceof Button b && text.equals(b.getText()))
                 .map(Button.class::cast).findFirst().orElseThrow();
-    }
-
-    private void clickMenuItem(String text) {
-        MenuItem item = $(MenuBar.class).all().stream().filter(this::usable)
-                .flatMap(m -> m.getItems().stream())
-                .flatMap(i -> java.util.stream.Stream.concat(java.util.stream.Stream.of(i),
-                        i.getSubMenu().getItems().stream()))
-                .filter(i -> text.equals(i.getElement().getTextRecursively().trim()))
-                .findFirst().orElseThrow(() -> new AssertionError("No menu item: " + text));
-        ComponentUtil.fireEvent(item, new ClickEvent<>(item));
     }
 
     /**

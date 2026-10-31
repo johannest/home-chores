@@ -528,6 +528,9 @@ class ListPanel extends VerticalLayout {
             // Only a person's tap: programmatic values during a rebuild are not decisions.
             if (e.isFromClient()) {
                 lists.setDone(item.getId(), author, e.getValue());
+                if (e.getValue()) {
+                    Celebrations.effect("tick");
+                }
                 refresh();
             }
         });
