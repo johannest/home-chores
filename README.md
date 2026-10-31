@@ -138,7 +138,35 @@ chmod 700 data                                # exports in data/ stay plain JSON
 ```
 
 Then add `FLASHCHORES_DB_KEY=…` to the service's environment, next to the VAPID keys, in a
-file only the service user can read (`chmod 600`), and start it again. The conversion copies
+file only the service user can read (`chmod 600`), and start it again.
+
+*Where the key file goes, and why it matters.* Encryption at rest only helps if the copies
+that leave the host carry the database **without** the key, so the key lives outside both
+`data/` and the app directory, and outside whatever the host backs up. On a shared
+cPanel/CloudLinux account (no root, no systemd, CageFS) that is:
+
+```bash
+mkdir -p ~/.config/flashchores && chmod 700 ~/.config/flashchores
+( umask 077; printf 'FLASHCHORES_DB_KEY=%s\n' "$(openssl rand -base64 32)" > ~/.config/flashchores/env )
+printf '%s\n' '.config/flashchores/env' >> ~/cpbackup-exclude.conf   # cPanel backups skip the key
+```
+
+and `flashchores.sh` loads it before it runs `java`, next to the VAPID keys:
+
+```bash
+set -a; . "$HOME/.config/flashchores/env"; set +a
+```
+
+The admin tool needs the same variable in its shell: `set -a; . ~/.config/flashchores/env;
+set +a` before `encrypt-db` and every later command. `tools/release.sh` needs no change, since
+it starts the app through `flashchores.sh`. What this does and does not buy: every copy of
+`data/`, of the app directory and of the account's cPanel backup is now useless on its own; the
+provider's root, and anything running as the service user, still has both. With systemd
+available, `LoadCredentialEncrypted=` and `systemd-creds` keep the key off the disk in the
+clear; without it, a key held only in memory (typed once per boot into a `/dev/shm` file) is
+the alternative, at the price of the app staying down after a reboot until someone types it.
+
+The conversion copies
 the file aside, encrypts it, proves it opens with the key, and only then deletes the copy and
 the old `homechores.trace.db`. On any failure it puts the copy back. The app refuses to start
 when the key and the file disagree, with a message naming the fix. With the key set, H2 writes
