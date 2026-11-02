@@ -1329,8 +1329,12 @@ starts no streak and needs no approval — organisation, like a list line.
   file to fetch, license or cache. Vibration patterns are 10–60 ms pulses, at most five.
 - **Autoplay.** Browsers keep audio suspended until a gesture, and iOS lets only a gesture
   handler resume it, while our sounds arrive after a server round trip. So while sound is on,
-  every `touchend` / `click` / `keydown` (passive, capturing document listeners — a state check
-  once running) resumes the context, and the chime that follows the tap can play. A chime that
+  every `touchend` / `click` / `keydown` (passive, capturing document listeners) readies the
+  context, and the chime that follows the tap can play. Readying means: resume it if it is not
+  running, and start a one-sample silent buffer, because iOS can report a context as running
+  while it plays nothing until a sound has been started inside a gesture. A context the page
+  left while hidden (`visibilitychange` / `pagehide`: an app switch, a locked screen) or one
+  WebKit reports `interrupted` is closed and replaced on the next tap rather than resumed. A chime that
   could not start within 500 ms is dropped rather than played on some later tap. Sounds are only
   ever sent to the tapping member's own UI, never to the other boards a push redraw updates.
 - **Safari** gets `navigator.audioSession.type = 'ambient'`: the chime mixes with the member's
