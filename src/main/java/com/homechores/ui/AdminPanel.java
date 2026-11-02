@@ -804,7 +804,7 @@ class AdminPanel extends VerticalLayout {
                         if (!stillAdmin()) {
                             return;
                         }
-                        if (!service.setMemberAdmin(m.getId(), !m.isAdmin())) {
+                        if (!service.setMemberAdmin(m.getId(), !m.isAdmin(), memberId)) {
                             toastError(T.tr("admin.lastAdmin"));
                         }
                         refresh();
@@ -909,7 +909,7 @@ class AdminPanel extends VerticalLayout {
         name.setValue(m.getName());
         Button save = new Button(T.tr("common.save"), e -> {
             if (!name.isEmpty() && stillAdmin()) {
-                service.renameMember(m.getId(), name.getValue());
+                service.renameMember(m.getId(), name.getValue(), memberId);
                 d.close();
                 refresh();
             }

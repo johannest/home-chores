@@ -208,9 +208,9 @@ class TrophyTest {
                 "another home's admin");
         assertTrue(credits.trophyRewards(code).isEmpty());
 
-        assertTrue(chores.setMemberAdmin(sam.getId(), true));
+        assertTrue(chores.setMemberAdmin(sam.getId(), true, alex.getId()));
         assertTrue(credits.setTrophyReward(code, Trophy.SILVER, 20, sam.getId()));
-        assertTrue(chores.setMemberAdmin(sam.getId(), false));
+        assertTrue(chores.setMemberAdmin(sam.getId(), false, alex.getId()));
         assertFalse(credits.setTrophyReward(code, Trophy.SILVER, 30, sam.getId()),
                 "a demoted admin's open screen");
 

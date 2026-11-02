@@ -64,7 +64,7 @@ class ChoreServiceTest {
     @Test
     void cannotRemoveOrDemoteLastAdmin() {
         Member admin = service.createHome("Nest", "Alex");
-        assertFalse(service.setMemberAdmin(admin.getId(), false), "last admin cannot be demoted");
+        assertFalse(service.setMemberAdmin(admin.getId(), false, admin.getId()), "last admin cannot be demoted");
         assertFalse(service.removeMember(admin.getId(), admin.getId()), "last admin cannot be removed");
         assertTrue(service.findMember(admin.getId()).orElseThrow().isAdmin());
     }
@@ -297,6 +297,27 @@ class ChoreServiceTest {
         service.deleteCompletion(done.completionId(), alex.getId());
         assertEquals(0, service.completionCount(sam.getId()));
         assertTrue(service.removeMember(sam.getId(), alex.getId()));
+    }
+
+    @Test
+    void promotingAndRenamingAMember_needAnAdminOfThatHome() {
+        Member alex = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(alex.getHomeCode(), "Sam").orElseThrow();
+        Member robin = service.createHome("Elsewhere", "Robin"); // an admin, of another home
+
+        assertThrows(IllegalArgumentException.class, () -> service.setMemberAdmin(sam.getId(), true, sam.getId()));
+        assertThrows(IllegalArgumentException.class, () -> service.setMemberAdmin(sam.getId(), true, robin.getId()));
+        assertThrows(IllegalArgumentException.class, () -> service.renameMember(alex.getId(), "Hacked", sam.getId()));
+        assertThrows(IllegalArgumentException.class, () -> service.renameMember(sam.getId(), "Hacked", robin.getId()));
+        assertFalse(service.findMember(sam.getId()).orElseThrow().isAdmin(), "nobody was promoted");
+        assertEquals("Alex", service.findMember(alex.getId()).orElseThrow().getName());
+        assertEquals("Sam", service.findMember(sam.getId()).orElseThrow().getName());
+
+        assertTrue(service.setMemberAdmin(sam.getId(), true, alex.getId()));
+        service.renameMember(sam.getId(), "Samuel", alex.getId());
+        Member after = service.findMember(sam.getId()).orElseThrow();
+        assertTrue(after.isAdmin());
+        assertEquals("Samuel", after.getName());
     }
 
     /** A hold nobody can ever complete must not keep the chore from everyone else. */

@@ -91,6 +91,7 @@ outlives the redraw that removes them, so the role is re-read at action time:
 `AdminPanel.stillAdmin` (through `ChoreService.isAdminOf`) guards every action in the tab and
 refuses a demoted admin's open dialog with a notice, and the service methods that take the
 acting admin — `decideRejoin`, `completeFor`, `approve`, `reject`, `logOtherHelpAsAdmin`,
+`deleteCompletion`, `removeMember`, `setMemberAdmin`, `renameMember`,
 `CreditService.redeem`, `BackupService.restore` — make the same check themselves
 (`MemberRepository.findAdmin`: the member exists, is an admin, and is in *that* home), so they
 hold whatever screen the call came from.
@@ -1940,8 +1941,8 @@ scales up, not the other way round.
   `HomeUiTest`: a demoted admin's already-open rename dialog saves nothing.
 - **Service boundaries and decisions (code review 2026-11-02).** `ChoreServiceTest`: a member of
   another home can neither complete nor book a chore, while the home's own member still can;
-  unmarking a chore and removing a member are refused for a plain member and for another
-  home's admin, and work for the home's admin; removing a member releases the chores they had
+  unmarking a chore, removing a member, promoting a member and renaming one are refused for
+  a plain member and for another home's admin, and work for the home's admin; removing a member releases the chores they had
   booked; a chore approved twice counts once and cannot then be rejected. `OtherHelpTest`:
   accepting help twice pays once; declining after accepting is refused and leaves status and
   credits in agreement; accepting after declining is refused. `ConcurrentReviewTest` (not

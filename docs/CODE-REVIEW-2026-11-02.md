@@ -231,13 +231,17 @@ without the fix.
 - [x] **Nits:** README rejoin row (nickname, not a member list); the claim-admin dialog's
   Cancel uses `common.cancel`; SPEC §4.11.2 now states both the code defaults and the
   production values.
-- [ ] **Open:** `setMemberAdmin` and `renameMember` still rely on the UI's `stillAdmin()`
-  re-check (see the SF-3 addendum). The deferred keyboard/screen-reader items stay in
-  `docs/UX-REVIEW-2026-09-16.md`.
+- [x] **SF-3 addendum:** `setMemberAdmin(id, admin, adminId)` and
+  `renameMember(id, name, adminId)` check `adminOf` against the target's own home, so they
+  no longer rely on the UI's `stillAdmin()` alone. Test:
+  `ChoreServiceTest.promotingAndRenamingAMember_needAnAdminOfThatHome`.
+
+The deferred keyboard/screen-reader items stay in `docs/UX-REVIEW-2026-09-16.md`.
 
 Validation: 526 tests across 53 classes passed, with 0 failures, errors or skips. That is
 the same non-UI selection as above plus `DeviceIdentityTest` and
 `SecurityHeadersInitListenerTest`. With a TestBench license in place, the UI tests
 (`**/ui/*Test`, `HomeUiTest` included) also passed: 160 tests across 15 classes, 0
-failures. The new "already decided" notice was not checked in a browser.
+failures. After the SF-3 addendum fix, a full `mvn test` ran 676 tests across 64 classes
+with 0 failures. The new "already decided" notice was not checked in a browser.
 

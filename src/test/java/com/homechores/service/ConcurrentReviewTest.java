@@ -42,7 +42,7 @@ class ConcurrentReviewTest {
             homes.add(code);
             Member sam = service.joinHome(code, "Sam").orElseThrow();
             Member pat = service.joinHome(code, "Pat").orElseThrow();
-            service.setMemberAdmin(pat.getId(), true);
+            service.setMemberAdmin(pat.getId(), true, alex.getId());
             Completion help = service.logOtherHelp(code, sam.getId(), "Fixed the sink").orElseThrow();
 
             CyclicBarrier together = new CyclicBarrier(2);

@@ -646,10 +646,11 @@ public class ChoreService {
         return false;
     }
 
-    /** Promote/demote a member. Refuses to demote the last remaining admin. */
+    /** An admin promoting/demoting a member. Refuses to demote the last remaining admin. */
     @Transactional
-    public boolean setMemberAdmin(Long memberId, boolean admin) {
+    public boolean setMemberAdmin(Long memberId, boolean admin, Long adminId) {
         Member member = members.findById(memberId).orElseThrow();
+        adminOf(member.getHomeCode(), adminId);
         if (!admin && member.isAdmin()
                 && members.countByHomeCodeAndAdminTrue(member.getHomeCode()) <= 1) {
             return false; // cannot remove the last admin
@@ -661,8 +662,9 @@ public class ChoreService {
     }
 
     @Transactional
-    public void renameMember(Long memberId, String name) {
+    public void renameMember(Long memberId, String name, Long adminId) {
         Member member = members.findById(memberId).orElseThrow();
+        adminOf(member.getHomeCode(), adminId);
         member.setName(InputLimits.clip(name, InputLimits.MEMBER_NAME));
         members.save(member);
         homeState.bump(member.getHomeCode());

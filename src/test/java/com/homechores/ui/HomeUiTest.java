@@ -2053,14 +2053,14 @@ class HomeUiTest extends HomeChoresUiTest {
         Member alex = service.createHome("Shared", "Alex");
         String code = alex.getHomeCode();
         Member sam = service.joinHome(code, "Sam").orElseThrow();
-        assertTrue(service.setMemberAdmin(sam.getId(), true));
+        assertTrue(service.setMemberAdmin(sam.getId(), true, alex.getId()));
         SessionContext.signIn(sam.getId(), code);
         navigate(HomeView.class);
         selectTab("Admin");
         assertEquals(4, tabCount());
         assertEquals(SessionContext.ADMIN_TIMEOUT_SECONDS, maxInactiveInterval());
 
-        assertTrue(service.setMemberAdmin(sam.getId(), false)); // Alex, on another phone
+        assertTrue(service.setMemberAdmin(sam.getId(), false, alex.getId())); // Alex, on another phone
         awaitRedraw(() -> tabCount() == 3);
 
         assertEquals(3, tabCount(), "the Admin tab went with the role");
@@ -2222,7 +2222,7 @@ class HomeUiTest extends HomeChoresUiTest {
         Member alex = service.createHome("Shared", "Alex");
         String code = alex.getHomeCode();
         Member sam = service.joinHome(code, "Sam").orElseThrow();
-        assertTrue(service.setMemberAdmin(sam.getId(), true));
+        assertTrue(service.setMemberAdmin(sam.getId(), true, alex.getId()));
         SessionContext.signIn(sam.getId(), code);
         navigate(HomeView.class);
         selectTab("Admin");
@@ -2230,7 +2230,7 @@ class HomeUiTest extends HomeChoresUiTest {
         clickMenuItem("Rename member"); // Alex's row: first by join time
         setField("Name", "Hacked");
 
-        assertTrue(service.setMemberAdmin(sam.getId(), false)); // Alex, on another phone
+        assertTrue(service.setMemberAdmin(sam.getId(), false, alex.getId())); // Alex, on another phone
         awaitRedraw(() -> tabCount() == 3);
         clickButton("Save");
 

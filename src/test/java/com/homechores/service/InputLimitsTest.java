@@ -56,7 +56,7 @@ class InputLimitsTest {
     @Test
     void renameAndTaskFields_areClippedAndClamped() {
         Member m = service.createHome("Limits", "Alex");
-        service.renameMember(m.getId(), LOREM);
+        service.renameMember(m.getId(), LOREM, m.getId());
         assertTrue(service.findMember(m.getId()).orElseThrow().getName().length()
                 <= InputLimits.MEMBER_NAME);
 
