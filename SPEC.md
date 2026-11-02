@@ -244,16 +244,18 @@ hold whatever screen the call came from.
   reach it once a home had approval switched off.
 - **US-39 Abandoned-home retention (operator).** As the operator of a public instance, I
   can have homes that were created and then abandoned *before anyone used them* removed
-  automatically, so stray sign-ups don't accumulate. A home qualifies only when it has no
-  chore history at all and at most one member. Two windows feed the same rule —
+  automatically, so stray sign-ups don't accumulate. A home qualifies only when it holds no
+  family data at all (no chore history, and nothing in the organizer: no list line, dinner
+  plan, list of its own or routine) and has at most one member. A solo home used only for its
+  lists is a family's data, and a long weekend away must not delete it. Two windows feed the same rule —
   `empty-home-hours` (fast anti-spam tier, 72h in prod config) and `abandoned-home-days`
   (the long upper bound). Off by default in code.
 - **US-40 Inactive-home retention (operator).** As the operator, I can additionally have
   *any* home that nobody has opened or used for `inactive-home-days` days (30 in prod
   config) deleted entirely — members, chores and history included — so the database only
   holds families that actually use the app, as the user agreement states. Because a false
-  positive here destroys irreplaceable history (a long trip, a lost phone), a home with
-  any chore history is exported as a full JSON backup to `retention.export-dir` right
+  positive here destroys irreplaceable history (a long trip, a lost phone), a home holding
+  any family data (chore history or organizer use) is exported as a full JSON backup to `retention.export-dir` right
   before deletion — the operator's undo, restorable via the maintenance tool — and a home
   whose export cannot be written is kept, not deleted. Activity means opening the board,
   joining, or logging/reviewing a chore; background push traffic and opt-in reminders
@@ -734,6 +736,9 @@ message and shows a matching badge on the card (`LockReason`):
     "sent for approval ⏳" message (no confetti yet). Counts, celebrations and
     credits are deferred until an admin approves.
 - Completing a chore clears any booking on it.
+- A chore is only ever completed or booked by a member of its own home: `complete` and
+  `bookChore` refuse a member from another home (`IllegalArgumentException`) rather than
+  trusting the caller to have paired them, as `completeFor` already did.
 - **Feedback**: the completion celebration offers three buttons
   (😖 Hate / 🙂 OK / 😍 Love) that set `Completion.feedback`. Optional.
 
@@ -750,6 +755,9 @@ message and shows a matching badge on the card (`LockReason`):
   only re-render on a bump and a hold quietly lapsing is not a mutation.
 - The booker can cancel; cards show "🔖 You" / "🔖 <name>". Available only in
   free-for-all division and only for currently-due chores.
+- Removing a member releases every chore they had booked, in the same transaction. A hold
+  by someone who no longer exists could never be completed, and would block everyone else
+  until it timed out.
 
 ### 4.4b Chore frequency and seasons
 - **Frequency** is edited as a preset (Anytime / Every day / Every week / Every 2 weeks /
@@ -950,7 +958,8 @@ starts no streak and needs no approval — organisation, like a list line.
   devices, and a routine not started stays due for the next sweep)
   reads the routines whose `nextFireAt` has passed — normally none — and pushes "🏋️ Workout /
   It's time…" to the routine's member, or to every device in the home for a home routine, each in
-  its member's language. No push when it was already ticked that day, when the Routines tab is
+  its member's language. A device row whose member no longer exists is skipped, whatever left
+  it behind. No push when it was already ticked that day, when the Routines tab is
   switched off, or when the occurrence is more than `STALE_AFTER` (30 min) old (server downtime);
   either way the routine moves on to its next occurrence from *now*, so no row is reconsidered.
   A time inside a spring-forward gap lands just after the gap. The notification only opens the
@@ -1176,6 +1185,14 @@ starts no streak and needs no approval — organisation, like a list line.
 - Approve → `APPROVED`, records reviewer/time, triggers trophy/new-chore/credit
   evaluation. The member sees a trophy it reached on their next board visit (§4.6).
 - Reject → `REJECTED` (retained for audit, excluded from all counts and fairness).
+- **Only a `PENDING` entry can be decided, and only once.** The entry is loaded with its row
+  lock (`CompletionRepository.findForDecisionById`, `select … for update`) before its status is
+  checked, so of two admins deciding the same entry at once (two phones, or a stale Accept-help
+  dialog) the second waits, then sees the first's decision; exactly one wins, and credits are paid
+  only for that one. The other gets "Someone already decided on this one" and a refreshed
+  list. Approving or rejecting an entry that is already decided does nothing: rejecting an
+  approved one would leave its credits paid while the history said it never counted, so
+  taking an approved chore back is the unmark in §4.3.1.
 - Live-updates when members submit; the Admin tab shows a pending-count badge.
 
 ### 4.11 Backup / restore (admin)
@@ -1198,6 +1215,10 @@ starts no streak and needs no approval — organisation, like a list line.
   A file carrying keys this build does not know (a backup written by a newer version) is
   restored for everything it does understand rather than refused outright. Restoring
   stamps the home as active. The restoring admin is signed out and rejoins.
+  Restore also deletes the home's push subscriptions. They are device credentials tied to
+  member ids that restore replaces, and leaving them would keep a removed person's phone
+  receiving the family's list lines. Each member re-registers a device the next time they
+  arm a reminder.
   Restoring a home that no longer exists is deliberately *not* reachable here — there is
   no admin to be signed in as — and is the operator's `restore` in §4.11.3.
 
@@ -1410,8 +1431,8 @@ starts no streak and needs no approval — organisation, like a list line.
   set at 23:40 that fired at 23:40 the next day would be one nobody wanted. `plusMonths` clamps
   the 31st to the last day of a shorter month. Bounds in the service: `[now + 1 min, now + 400 d]`.
 - **Home-wide, not per member** — the deliberate difference from §4.13b. A shared list is
-  shared: one `ListReminder` per line, pushed to every subscribed device in the home (each in its
-  own member's language via `Member.reminderLocale`), badged under the line for everyone
+  shared: one `ListReminder` per line, pushed to every subscribed device of a current member of
+  the home (each in its own member's language via `Member.reminderLocale`), badged under the line for everyone
   ("⏰ 9:00", "⏰ 19.9. 9:00", "⏰ in 12d" — absolute, never relative, for the reason the chore
   badge is), and movable or cancellable by anyone in the home. The reminder also decides where
   the line sits on its list — due ones lead, far-off ones trail (§4.4e). Because it is the family's
@@ -1458,8 +1479,9 @@ starts no streak and needs no approval — organisation, like a list line.
   the member's **own** completion and only within `UNDO_WINDOW` (10 minutes). Offered in
   the celebration dialog and, so it survives dismissing that, from an undo strip on the
   board fed by `undoableCompletion(memberId)`.
-- **Admin unmark**: `deleteCompletion(id)` from the Recent chores list — any member, any
-  age, any status.
+- **Admin unmark**: `deleteCompletion(id, adminId)` from the Recent chores list — any member,
+  any age, any status. The service re-checks that `adminId` is an admin of the completion's
+  own home.
 - **Credits follow the completion.** `CreditEntry.completionId` records which completion
   earned an award (chore value *and* any spree bonus triggered by it), and both undo paths
   revoke them. Without that link an undone chore would leave phantom 💎 behind, and a
@@ -1525,10 +1547,15 @@ everyone in the home except the admin doing the logging.
   Nullable — homes predating the column fall back to `createdAt`.
 - `HomeCleanupService` purges a home only when **all** hold:
   1. last activity (or creation) is older than the configured window;
-  2. it has **no completions at all**, of any status (a rejected one still counts as history);
+  2. it holds **no family data at all** (`BackupService.holdsFamilyData`): no completion of any
+     status (a rejected one still counts as history), and nothing in the organizer — no list
+     line or dinner plan, no list of its own, no routine. Chores and settings do not count,
+     since a new home is seeded with them;
   3. it has **at most one member** — inviting someone means it was more than a stray tap.
-- Governed by `homechores.retention.abandoned-home-days` (**0 = disabled, the default**)
-  and `homechores.retention.cron` (nightly at 03:30 by default). `findAbandoned(cutoff)`
+- Governed by `homechores.retention.abandoned-home-days` and the fast tier's
+  `homechores.retention.empty-home-hours` (both **0 = disabled, the default in code**; the
+  committed `application.properties` sets 30 days and 72 hours) and
+  `homechores.retention.cron` (nightly at 03:30 by default). `findAbandoned(cutoff)`
   is a dry run for inspecting candidates without deleting.
 - Deletion reuses `ChoreService.deleteHome`, so the cascade across all eleven tables
   — rejoin requests, push subscriptions, chore reminders, completions, credits, spree tiers,
@@ -1536,7 +1563,7 @@ everyone in the home except the admin doing the logging.
   code is the home's access credential.
 - Time-based deletion of homes that *were* used exists as its own opt-in tier
   (`inactive-home-days`, US-40) and follows the safeguard this section always demanded:
-  a full backup is exported before deleting, the home is kept if that export fails, and
+  a full backup of any home holding family data is exported before deleting, the home is kept if that export fails, and
   the export is restorable with the maintenance CLI's `restore` (§4.11.3) — a restore
   stamps `lastActiveAt`, so a revived home is not swept away again the same night.
   There is still no way to warn a whole family first, so the window is a deliberate
@@ -1911,6 +1938,23 @@ scales up, not the other way round.
   chore for someone, redeem, restore, nor add a member without a device; redeeming for a member
   who is not in the home is refused too.
   `HomeUiTest`: a demoted admin's already-open rename dialog saves nothing.
+- **Service boundaries and decisions (code review 2026-11-02).** `ChoreServiceTest`: a member of
+  another home can neither complete nor book a chore, while the home's own member still can;
+  unmarking a chore and removing a member are refused for a plain member and for another
+  home's admin, and work for the home's admin; removing a member releases the chores they had
+  booked; a chore approved twice counts once and cannot then be rejected. `OtherHelpTest`:
+  accepting help twice pays once; declining after accepting is refused and leaves status and
+  credits in agreement; accepting after declining is refused. `ConcurrentReviewTest` (not
+  transactional, so it commits for real): two admins accepting the same help at the same
+  instant, 20 rounds, exactly one wins and the credits are paid once. The test fails against
+  an unlocked "check the status, then save" version.
+- **Notifications after restore** (sender mocked). `ListReminderServiceTest`: restoring a
+  backup older than a member deletes the home's devices, and the person the backup never had
+  gets no push of a new line; a device row whose member is gone is left out of the audience.
+  `RoutineServiceTest`: the same for a home routine.
+- **Retention** (`HomeCleanupServiceTest`): a solo home with no chore history but a private
+  list, a grocery line, a dinner plan or a routine survives the 72-hour tier after four days
+  away; the inactive tier exports such a home, list lines included, before deleting it.
 - **A member without a device** (`AddMemberTest`): added trimmed, non-admin, with no device and
   the agreement stamped, and an admin can log a chore for them; a blank or already-taken
   nickname (case-insensitive) is refused; and the sign-back-in by nickname with the PIN later

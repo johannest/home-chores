@@ -30,6 +30,7 @@ import com.homechores.domain.ListReminderRepository;
 import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
+import com.homechores.domain.PushSubscriptionRepository;
 import com.homechores.domain.RejoinRequestRepository;
 import com.homechores.domain.Routine;
 import com.homechores.domain.RoutineDoneRepository;
@@ -80,6 +81,7 @@ public class BackupService {
     private final SpreeTierRepository spreeTiers;
     private final TrophyRewardRepository trophyRewards;
     private final RejoinRequestRepository rejoins;
+    private final PushSubscriptionRepository pushSubscriptions;
     private final HomeState homeState;
     private final ObjectMapper mapper = new ObjectMapper()
             .registerModule(new JavaTimeModule())
@@ -98,7 +100,7 @@ public class BackupService {
                         CreditEntryRepository creditEntries, SpreeTierRepository spreeTiers,
                         TrophyRewardRepository trophyRewards, RejoinRequestRepository rejoins,
                         RoutineRepository routines, RoutineDoneRepository routineTicks,
-                        HomeState homeState) {
+                        PushSubscriptionRepository pushSubscriptions, HomeState homeState) {
         this.homes = homes;
         this.members = members;
         this.tasks = tasks;
@@ -114,7 +116,22 @@ public class BackupService {
         this.spreeTiers = spreeTiers;
         this.trophyRewards = trophyRewards;
         this.rejoins = rejoins;
+        this.pushSubscriptions = pushSubscriptions;
         this.homeState = homeState;
+    }
+
+    /**
+     * Whether the home holds anything its family made: chore history, or anything in the
+     * organizer (list lines, dinner plans, lists of its own, routines). Retention asks this
+     * rather than "has completions" because a home used only for its lists is just as much a
+     * family's data as one used for chores. Chores and settings do not count; a new home
+     * is seeded with those.
+     */
+    public boolean holdsFamilyData(String homeCode) {
+        return completions.existsByHomeCode(homeCode)
+                || listItems.existsByHomeCode(homeCode)
+                || customLists.existsByHomeCode(homeCode)
+                || routines.existsByHomeCode(homeCode);
     }
 
     // ---- Export -------------------------------------------------------------
@@ -294,6 +311,11 @@ public class BackupService {
         // List reminders too: their line ids are about to be reissued, and they are excluded from
         // the export like every other pending notification.
         listReminders.deleteByHomeCode(code);
+        // And the devices themselves. Each row names a member id that is about to stop
+        // existing, so a survivor would keep carrying the home's list lines to whoever owned
+        // it — including someone the older backup never knew. Everyone re-arms a reminder to
+        // re-register their phone, the same as after signing in on a new one.
+        pushSubscriptions.deleteByHomeCode(code);
         completions.deleteByHomeCode(code);
         creditEntries.deleteByHomeCode(code);
         spreeTiers.deleteByHomeCode(code);
@@ -615,7 +637,7 @@ public class BackupService {
     // (server-side facts, not family data) and everything about push reminders
     // (PushSubscription rows, Member.reminderTime/zoneId/reminderLocale) — subscriptions
     // are device credentials that would dangle after restore anyway, since restore mints
-    // new member ids.
+    // new member ids; restore deletes the home's existing ones for that reason.
 
     public static class Backup {
         public int version = VERSION;

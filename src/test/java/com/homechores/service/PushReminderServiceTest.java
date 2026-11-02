@@ -182,7 +182,7 @@ class PushReminderServiceTest {
         reminders.storeSubscription(other.getId(), other.getHomeCode(),
                 "https://push.example/other", "k", "a");
 
-        assertTrue(service.removeMember(other.getId()));
+        assertTrue(service.removeMember(other.getId(), admin.getId()));
 
         assertTrue(subscriptions.findByMemberId(other.getId()).isEmpty());
         assertFalse(subscriptions.findByMemberId(admin.getId()).isEmpty(),

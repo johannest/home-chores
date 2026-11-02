@@ -104,6 +104,52 @@ class OtherHelpTest {
         assertTrue(service.pendingOtherHelp(alex.getHomeCode()).isEmpty());
     }
 
+    /** Two admins with the same Accept dialog open: the second one to press it pays nothing. */
+    @Test
+    void acceptingTwice_fromAStaleDialog_paysOnce() {
+        Member alex = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(alex.getHomeCode(), "Sam").orElseThrow();
+        Completion help = service.logOtherHelp(alex.getHomeCode(), sam.getId(), "Painted the fence")
+                .orElseThrow();
+
+        assertTrue(service.approve(help.getId(), alex.getId(), 5).isPresent());
+        assertTrue(service.approve(help.getId(), alex.getId(), 5).isEmpty(), "already decided");
+
+        assertEquals(5, credits.balance(sam.getId()));
+        assertEquals(1, service.completionCount(sam.getId()));
+    }
+
+    /** A stale Decline after an Accept would leave the credits paid for an entry the history
+     *  calls rejected; taking it back is the explicit unmark's job instead. */
+    @Test
+    void decliningAfterAccepting_isRefused_soTheCreditsAndTheHistoryAgree() {
+        Member alex = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(alex.getHomeCode(), "Sam").orElseThrow();
+        Completion help = service.logOtherHelp(alex.getHomeCode(), sam.getId(), "Painted the fence")
+                .orElseThrow();
+        service.approve(help.getId(), alex.getId(), 5);
+
+        assertFalse(service.reject(help.getId(), alex.getId()));
+
+        assertEquals(CompletionStatus.APPROVED,
+                service.recentCompletions(alex.getHomeCode(), 5).get(0).getStatus());
+        assertEquals(5, credits.balance(sam.getId()));
+    }
+
+    @Test
+    void acceptingAfterDeclining_isRefused() {
+        Member alex = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(alex.getHomeCode(), "Sam").orElseThrow();
+        Completion help = service.logOtherHelp(alex.getHomeCode(), sam.getId(), "Nothing really")
+                .orElseThrow();
+
+        assertTrue(service.reject(help.getId(), alex.getId()));
+        assertTrue(service.approve(help.getId(), alex.getId(), 5).isEmpty());
+
+        assertEquals(0, service.completionCount(sam.getId()));
+        assertEquals(0, credits.balance(sam.getId()));
+    }
+
     /** Two queues, because the two decisions differ — but one badge count for the admin. */
     @Test
     void helpHasItsOwnQueueButSharesThePendingBadge() {

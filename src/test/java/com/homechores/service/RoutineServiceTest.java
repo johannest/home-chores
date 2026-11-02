@@ -336,6 +336,40 @@ class RoutineServiceTest {
         assertEquals(0, routines.sendDue(Instant.now()), "never twice for one occurrence");
     }
 
+    /** Restore replaces every member, so no device of the old ones may still hear the home's
+     *  routines; least of all one belonging to someone the older backup never had. */
+    @Test
+    void afterRestoringAnOlderBackup_aRemovedPersonsDevice_getsNoHomeRoutine() {
+        when(sender.isEnabled()).thenReturn(true);
+        when(sender.send(any(), anyString(), anyString())).thenReturn(true);
+        Member alex = chores.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+        routines.create(code, alex.getId(), timed("Bins", null, LocalTime.of(19, 0))).orElseThrow();
+        byte[] older = backup.export(code).getBytes(StandardCharsets.UTF_8);
+        subscribe(chores.joinHome(code, "Sam").orElseThrow());
+
+        backup.restore(older, code, alex.getId());
+        assertTrue(chores.findMemberByName(code, "Sam").isEmpty(), "precondition: the backup never had Sam");
+        dueNow(repo.findByHomeCodeOrderByTimeAscNameAscIdAsc(code).get(0));
+
+        routines.sendDue(Instant.now());
+        verify(sender, never()).send(any(), anyString(), anyString());
+    }
+
+    @Test
+    void aDeviceWhoseMemberIsGone_getsNoHomeRoutine() {
+        when(sender.isEnabled()).thenReturn(true);
+        when(sender.send(any(), anyString(), anyString())).thenReturn(true);
+        Member alex = chores.createHome("Nest", "Alex");
+        String code = alex.getHomeCode();
+        subscribe(alex);
+        subscriptions.save(new PushSubscription(-1L, code,
+                "https://fcm.googleapis.com/fcm/send/orphan", "p256dh", "auth"));
+        dueNow(routines.create(code, alex.getId(), timed("Bins", null, LocalTime.of(19, 0))).orElseThrow());
+
+        assertEquals(1, routines.sendDue(Instant.now()), "Alex's device only, not the orphan");
+    }
+
     @Test
     void theSendCap_startsNoMoreRoutines_butNeverLeavesAStartedOnesAudienceHalfway() {
         when(sender.isEnabled()).thenReturn(true);
@@ -421,7 +455,7 @@ class RoutineServiceTest {
         routines.create(code, alex.getId(), spec("Bins", null)).orElseThrow();
         routines.setDone(code, piano.getId(), Author.member(sam.getId()), true);
 
-        assertTrue(chores.removeMember(sam.getId()));
+        assertTrue(chores.removeMember(sam.getId(), alex.getId()));
         assertEquals(List.of("Bins"), routines.routinesOf(code, alex.getId()).stream().map(Routine::getName).toList());
         assertTrue(ticks.findAll().isEmpty());
 

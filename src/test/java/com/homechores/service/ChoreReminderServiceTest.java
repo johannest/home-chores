@@ -172,7 +172,7 @@ class ChoreReminderServiceTest {
         chores.deleteTask(tasks.get(0).getId());
         assertTrue(snoozes.forMember(alex.getId()).isEmpty(), "the chore is gone");
 
-        chores.removeMember(sam.getId());
+        chores.removeMember(sam.getId(), alex.getId());
         assertTrue(snoozes.forMember(sam.getId()).isEmpty(), "the member is gone");
 
         snoozes.schedule(alex.getId(), tasks.get(2).getId(), Duration.ofHours(2), null);

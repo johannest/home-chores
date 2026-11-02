@@ -646,7 +646,7 @@ class HomeUiTest extends HomeChoresUiTest {
         Member admin = service.createHome("Shared", "Alex");
         Member sam = service.joinHome(admin.getHomeCode(), "Sam").orElseThrow();
         String secret = service.issueDeviceSecret(sam.getId());
-        assertTrue(service.removeMember(sam.getId()));
+        assertTrue(service.removeMember(sam.getId(), admin.getId()));
 
         landing().restoreMember(DeviceIdentity.parse(sam.getId() + "|" + admin.getHomeCode() + "|" + secret));
 
@@ -2080,7 +2080,7 @@ class HomeUiTest extends HomeChoresUiTest {
         SessionContext.signIn(sam.getId(), code);
         navigate(HomeView.class);
 
-        assertTrue(service.removeMember(sam.getId())); // Alex, on another phone
+        assertTrue(service.removeMember(sam.getId(), alex.getId())); // Alex, on another phone
         awaitRedraw(() -> getCurrentView() instanceof LandingView);
         assertInstanceOf(LandingView.class, getCurrentView(), "removed: back on the landing page");
         assertNull(SessionContext.memberId(), "and signed out");

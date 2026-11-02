@@ -1,6 +1,5 @@
 package com.homechores.service;
 
-import com.homechores.domain.CompletionRepository;
 import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
 import com.homechores.domain.MemberRepository;
@@ -22,15 +21,16 @@ import org.springframework.stereotype.Service;
  *
  * <ul>
  * <li><b>{@code empty-home-hours}</b> — the fast anti-spam tier. Purges homes that were
- * created and abandoned before anyone used them (<em>no chore history at all</em> and
- * <em>at most one member</em> — the "tapped Create, never invited anyone" leftovers).
+ * created and abandoned before anyone used them (<em>no family data at all</em>, see
+ * {@link BackupService#holdsFamilyData}, and <em>at most one member</em> — the "tapped
+ * Create, never invited anyone" leftovers).
  * Nothing of value is lost, so the window is short (72h in prod config).</li>
  * <li><b>{@code abandoned-home-days}</b> — the same empty-home rule with a long window;
  * kept as the documented upper bound for unused homes even when the fast tier is off.</li>
  * <li><b>{@code inactive-home-days}</b> — the total-inactivity tier: a home nobody has
  * opened or used for this many days is deleted <em>entirely</em>, members and chore
  * history included. Because a false positive here destroys a real family's data (a long
- * trip, a lost phone), every home that has actual history is exported to
+ * trip, a lost phone), every home that holds family data is exported to
  * {@code retention.export-dir} first — the operator's undo — and a home whose export
  * fails is skipped rather than deleted. The user agreement and privacy page state this
  * window, generated from the configured value.</li>
@@ -52,7 +52,6 @@ public class HomeCleanupService {
 
     private final HomeRepository homes;
     private final MemberRepository members;
-    private final CompletionRepository completions;
     private final ChoreService choreService;
     private final BackupService backupService;
 
@@ -65,11 +64,11 @@ public class HomeCleanupService {
     /** Days of total inactivity before ANY home is purged, history and all; 0 = off. */
     private final int inactiveHomeDays;
 
-    /** Where the pre-purge safety exports of homes with real history are written. */
+    /** Where the pre-purge safety exports of homes holding family data are written. */
     private final String exportDir;
 
     public HomeCleanupService(HomeRepository homes, MemberRepository members,
-                             CompletionRepository completions, ChoreService choreService,
+                             ChoreService choreService,
                              BackupService backupService,
                              @Value("${homechores.retention.abandoned-home-days:0}")
                              int abandonedHomeDays,
@@ -81,7 +80,6 @@ public class HomeCleanupService {
                              String exportDir) {
         this.homes = homes;
         this.members = members;
-        this.completions = completions;
         this.choreService = choreService;
         this.backupService = backupService;
         this.abandonedHomeDays = abandonedHomeDays;
@@ -158,8 +156,8 @@ public class HomeCleanupService {
         if (!home.lastActiveOrCreated().isBefore(cutoff)) {
             return false; // used recently enough
         }
-        if (completions.existsByHomeCode(home.getCode())) {
-            return false; // has history — the inactive tier decides about these, not this one
+        if (backupService.holdsFamilyData(home.getCode())) {
+            return false; // chore history or organizer use: the inactive tier decides, with an export
         }
         return members.countByHomeCode(home.getCode()) <= MAX_MEMBERS_TO_PURGE;
     }
@@ -181,7 +179,7 @@ public class HomeCleanupService {
 
     /**
      * Deletes every home whose last activity is before {@code cutoff}, whatever its size
-     * or history. A home with any chore history is exported to {@link #exportDir} first;
+     * or history. A home holding family data is exported to {@link #exportDir} first;
      * if that export cannot be written the home is <em>kept</em> — losing a family's
      * irreplaceable history to a full disk would be the worst possible trade.
      */
@@ -191,8 +189,7 @@ public class HomeCleanupService {
             if (!home.lastActiveOrCreated().isBefore(cutoff)) {
                 continue;
             }
-            boolean hasHistory = completions.existsByHomeCode(home.getCode());
-            if (hasHistory && !exportBeforePurge(home)) {
+            if (backupService.holdsFamilyData(home.getCode()) && !exportBeforePurge(home)) {
                 continue; // fail safe: no export, no delete
             }
             if (choreService.deleteHome(home.getCode())) {

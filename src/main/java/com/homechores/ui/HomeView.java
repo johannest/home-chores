@@ -521,7 +521,7 @@ public class HomeView extends VerticalLayout implements BeforeEnterObserver {
         });
         ok.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         d.add(pin);
-        d.getFooter().add(new Button("Cancel", e -> d.close()), ok);
+        d.getFooter().add(new Button(T.tr("common.cancel"), e -> d.close()), ok);
         d.open();
     }
 

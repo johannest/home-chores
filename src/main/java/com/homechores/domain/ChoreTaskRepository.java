@@ -30,6 +30,8 @@ public interface ChoreTaskRepository extends JpaRepository<ChoreTask, Long> {
     /** Every chore currently carrying a booking, expired or not — the expiry sweep's candidates. */
     List<ChoreTask> findByBookedByMemberIdIsNotNull();
 
+    List<ChoreTask> findByBookedByMemberId(Long memberId);
+
     @Transactional
     void deleteByHomeCode(String homeCode);
 }

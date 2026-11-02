@@ -50,7 +50,10 @@ class StatsAggregationTest {
         chores.setFeedback(a1.completionId(), Feedback.LOVE);
         var s1 = chores.complete(t.get(0).getId(), sam.getId());    // APPROVED
         chores.setFeedback(s1.completionId(), Feedback.HATE);
-        var s2 = chores.complete(t.get(1).getId(), sam.getId());    // -> REJECTED
+        Home home = chores.findHome(code).orElseThrow();
+        home.setRequireApproval(true); // only a decision still pending can be rejected
+        chores.saveHome(home);
+        var s2 = chores.complete(t.get(1).getId(), sam.getId());    // PENDING -> REJECTED
         chores.reject(s2.completionId(), alex.getId());
 
         // Other help: always PENDING; accept one, leave one waiting.

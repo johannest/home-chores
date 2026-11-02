@@ -150,7 +150,7 @@ class LogForMemberTest {
         CompleteOutcome outcome = service.completeFor(
                 service.tasksOf(alex.getHomeCode()).get(0).getId(), sam.getId(), alex.getId());
 
-        service.deleteCompletion(outcome.completionId());
+        service.deleteCompletion(outcome.completionId(), alex.getId());
 
         assertEquals(0, service.completionCount(sam.getId()));
     }

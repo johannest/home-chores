@@ -5,16 +5,20 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.homechores.domain.CompletionRepository;
 import com.homechores.domain.Home;
 import com.homechores.domain.HomeRepository;
+import com.homechores.domain.ListKind;
 import com.homechores.domain.Member;
 import com.homechores.domain.MemberRepository;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.DayOfWeek;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.function.BiConsumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,8 +27,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Retention. The empty-home tiers purge only homes abandoned before anyone used them —
- * there, the rule that matters most is the negative one: a home with any history at all
- * survives. The separate total-inactivity tier purges any home unused past its window,
+ * there, the rule that matters most is the negative one: a home with any family data at
+ * all (chore history or organizer use) survives. The separate total-inactivity tier purges any home unused past its window,
  * but never without first writing the safety export that is the operator's undo.
  */
 @SpringBootTest
@@ -44,7 +48,10 @@ class HomeCleanupServiceTest {
     MemberRepository members;
 
     @Autowired
-    CompletionRepository completions;
+    ListItemService lists;
+
+    @Autowired
+    RoutineService routines;
 
     @Autowired
     BackupService backupService;
@@ -60,7 +67,7 @@ class HomeCleanupServiceTest {
     }
 
     private HomeCleanupService withWindows(int abandonedDays, int emptyHours, int inactiveDays) {
-        return new HomeCleanupService(homes, members, completions, service, backupService,
+        return new HomeCleanupService(homes, members, service, backupService,
                 abandonedDays, emptyHours, inactiveDays, exportDir.toString());
     }
 
@@ -313,7 +320,7 @@ class HomeCleanupServiceTest {
         // fail-safe path: no export, no delete.
         Path blocked = exportDir.resolve("blocked");
         Files.writeString(blocked, "not a directory");
-        HomeCleanupService strict = new HomeCleanupService(homes, members, completions,
+        HomeCleanupService strict = new HomeCleanupService(homes, members,
                 service, backupService, 0, 0, 30, blocked.toString());
 
         Member alex = service.createHome("Protected", "Alex");
@@ -376,6 +383,54 @@ class HomeCleanupServiceTest {
         assertTrue(fast.purgeAbandonedHomes().isEmpty());
         assertTrue(service.findHome(robin.getHomeCode()).isPresent());
         assertTrue(service.findHome(alex.getHomeCode()).isPresent());
+    }
+
+    /**
+     * A solo home used only for its organizer is a family's data, not a drive-by sign-up,
+     * even with no chore ever logged. Each kind of organizer content counts on its own.
+     */
+    @Test
+    void fastTier_neverTouchesAHomeUsedOnlyForItsOrganizer() {
+        HomeCleanupService fast = withWindows(0, 72);
+        List<String> used = List.of(
+                organizerHome("PrivateList", (code, alex) -> {
+                    var mine = lists.createList(code, Author.member(alex), "Mine").orElseThrow();
+                    lists.setListPrivate(code, mine.getId(), Author.member(alex), true);
+                    lists.add(code, ListKind.TODO, mine.getId(), Author.member(alex), "Passport");
+                }),
+                organizerHome("Grocery", (code, alex) ->
+                        lists.add(code, ListKind.GROCERY, Author.member(alex), "Milk")),
+                organizerHome("Dinner", (code, alex) ->
+                        lists.setDinner(code, LocalDate.now(), Author.member(alex), "Soup")),
+                organizerHome("Routine", (code, alex) -> routines.create(code, alex,
+                        new RoutineService.Spec("Bins out", "🗑️", EnumSet.allOf(DayOfWeek.class),
+                                1, false, null, null, false))));
+        used.forEach(code -> stale(code, Duration.ofDays(4))); // a long weekend away
+
+        assertTrue(fast.purgeAbandonedHomes().isEmpty());
+        used.forEach(code -> assertTrue(service.findHome(code).isPresent(), code));
+    }
+
+    @Test
+    void inactiveTier_exportsAHomeUsedOnlyForItsOrganizer_beforeDeletingIt() throws Exception {
+        HomeCleanupService strict = withWindows(0, 0, 30);
+        String code = organizerHome("ListsOnly", (c, alex) ->
+                lists.add(c, ListKind.GROCERY, Author.member(alex), "Milk"));
+        stale(code, Duration.ofDays(60));
+
+        assertTrue(strict.purgeInactiveHomes().contains(code));
+        try (var files = Files.list(exportDir)) {
+            var export = files.filter(f -> f.getFileName().toString().startsWith(code)).toList();
+            assertEquals(1, export.size(), "no chore history, but the lists are worth an export");
+            assertTrue(Files.readString(export.get(0)).contains("Milk"));
+        }
+    }
+
+    /** A solo home with no chore history, given whatever organizer content {@code use} adds. */
+    private String organizerHome(String name, BiConsumer<String, Long> use) {
+        Member alex = service.createHome(name, "Alex");
+        use.accept(alex.getHomeCode(), alex.getId());
+        return alex.getHomeCode();
     }
 
     @Test

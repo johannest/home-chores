@@ -11,6 +11,8 @@ public interface RoutineRepository extends JpaRepository<Routine, Long> {
 
     long countByHomeCode(String homeCode);
 
+    boolean existsByHomeCode(String homeCode);
+
     /** The reminder sweep's working set, bounded in the query: it shares the one scheduler thread. */
     List<Routine> findTop50ByNextFireAtLessThanEqualOrderByNextFireAtAsc(Instant now);
 

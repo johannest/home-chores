@@ -1,8 +1,11 @@
 package com.homechores.domain;
 
+import jakarta.persistence.LockModeType;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,6 +15,15 @@ public interface CompletionRepository extends JpaRepository<Completion, Long> {
     long countByMemberIdAndStatus(Long memberId, CompletionStatus status);
 
     long countByHomeCodeAndStatus(String homeCode, CompletionStatus status);
+
+    /**
+     * A completion about to be approved or rejected, row-locked until the deciding transaction
+     * ends ({@code select … for update}). Of two admins deciding the same entry at once, the
+     * second waits for the first and then reads its decision, so a status check made after
+     * this load cannot be raced.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<Completion> findForDecisionById(Long id);
 
     /** Every member's all-time approved count in one grouped query — the leaderboard's trophy
      *  badges, which must not cost a query per member on every redraw. A member with nothing

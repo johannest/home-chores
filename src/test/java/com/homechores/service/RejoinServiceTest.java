@@ -170,7 +170,7 @@ class RejoinServiceTest {
         Member sam = service.joinHome(admin.getHomeCode(), "Sam").orElseThrow();
         Rejoin r = service.requestRejoin(admin.getHomeCode(), sam.getId(), null);
 
-        assertTrue(service.removeMember(sam.getId()));
+        assertTrue(service.removeMember(sam.getId(), admin.getId()));
         assertTrue(service.findRejoinByToken(r.token()).isEmpty());
         assertTrue(service.pendingRejoins(admin.getHomeCode()).isEmpty());
     }

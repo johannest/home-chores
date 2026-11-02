@@ -271,8 +271,8 @@ class AdminPanel extends VerticalLayout {
                     ButtonVariant.LUMO_SMALL);
             accept.setAriaLabel(T.tr("admin.help.accept"));
             Button decline = new Button(VaadinIcon.CLOSE.create(), e -> {
-                service.reject(c.getId(), memberId);
-                toast(T.tr("admin.help.declined"));
+                toast(T.tr(service.reject(c.getId(), memberId)
+                        ? "admin.help.declined" : "admin.review.alreadyDecided"));
                 refresh();
             });
             decline.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_SMALL);
@@ -306,8 +306,14 @@ class AdminPanel extends VerticalLayout {
 
         Button ok = new Button(T.tr("admin.help.accept.confirm"), e -> {
             int amount = credits.getValue() == null ? 0 : Math.max(0, credits.getValue());
-            service.approve(help.getId(), memberId, amount);
+            boolean accepted = service.approve(help.getId(), memberId, amount).isPresent();
             d.close();
+            if (!accepted) {
+                // Another admin got there while this dialog was open; their decision stands.
+                toast(T.tr("admin.review.alreadyDecided"));
+                refresh();
+                return;
+            }
             toast(T.tr("admin.help.accepted", member));
             // The board is the point: help that happens often should become a card anyone
             // can tap, so the same thing never has to be typed out and reviewed again.
@@ -429,7 +435,9 @@ class AdminPanel extends VerticalLayout {
             info.addClassName("grow");
 
             Button approve = new Button(VaadinIcon.CHECK.create(), e -> {
-                service.approve(c.getId(), memberId);
+                if (service.approve(c.getId(), memberId).isEmpty()) {
+                    toast(T.tr("admin.review.alreadyDecided"));
+                }
                 refresh();
             });
             approve.addThemeVariants(ButtonVariant.LUMO_PRIMARY, ButtonVariant.LUMO_SUCCESS,
@@ -437,7 +445,9 @@ class AdminPanel extends VerticalLayout {
             // Icon-only, so it needs a name of its own — as the Other help buttons already have.
             approve.setAriaLabel(T.tr("admin.approve"));
             Button reject = new Button(VaadinIcon.CLOSE.create(), e -> {
-                service.reject(c.getId(), memberId);
+                if (!service.reject(c.getId(), memberId)) {
+                    toast(T.tr("admin.review.alreadyDecided"));
+                }
                 refresh();
             });
             reject.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_SMALL);
@@ -549,7 +559,7 @@ class AdminPanel extends VerticalLayout {
             Button unmark = new Button(T.tr("admin.recent.unmark"), VaadinIcon.ARROW_BACKWARD.create(),
                     e -> confirm(T.tr("admin.recent.unmark.title", chore),
                             T.tr("admin.recent.unmark.text", member), () -> {
-                                service.deleteCompletion(c.getId());
+                                service.deleteCompletion(c.getId(), memberId);
                                 toast(T.tr("admin.recent.unmarked", chore, member));
                                 refresh();
                             }));
@@ -919,7 +929,7 @@ class AdminPanel extends VerticalLayout {
     private void confirmRemoveMember(Member m) {
         confirm(T.tr("admin.removeMember.title", m.getName()),
                 T.tr("admin.removeMember.text"), () -> {
-                    if (!service.removeMember(m.getId())) {
+                    if (!service.removeMember(m.getId(), memberId)) {
                         toastError(T.tr("admin.lastAdmin"));
                         return;
                     }
