@@ -237,7 +237,7 @@ without the fix.
 
 Validation: 526 tests across 53 classes passed, with 0 failures, errors or skips. That is
 the same non-UI selection as above plus `DeviceIdentityTest` and
-`SecurityHeadersInitListenerTest`. The licensed UI tests (`HomeUiTest` and others, whose
-calls were updated for the new signatures) compile, but they stop at the TestBench license
-check and were **not run**. The new "already decided" notice was not checked in a browser.
+`SecurityHeadersInitListenerTest`. With a TestBench license in place, the UI tests
+(`**/ui/*Test`, `HomeUiTest` included) also passed: 160 tests across 15 classes, 0
+failures. The new "already decided" notice was not checked in a browser.
 
