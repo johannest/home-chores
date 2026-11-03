@@ -64,8 +64,8 @@ class ChoreServiceTest {
     @Test
     void cannotRemoveOrDemoteLastAdmin() {
         Member admin = service.createHome("Nest", "Alex");
-        assertFalse(service.setMemberAdmin(admin.getId(), false), "last admin cannot be demoted");
-        assertFalse(service.removeMember(admin.getId()), "last admin cannot be removed");
+        assertFalse(service.setMemberAdmin(admin.getId(), false, admin.getId()), "last admin cannot be demoted");
+        assertFalse(service.removeMember(admin.getId(), admin.getId()), "last admin cannot be removed");
         assertTrue(service.findMember(admin.getId()).orElseThrow().isAdmin());
     }
 
@@ -209,7 +209,7 @@ class ChoreServiceTest {
         service.complete(dish, sam.getId());
         assertEquals(1, service.completionCount(sam.getId()));
 
-        assertTrue(service.removeMember(sam.getId()));
+        assertTrue(service.removeMember(sam.getId(), alex.getId()));
         assertTrue(service.findMember(sam.getId()).isEmpty());
     }
 
@@ -246,5 +246,92 @@ class ChoreServiceTest {
 
         service.approve(pending.completionId(), alex.getId());
         assertEquals(1, service.completionCount(sam.getId()));
+    }
+
+    @Test
+    void approvingAChoreTwice_countsItOnce() {
+        Member alex = service.createHome("Nest", "Alex");
+        Home home = service.findHome(alex.getHomeCode()).orElseThrow();
+        home.setRequireApproval(true);
+        service.saveHome(home);
+        CompleteOutcome pending = service.complete(tasks(alex.getHomeCode()).get(0).getId(), alex.getId());
+
+        assertTrue(service.approve(pending.completionId(), alex.getId()).isPresent());
+        assertTrue(service.approve(pending.completionId(), alex.getId()).isEmpty());
+        assertFalse(service.reject(pending.completionId(), alex.getId()), "nor rejected once approved");
+        assertEquals(1, service.completionCount(alex.getId()));
+    }
+
+    /** The service checks the home itself rather than trusting that its caller paired a chore
+     *  with one of that home's members. */
+    @Test
+    void aMemberOfAnotherHome_canNeitherCompleteNorBookItsChores() {
+        Member alex = service.createHome("Nest", "Alex");
+        Member robin = service.createHome("Elsewhere", "Robin");
+        Long dish = tasks(alex.getHomeCode()).get(0).getId();
+
+        assertThrows(IllegalArgumentException.class, () -> service.complete(dish, robin.getId()));
+        assertThrows(IllegalArgumentException.class, () -> service.bookChore(dish, robin.getId()));
+        assertEquals(0, service.completionCount(robin.getId()));
+
+        assertTrue(service.bookChore(dish, alex.getId()), "its own home's member still can");
+        assertTrue(service.complete(dish, alex.getId()).allowed());
+    }
+
+    @Test
+    void unmarkingAChore_andRemovingAMember_needAnAdminOfThatHome() {
+        Member alex = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(alex.getHomeCode(), "Sam").orElseThrow();
+        Member robin = service.createHome("Elsewhere", "Robin"); // an admin, of another home
+        CompleteOutcome done = service.complete(tasks(alex.getHomeCode()).get(0).getId(), sam.getId());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.deleteCompletion(done.completionId(), robin.getId()));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.deleteCompletion(done.completionId(), sam.getId()));
+        assertThrows(IllegalArgumentException.class, () -> service.removeMember(sam.getId(), robin.getId()));
+        assertThrows(IllegalArgumentException.class, () -> service.removeMember(alex.getId(), sam.getId()));
+        assertEquals(1, service.completionCount(sam.getId()), "nothing was unmarked");
+        assertTrue(service.findMember(sam.getId()).isPresent(), "nobody was removed");
+
+        service.deleteCompletion(done.completionId(), alex.getId());
+        assertEquals(0, service.completionCount(sam.getId()));
+        assertTrue(service.removeMember(sam.getId(), alex.getId()));
+    }
+
+    @Test
+    void promotingAndRenamingAMember_needAnAdminOfThatHome() {
+        Member alex = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(alex.getHomeCode(), "Sam").orElseThrow();
+        Member robin = service.createHome("Elsewhere", "Robin"); // an admin, of another home
+
+        assertThrows(IllegalArgumentException.class, () -> service.setMemberAdmin(sam.getId(), true, sam.getId()));
+        assertThrows(IllegalArgumentException.class, () -> service.setMemberAdmin(sam.getId(), true, robin.getId()));
+        assertThrows(IllegalArgumentException.class, () -> service.renameMember(alex.getId(), "Hacked", sam.getId()));
+        assertThrows(IllegalArgumentException.class, () -> service.renameMember(sam.getId(), "Hacked", robin.getId()));
+        assertFalse(service.findMember(sam.getId()).orElseThrow().isAdmin(), "nobody was promoted");
+        assertEquals("Alex", service.findMember(alex.getId()).orElseThrow().getName());
+        assertEquals("Sam", service.findMember(sam.getId()).orElseThrow().getName());
+
+        assertTrue(service.setMemberAdmin(sam.getId(), true, alex.getId()));
+        service.renameMember(sam.getId(), "Samuel", alex.getId());
+        Member after = service.findMember(sam.getId()).orElseThrow();
+        assertTrue(after.isAdmin());
+        assertEquals("Samuel", after.getName());
+    }
+
+    /** A hold nobody can ever complete must not keep the chore from everyone else. */
+    @Test
+    void removingAMember_releasesTheChoresTheyHadBooked() {
+        Member alex = service.createHome("Nest", "Alex");
+        Member sam = service.joinHome(alex.getHomeCode(), "Sam").orElseThrow();
+        Long dish = tasks(alex.getHomeCode()).get(0).getId();
+        assertTrue(service.bookChore(dish, sam.getId()));
+        assertFalse(service.bookChore(dish, alex.getId()), "precondition: Sam's hold blocks Alex");
+
+        assertTrue(service.removeMember(sam.getId(), alex.getId()));
+
+        assertTrue(service.bookChore(dish, alex.getId()), "free again");
+        assertTrue(service.complete(dish, alex.getId()).allowed());
     }
 }

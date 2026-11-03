@@ -116,7 +116,7 @@ class TrophyTest {
         complete(alex);
         assertEquals(7, credits.balance(alex.getId()));
 
-        chores.deleteCompletion(older.get(0).getId()); // the admin's "that didn't happen"
+        chores.deleteCompletion(older.get(0).getId(), alex.getId()); // the admin's "that didn't happen"
         CompleteOutcome back = complete(alex);
 
         assertEquals(Trophy.SPROUT, back.trophy(), "the trophy is reached again, and celebrated");
@@ -149,7 +149,7 @@ class TrophyTest {
         assertNull(pending.trophy(), "a pending chore reaches nothing");
         assertTrue(chores.unseenTrophies(sam.getId()).isEmpty());
 
-        CompleteOutcome approved = chores.approve(pending.completionId(), alex.getId());
+        CompleteOutcome approved = chores.approve(pending.completionId(), alex.getId()).orElseThrow();
         assertEquals(Trophy.SPROUT, approved.trophy());
         assertEquals(7, credits.balance(sam.getId()));
         assertEquals(List.of(Trophy.SPROUT), chores.unseenTrophies(sam.getId()),
@@ -208,9 +208,9 @@ class TrophyTest {
                 "another home's admin");
         assertTrue(credits.trophyRewards(code).isEmpty());
 
-        assertTrue(chores.setMemberAdmin(sam.getId(), true));
+        assertTrue(chores.setMemberAdmin(sam.getId(), true, alex.getId()));
         assertTrue(credits.setTrophyReward(code, Trophy.SILVER, 20, sam.getId()));
-        assertTrue(chores.setMemberAdmin(sam.getId(), false));
+        assertTrue(chores.setMemberAdmin(sam.getId(), false, alex.getId()));
         assertFalse(credits.setTrophyReward(code, Trophy.SILVER, 30, sam.getId()),
                 "a demoted admin's open screen");
 
@@ -297,7 +297,7 @@ class TrophyTest {
         assertTrue(chores.unseenTrophies(back.getId()).isEmpty(), "no replay of a seen trophy");
         // The paid rung came back too: deleting a chore and climbing back pays nothing.
         chores.deleteCompletion(completionRepo.findByMemberIdAndStatus(back.getId(),
-                CompletionStatus.APPROVED).get(0).getId());
+                CompletionStatus.APPROVED).get(0).getId(), back.getId());
         CompleteOutcome climbedBack = complete(back);
         assertEquals(Trophy.SPROUT, climbedBack.trophy());
         assertEquals(0, climbedBack.award().trophyCredits());

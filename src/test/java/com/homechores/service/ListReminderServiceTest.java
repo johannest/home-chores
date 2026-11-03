@@ -231,6 +231,46 @@ class ListReminderServiceTest {
         assertTrue(reminders.forHome(code).isEmpty(), "the home is gone");
     }
 
+    /**
+     * Restore replaces every member with a new one, so the home's devices go with the old
+     * members. Above all, the phone of someone the older backup never had must stop receiving
+     * the family's list lines.
+     */
+    @Test
+    void restoringAnOlderBackup_dropsTheHomesDevices_soARemovedPersonHearsNothing() {
+        when(sender.send(any(), anyString(), anyString())).thenReturn(true);
+        Member alex = subscribedHome("Alex");
+        String code = alex.getHomeCode();
+        byte[] older = backup.export(code).getBytes(StandardCharsets.UTF_8);
+        subscribe(chores.joinHome(code, "Sam").orElseThrow());
+
+        backup.restore(older, code, alex.getId());
+        assertTrue(chores.findMemberByName(code, "Sam").isEmpty(), "precondition: the backup never had Sam");
+        assertTrue(subscriptions.findByHomeCode(code).isEmpty(), "every device re-registers after a restore");
+
+        Member back = chores.findMemberByName(code, "Alex").orElseThrow();
+        armedAndDue(todo(code, back.getId(), "Door code is 4711").getId(), back.getId());
+        reminders.sendDue(Instant.now());
+        verify(sender, never()).send(any(), anyString(), anyString());
+    }
+
+    /** The second line of defence: a device row left behind by a member who is gone is not
+     *  part of the home's audience, however it came to be left. */
+    @Test
+    void aDeviceWhoseMemberIsGone_isNotRemindedOfTheHomesLines() {
+        when(sender.send(any(), anyString(), anyString())).thenReturn(true);
+        Member alex = subscribedHome("Alex");
+        String code = alex.getHomeCode();
+        subscriptions.save(new PushSubscription(-1L, code,
+                "https://fcm.googleapis.com/fcm/send/orphan", "p256dh", "auth"));
+        armedAndDue(todo(code, alex.getId(), "Milk").getId(), alex.getId());
+
+        assertEquals(1, reminders.sendDue(Instant.now()), "Alex's device only");
+        ArgumentCaptor<PushSubscription> to = ArgumentCaptor.forClass(PushSubscription.class);
+        verify(sender, times(1)).send(to.capture(), anyString(), anyString());
+        assertEquals(alex.getId(), to.getValue().getMemberId());
+    }
+
     @Test
     void removingAMember_leavesTheHomesReminderInPlace() {
         Member alex = subscribedHome("Alex");
@@ -239,7 +279,7 @@ class ListReminderServiceTest {
         ListItem item = todo(code, sam.getId(), "Milk");
         reminders.schedule(item.getId(), sam.getId(), inTwoHours(), null);
 
-        chores.removeMember(sam.getId());
+        chores.removeMember(sam.getId(), alex.getId());
 
         assertEquals(1, reminders.forHome(code).size(), "it belongs to the line, not to Sam");
     }

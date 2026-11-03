@@ -119,7 +119,7 @@ class BoardFeedTest {
         assertTrue(pending.pending());
         assertEquals(0, pending.doneTodayAfter(), "not counted until approved");
 
-        var approved = service.approve(pending.completionId(), alex.getId());
+        var approved = service.approve(pending.completionId(), alex.getId()).orElseThrow();
         assertEquals(1, approved.doneTodayAfter(), "approval is when it starts counting");
     }
 }

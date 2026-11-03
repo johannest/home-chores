@@ -147,7 +147,7 @@ class UndoCompletionTest {
         CompleteOutcome done = service.complete(paid.getId(), alex.getId());
         backdate(done.completionId(), Duration.ofDays(4));
 
-        service.deleteCompletion(done.completionId());
+        service.deleteCompletion(done.completionId(), alex.getId());
 
         assertEquals(0, service.completionCount(alex.getId()));
         assertEquals(0, credits.balance(alex.getId()));
@@ -164,7 +164,7 @@ class UndoCompletionTest {
         CompleteOutcome done = service.complete(service.tasksOf(code).get(0).getId(), alex.getId());
         assertEquals(1, service.pendingApprovals(code).size());
 
-        service.deleteCompletion(done.completionId());
+        service.deleteCompletion(done.completionId(), alex.getId());
         assertTrue(service.pendingApprovals(code).isEmpty());
         assertEquals(0, credits.balance(alex.getId()));
     }

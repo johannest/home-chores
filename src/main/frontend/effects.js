@@ -48,9 +48,12 @@
   const NOTE_SECONDS = 0.18;
 
   let ctx = null;
+  // Set when the page was hidden (app switch, screen lock, the home-screen app backgrounded):
+  // the next tap replaces the context instead of trusting it.
+  let stale = false;
 
   const context = () => {
-    if (ctx) return ctx;
+    if (ctx && ctx.state !== 'closed') return ctx;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
     // Safari: 'ambient' mixes with the member's music instead of pausing it, and stays quiet
@@ -65,17 +68,37 @@
   };
 
   // Browsers start audio suspended until a user gesture, and iOS only lets a gesture handler
-  // resume it — but our sounds arrive after a server round trip, outside the tap. So every tap
-  // (while sound is on) makes sure the context is running, and the chime that follows can play.
-  // Passive and cheap: it never blocks scrolling, and after the first tap it is a state check.
+  // wake it, but our sounds arrive after a server round trip, outside the tap. So every tap
+  // (while sound is on) readies the context for the chime that follows. On iOS, resume() alone
+  // is not enough: a context can report 'running' and still play nothing until a sound has been
+  // *started* inside a gesture, and after the page was hidden WebKit leaves it 'interrupted' or
+  // silently dead, beyond what resume() can fix. So the tap replaces a context like that, and
+  // starts a one-sample silent buffer every time. That costs two tiny nodes per tap and never
+  // blocks scrolling (the listeners are passive).
   const unlock = () => {
     if (!soundOn()) return;
+    if (ctx && (stale || ctx.state === 'interrupted')) {
+      ctx.close().catch(() => {});
+      ctx = null;
+    }
+    stale = false;
     const c = context();
-    if (c && c.state !== 'running') c.resume().catch(() => {});
+    if (!c) return;
+    if (c.state !== 'running') c.resume().catch(() => {});
+    const silence = c.createBufferSource();
+    silence.buffer = c.createBuffer(1, 1, c.sampleRate);
+    silence.connect(c.destination);
+    silence.start(0);
   };
   for (const type of ['touchend', 'click', 'keydown']) {
     document.addEventListener(type, unlock, { capture: true, passive: true });
   }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stale = true;
+  });
+  window.addEventListener('pagehide', () => {
+    stale = true;
+  });
 
   const play = (notes) => {
     const c = context();

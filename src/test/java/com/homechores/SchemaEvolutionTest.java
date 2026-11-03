@@ -297,7 +297,7 @@ class SchemaEvolutionTest {
     @Test
     void theServiceLayerIsWhatEnforcesLengths_notTheOldColumns() {
         Member sam = byName("Sam");
-        service.renameMember(sam.getId(), "x".repeat(200));
+        service.renameMember(sam.getId(), "x".repeat(200), byName("Alex").getId());
         assertEquals(40, byName2(sam.getId()).getName().length(),
                 "InputLimits.MEMBER_NAME, not the legacy VARCHAR(255)");
     }

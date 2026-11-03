@@ -598,6 +598,14 @@ public class ChoreService {
                 .orElseThrow(() -> new IllegalArgumentException("Not an admin of this home"));
     }
 
+    /** Ids reach these methods from callers this service does not vouch for: a chore is only
+     *  ever done or booked by a member of its own home. */
+    private static void requireSameHome(ChoreTask task, Member member) {
+        if (!task.getHomeCode().equals(member.getHomeCode())) {
+            throw new IllegalArgumentException("Chore and member belong to different homes");
+        }
+    }
+
     /**
      * An admin adding a member who has no phone of their own — a child, usually. The member
      * exists like any other (leaderboard, rotation, credits, backups) but holds no device
@@ -638,10 +646,11 @@ public class ChoreService {
         return false;
     }
 
-    /** Promote/demote a member. Refuses to demote the last remaining admin. */
+    /** An admin promoting/demoting a member. Refuses to demote the last remaining admin. */
     @Transactional
-    public boolean setMemberAdmin(Long memberId, boolean admin) {
+    public boolean setMemberAdmin(Long memberId, boolean admin, Long adminId) {
         Member member = members.findById(memberId).orElseThrow();
+        adminOf(member.getHomeCode(), adminId);
         if (!admin && member.isAdmin()
                 && members.countByHomeCodeAndAdminTrue(member.getHomeCode()) <= 1) {
             return false; // cannot remove the last admin
@@ -653,8 +662,9 @@ public class ChoreService {
     }
 
     @Transactional
-    public void renameMember(Long memberId, String name) {
+    public void renameMember(Long memberId, String name, Long adminId) {
         Member member = members.findById(memberId).orElseThrow();
+        adminOf(member.getHomeCode(), adminId);
         member.setName(InputLimits.clip(name, InputLimits.MEMBER_NAME));
         members.save(member);
         homeState.bump(member.getHomeCode());
@@ -669,10 +679,11 @@ public class ChoreService {
         homeState.bump(member.getHomeCode());
     }
 
-    /** Removes a member and their completions. Refuses to remove the last admin. */
+    /** An admin removing a member and their completions. Refuses to remove the last admin. */
     @Transactional
-    public boolean removeMember(Long memberId) {
+    public boolean removeMember(Long memberId, Long adminId) {
         Member member = members.findById(memberId).orElseThrow();
+        adminOf(member.getHomeCode(), adminId);
         if (member.isAdmin()
                 && members.countByHomeCodeAndAdminTrue(member.getHomeCode()) <= 1) {
             return false;
@@ -683,6 +694,13 @@ public class ChoreService {
         rejoins.deleteByMemberId(memberId);
         pushSubscriptions.deleteByMemberId(memberId);
         choreReminders.deleteByMemberId(memberId);
+        // Their bookings are released: a hold nobody can ever complete would block the chore
+        // for everyone else until it timed out.
+        for (ChoreTask t : tasks.findByBookedByMemberId(memberId)) {
+            t.setBookedByMemberId(null);
+            t.setBookedAt(null);
+            tasks.save(t);
+        }
         // Their private lists go with them, lines and reminders included: nobody else may see
         // them, so nobody else could ever clear them up.
         for (CustomList list : customLists.findByOwnerMemberId(memberId)) {
@@ -1339,6 +1357,7 @@ public class ChoreService {
     @Transactional
     public boolean bookChore(Long taskId, Long memberId) {
         ChoreTask task = tasks.findById(taskId).orElseThrow();
+        requireSameHome(task, members.findById(memberId).orElseThrow());
         Home home = homes.findById(task.getHomeCode()).orElseThrow();
         Long current = effectiveBookerId(task, home);
         if (current != null && !current.equals(memberId)) {
@@ -1493,6 +1512,7 @@ public class ChoreService {
     public CompleteOutcome complete(Long taskId, Long memberId, ZoneId zone) {
         ChoreTask task = tasks.findById(taskId).orElseThrow();
         Member member = members.findById(memberId).orElseThrow();
+        requireSameHome(task, member);
         Home home = homes.findById(task.getHomeCode()).orElseThrow();
         boolean rotating = home.getDivisionStyle() == DivisionStyle.ROTATING;
 
@@ -1599,9 +1619,7 @@ public class ChoreService {
         ChoreTask task = tasks.findById(taskId).orElseThrow();
         Member member = members.findById(memberId).orElseThrow();
         Home home = homes.findById(task.getHomeCode()).orElseThrow();
-        if (!task.getHomeCode().equals(member.getHomeCode())) {
-            throw new IllegalArgumentException("Chore and member belong to different homes");
-        }
+        requireSameHome(task, member);
         adminOf(task.getHomeCode(), adminId);
 
         // Logging it settles the chore, so a booking on it has served its purpose.
@@ -1760,7 +1778,7 @@ public class ChoreService {
 
     /** Approves a pending completion; returns the celebration outcome for that member. */
     @Transactional
-    public CompleteOutcome approve(Long completionId, Long adminId) {
+    public Optional<CompleteOutcome> approve(Long completionId, Long adminId) {
         return approve(completionId, adminId, 0);
     }
 
@@ -1768,10 +1786,13 @@ public class ChoreService {
      * Approves a pending completion, or accepts an other-help entry. {@code credits} is only
      * used for other help — a chore carries its own credit value, but help written by hand
      * has nothing to read a reward off, so the admin sets it when they accept.
+     *
+     * @return empty when the entry is no longer pending: another admin, or a stale dialog of
+     *         this one's, decided it first, and the credits were paid (or not) then
      */
     @Transactional
-    public CompleteOutcome approve(Long completionId, Long adminId, int credits) {
-        Completion c = completions.findById(completionId).orElseThrow();
+    public Optional<CompleteOutcome> approve(Long completionId, Long adminId, int credits) {
+        Completion c = completions.findForDecisionById(completionId).orElseThrow();
         adminOf(c.getHomeCode(), adminId);
         ChoreTask task = c.isOtherHelp() ? null : tasks.findById(c.getTaskId()).orElseThrow();
         Member member = members.findById(c.getMemberId()).orElseThrow();
@@ -1779,10 +1800,9 @@ public class ChoreService {
         boolean alreadyDoneThisChore = task != null && completions.existsByMemberIdAndTaskIdAndStatus(
                 c.getMemberId(), c.getTaskId(), CompletionStatus.APPROVED);
 
-        c.setStatus(CompletionStatus.APPROVED);
-        c.setReviewedByMemberId(adminId);
-        c.setReviewedAt(java.time.Instant.now());
-        completions.save(c);
+        if (!decide(c, CompletionStatus.APPROVED, adminId)) {
+            return Optional.empty();
+        }
         touchHome(c.getHomeCode());
         homeState.bump(c.getHomeCode());
 
@@ -1793,20 +1813,38 @@ public class ChoreService {
                 : creditService.onApprovedHelp(c.getHomeCode(), c.getMemberId(), c.getId(),
                         credits, c.getNote(), memberTotal);
         // Not marked seen: the admin approved it, the member sees it on their next board visit.
-        return CompleteOutcome.done(task, member, memberTotal, task != null && !alreadyDoneThisChore,
-                Trophy.reachedAt(memberTotal).orElse(null), 0, c.getId(), award,
-                doneTodayCount(c.getMemberId()));
+        return Optional.of(CompleteOutcome.done(task, member, memberTotal,
+                task != null && !alreadyDoneThisChore, Trophy.reachedAt(memberTotal).orElse(null),
+                0, c.getId(), award, doneTodayCount(c.getMemberId())));
     }
 
+    /**
+     * Rejects a pending completion. False when it is no longer pending: rejecting an approved
+     * one would leave its credits paid while the history says it never counted, so taking an
+     * approved chore back stays {@link #deleteCompletion}'s job.
+     */
     @Transactional
-    public void reject(Long completionId, Long adminId) {
-        Completion c = completions.findById(completionId).orElseThrow();
+    public boolean reject(Long completionId, Long adminId) {
+        Completion c = completions.findForDecisionById(completionId).orElseThrow();
         adminOf(c.getHomeCode(), adminId);
-        c.setStatus(CompletionStatus.REJECTED);
-        c.setReviewedByMemberId(adminId);
-        c.setReviewedAt(java.time.Instant.now());
-        completions.save(c);
+        if (!decide(c, CompletionStatus.REJECTED, adminId)) {
+            return false;
+        }
         homeState.bump(c.getHomeCode());
+        return true;
+    }
+
+    /** Records an admin's decision on a completion loaded with its row lock; false, changing
+     *  nothing, when it was already decided. */
+    private boolean decide(Completion c, CompletionStatus outcome, Long adminId) {
+        if (c.getStatus() != CompletionStatus.PENDING) {
+            return false;
+        }
+        c.setStatus(outcome);
+        c.setReviewedByMemberId(adminId);
+        c.setReviewedAt(Instant.now());
+        completions.save(c);
+        return true;
     }
 
     /**
@@ -1814,12 +1852,16 @@ public class ChoreService {
      * credits it earned go with it, so an undone chore can't leave phantom 💎 behind.
      */
     @Transactional
-    public void deleteCompletion(Long completionId) {
+    public void deleteCompletion(Long completionId, Long adminId) {
         Completion c = completions.findById(completionId).orElseThrow();
-        String homeCode = c.getHomeCode();
-        creditService.deleteForCompletion(completionId);
+        adminOf(c.getHomeCode(), adminId);
+        removeCompletion(c);
+    }
+
+    private void removeCompletion(Completion c) {
+        creditService.deleteForCompletion(c.getId());
         completions.delete(c);
-        homeState.bump(homeCode);
+        homeState.bump(c.getHomeCode());
     }
 
     /** How long a member may take back a chore they logged by mistake. */
@@ -1838,7 +1880,7 @@ public class ChoreService {
         if (c == null || !c.getMemberId().equals(memberId) || !isUndoable(c)) {
             return false;
         }
-        deleteCompletion(completionId);
+        removeCompletion(c);
         return true;
     }
 

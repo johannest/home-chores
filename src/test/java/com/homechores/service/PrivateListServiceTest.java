@@ -181,7 +181,7 @@ class PrivateListServiceTest {
         CustomList shared = lists.createList(code, Author.member(sam.getId()), "Shared by Sam").orElseThrow();
         reminders.schedule(line.getId(), sam.getId(), Instant.now().plus(Duration.ofHours(2)), Locale.ENGLISH);
 
-        assertTrue(chores.removeMember(sam.getId()));
+        assertTrue(chores.removeMember(sam.getId(), alex.getId()));
         assertTrue(listRepo.findById(diary.getId()).isEmpty());
         assertTrue(itemRepo.findById(line.getId()).isEmpty());
         assertTrue(reminderRepo.findByItemId(line.getId()).isEmpty());

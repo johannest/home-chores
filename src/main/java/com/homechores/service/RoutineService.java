@@ -497,7 +497,10 @@ public class RoutineService {
                     : subscriptions.findByMemberId(r.getForMemberId());
             Map<PushSubscription, String[]> messages = new LinkedHashMap<>();
             for (PushSubscription sub : audience) {
-                Locale locale = locales.getOrDefault(sub.getMemberId(), Locale.ENGLISH);
+                Locale locale = locales.get(sub.getMemberId());
+                if (locale == null) {
+                    continue; // a device whose member is gone is not the home's audience any more
+                }
                 messages.put(sub, new String[] {
                         translations.getTranslation("routine.notification.title", locale,
                                 r.getEmoji(), r.getName()),

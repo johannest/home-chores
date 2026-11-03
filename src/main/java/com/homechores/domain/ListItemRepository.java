@@ -50,6 +50,8 @@ public interface ListItemRepository extends JpaRepository<ListItem, Long> {
     @Transactional
     long deleteByDoneAtBefore(Instant cutoff);
 
+    boolean existsByHomeCode(String homeCode);
+
     @Transactional
     void deleteByHomeCode(String homeCode);
 }
